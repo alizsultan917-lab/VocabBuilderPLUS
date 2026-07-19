@@ -71,6 +71,27 @@ If Gemini's reply doesn't contain a `|`, the extension logs a warning
 to the Gemini tab's console and skips relaying it (rather than sending
 garbage into your form) — check there first if entries stop arriving.
 
+## ⌨️ Customizable Keyboard Shortcuts (app-side)
+
+The app now has a Gemini-style sliding sidebar — click the new **⌨️** icon
+in the header (or press **F1**) — for fully remapping every shortcut:
+header buttons, Search Gemini / Fetch with AI / Add Entry / manual-add
+buttons, US/UK pronunciation, Definitions/Images list navigation +
+selection, and the two tab-switch keys below. Bindings save to
+`localStorage` instantly and survive reloads. Click any key field, then
+press the new key; hold the configurable **Pass-Through Modifier**
+(default `Alt`) while pressing a mapped key to type it as a literal
+character instead of triggering the shortcut.
+
+Two of those bindings — **Focus Gemini Tab** (`F7`) and **Return to App
+Tab** (`F8`) — are synced to this extension automatically (see
+`SYNC_SHORTCUT_KEYS` in `background.js` / `bridge-app.js`), so:
+- Pressing `F7` in the app switches you to an already-open Gemini tab
+  (it does not open a new one — that's what "Search Gemini" is for).
+- Pressing your "Return to App Tab" key **while sitting on the Gemini
+  tab itself** switches you straight back to the app (`content-gemini.js`
+  listens for it and relays `RETURN_TO_APP_TAB` to `background.js`).
+
 ## Data flow
 ```
 Gemini page                          Your app's page
