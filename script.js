@@ -4157,6 +4157,31 @@ if (searchGeminiBtn) {
   });
 }
 
+// Gemini's "direct URL to a representative image" is frequently a
+// hallucinated/dead link — LLMs are unreliable at producing real,
+// resolvable image URLs. Probe it with a throwaway Image() first; if it
+// 404s/errors, fall back to the app's own Openverse image search (the
+// same one "Fetch with AI" already uses) instead of leaving nothing.
+function addImageWithFallback(url, fallbackQuery) {
+  const probe = new Image();
+  probe.onload = () => addPendingImage(url, "ai", true);
+  probe.onerror = async () => {
+    console.warn("[VocabBridge] Gemini's image URL didn't load, falling back to image search:", url);
+    if (!fallbackQuery) return;
+    try {
+      const result = await fetchImages(fallbackQuery, 1);
+      if (result.ok && result.images[0]) {
+        addPendingImage(result.images[0], "ai", true);
+      } else {
+        console.warn("[VocabBridge] Fallback image search also came up empty for:", fallbackQuery);
+      }
+    } catch (err) {
+      console.warn("[VocabBridge] Fallback image search failed:", err);
+    }
+  };
+  probe.src = url;
+}
+
 // Receives a scraped Gemini entry relayed by the extension's app-side
 // content script (the Scrape-Back flow). Wrapped in try/catch so a
 // malformed or unexpected message can never break the rest of the app.
@@ -4173,6 +4198,7 @@ window.addEventListener("message", (event) => {
     // ever leaves the extension — nothing left to split here.
     const definition = typeof payload.definition === "string" ? payload.definition.trim() : "";
     const imageUrl = typeof payload.imageUrl === "string" ? payload.imageUrl.trim() : "";
+    const wordForFallback = wordInput.value.trim();
 
     // Clear any stale pending definitions/images/tags before injecting
     // the new data — same as a fresh "Fetch with AI" run would.
@@ -4185,7 +4211,7 @@ window.addEventListener("message", (event) => {
       addPendingDefinition(definition, "ai", true);
     }
     if (imageUrl) {
-      addPendingImage(imageUrl, "ai", true);
+      addImageWithFallback(imageUrl, wordForFallback);
     }
 
     // Ready for the person to review/adjust and hit "Add Entry" —
