@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Literary Vocabulary Register</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+<header class="site-header" id="site-header-bar">
+  <div class="header-inner">
+    <h1>Literary Vocabulary Register</h1>
+    <p class="subtitle">Collect and revisit the words that catch your eye while reading</p>
+  </div>
+
+  <div class="header-widgets">
+
+    <div id="limits-widget" class="storage-widget">
+      <button type="button" id="limits-toggle-btn" class="storage-toggle-btn" title="Fetch limits">
+        <span class="storage-icon">⚙️</span>
+      </button>
+      <div id="limits-panel" class="storage-panel hidden">
+        <p class="storage-status">Set how many System (dictionary/auto-search), AI-fetched, and Manual (typed/pasted) items are kept per word — each controlled independently. Set any field to 0 to turn that source off entirely.</p>
+
+        <div class="limits-group">
+          <h4 class="limits-group-title">Definitions</h4>
+          <div class="limits-field-row">
+            <label for="system-def-limit-input">System (Dictionary)</label>
+            <input type="number" id="system-def-limit-input" min="0" max="10" step="1">
+          </div>
+          <div class="limits-field-row">
+            <label for="ai-def-limit-input">AI Context</label>
+            <input type="number" id="ai-def-limit-input" min="0" max="10" step="1">
+          </div>
+          <div class="limits-field-row">
+            <label for="manual-def-limit-input">Manual (Typed)</label>
+            <input type="number" id="manual-def-limit-input" min="0" max="10" step="1">
+          </div>
+        </div>
+
+        <div class="limits-group">
+          <h4 class="limits-group-title">Images</h4>
+          <div class="limits-field-row">
+            <label for="system-img-limit-input">System (Auto-Search)</label>
+            <input type="number" id="system-img-limit-input" min="0" max="10" step="1">
+          </div>
+          <div class="limits-field-row">
+            <label for="ai-img-limit-input">AI</label>
+            <input type="number" id="ai-img-limit-input" min="0" max="10" step="1">
+          </div>
+          <div class="limits-field-row">
+            <label for="manual-img-limit-input">Manual (Pasted/URL)</label>
+            <input type="number" id="manual-img-limit-input" min="0" max="10" step="1">
+          </div>
+        </div>
+
+        <p class="storage-sync-hint">Changes apply immediately to your register below — 0 (off) to 10 each.</p>
+      </div>
+    </div>
+
+    <div id="display-widget" class="storage-widget">
+      <button type="button" id="display-toggle-btn" class="storage-toggle-btn" title="Display settings">
+        <span class="storage-icon">🔍</span>
+      </button>
+      <div id="display-panel" class="storage-panel hidden">
+        <p class="storage-status">Resize things to your liking — saved on this device.</p>
+
+        <div class="bubbly-toggle-row">
+          <div class="bubbly-toggle-label">
+            <span class="bubbly-toggle-title">🫧 Liquid Interface</span>
+            <span class="bubbly-toggle-hint">Glossy, bubbly buttons &amp; panels</span>
+          </div>
+          <label class="switch" for="bubbly-mode-toggle">
+            <input type="checkbox" id="bubbly-mode-toggle">
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+          </label>
+        </div>
+
+        <div id="glass-controls" class="glass-controls hidden">
+          <div class="slider-field-row">
+            <div class="slider-field-label">
+              <label for="glass-transparency-input">Glass transparency</label>
+              <span id="glass-transparency-value" class="slider-value">70%</span>
+            </div>
+            <input type="range" id="glass-transparency-input" min="0" max="100" step="5">
+          </div>
+
+          <div class="slider-field-row">
+            <div class="slider-field-label">
+              <label for="glass-blur-input">Blur intensity</label>
+              <span id="glass-blur-value" class="slider-value">20px</span>
+            </div>
+            <input type="range" id="glass-blur-input" min="0" max="40" step="2">
+          </div>
+
+          <div class="slider-field-row">
+            <div class="slider-field-label">
+              <label for="glass-tint-input">Tint strength</label>
+              <span id="glass-tint-value" class="slider-value">50%</span>
+            </div>
+            <input type="range" id="glass-tint-input" min="0" max="100" step="5">
+          </div>
+        </div>
+
+        <hr class="storage-divider">
+
+        <div class="slider-field-row">
+          <div class="slider-field-label">
+            <label for="search-width-input">Search bar width</label>
+            <span id="search-width-value" class="slider-value">220px</span>
+          </div>
+          <input type="range" id="search-width-input" min="140" max="640" step="10">
+        </div>
+
+        <div class="slider-field-row">
+          <div class="slider-field-label">
+            <label for="def-text-size-input">Definition text size</label>
+            <span id="def-text-size-value" class="slider-value">100%</span>
+          </div>
+          <input type="range" id="def-text-size-input" min="75" max="160" step="5">
+        </div>
+
+        <div class="slider-field-row">
+          <div class="slider-field-label">
+            <label for="img-thumb-size-input">Image size (to select)</label>
+            <span id="img-thumb-size-value" class="slider-value">150px</span>
+          </div>
+          <input type="range" id="img-thumb-size-input" min="80" max="320" step="10">
+        </div>
+
+        <div class="storage-panel-actions">
+          <button type="button" id="reset-display-btn" class="btn btn-secondary btn-small">Reset to Defaults</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="customize-widget" class="storage-widget">
+      <button type="button" id="customize-toggle-btn" class="storage-toggle-btn" title="Customize layout">
+        <span class="storage-icon">🎛️</span>
+      </button>
+      <div id="customize-panel" class="storage-panel hidden">
+        <p class="storage-status">Turn on Free Placement, then use the small "⠿ Drag" badge to move any control — including the Definitions panel, the Related Images panel, and the toolbar bars — anywhere on the page, or the round corner badge to resize it. Click "Lock Layout" (or press Esc) when you're done to lock everything in place. Your layout is remembered on this device.</p>
+        <div class="storage-panel-actions">
+          <button type="button" id="customize-mode-btn" class="btn btn-secondary btn-small">✥ Enable Free Placement</button>
+        </div>
+        <div class="storage-panel-actions">
+          <button type="button" id="reset-layout-btn" class="btn btn-secondary btn-small">Reset Layout</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="storage-widget" class="storage-widget">
+      <button type="button" id="storage-toggle-btn" class="storage-toggle-btn" title="Storage settings">
+        <span id="storage-icon" class="storage-icon">💾</span>
+      </button>
+      <div id="storage-panel" class="storage-panel hidden">
+        <p id="storage-status" class="storage-status">Checking storage…</p>
+        <div class="storage-panel-actions">
+          <button type="button" id="choose-folder-btn" class="btn btn-secondary btn-small hidden">Choose Folder</button>
+          <button type="button" id="reconnect-folder-btn" class="btn btn-secondary btn-small hidden">Reconnect Folder</button>
+        </div>
+
+        <hr class="storage-divider">
+
+        <p id="cloud-status" class="storage-status">Not connected to Google Drive.</p>
+        <div class="origin-row">
+          <span class="origin-label">Authorized origin needed:</span>
+          <code id="origin-value" class="origin-value"></code>
+          <button type="button" id="copy-origin-btn" class="link-btn" title="Copy this origin">Copy</button>
+        </div>
+        <div class="storage-panel-actions">
+          <button type="button" id="connect-drive-btn" class="btn btn-secondary btn-small">Connect Google Drive</button>
+          <button type="button" id="disconnect-drive-btn" class="btn btn-secondary btn-small hidden">Disconnect</button>
+        </div>
+        <button type="button" id="change-client-id-btn" class="link-btn key-link-btn">Change Client ID</button>
+
+        <div id="sync-both-row" class="storage-sync-options hidden">
+          <p class="storage-sync-hint">Both connected — save entries to:</p>
+          <label class="storage-check-row"><input type="checkbox" id="sync-local-checkbox" checked><span>Local folder</span></label>
+          <label class="storage-check-row"><input type="checkbox" id="sync-cloud-checkbox" checked><span>Google Drive</span></label>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</header>
+
+<main class="container">
+
+  <!-- ADD ENTRY FORM -->
+  <section class="card form-card" id="form-card">
+    <h2>Add a Word</h2>
+    <form id="entry-form" autocomplete="off">
+      <div class="form-layout">
+
+        <!-- LEFT: word identity + pronunciation -->
+        <div class="form-left">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="word-input">Word</label>
+              <input type="text" id="word-input" required placeholder="e.g. Ephemeral">
+            </div>
+            <div class="form-group form-group-narrow">
+              <label for="page-input">Page</label>
+              <input type="number" id="page-input" required min="1" placeholder="42">
+            </div>
+          </div>
+
+          <!-- PRONUNCIATION -->
+          <div class="form-group">
+            <label>Pronunciation</label>
+            <div id="pronunciation-panel" class="pronunciation-panel">
+              <div class="pron-row">
+                <span class="pron-accent">US</span>
+                <span id="pron-us-text" class="pron-text">—</span>
+                <button type="button" id="pron-us-btn" class="icon-btn pron-play-btn" title="Play American pronunciation">🔊</button>
+              </div>
+              <div class="pron-row">
+                <span class="pron-accent">UK</span>
+                <span id="pron-uk-text" class="pron-text">—</span>
+                <button type="button" id="pron-uk-btn" class="icon-btn pron-play-btn" title="Play British pronunciation">🔊</button>
+              </div>
+            </div>
+          </div>
+
+          <button type="submit" id="entry-form-submit-btn" class="btn btn-primary btn-submit">Add Entry</button>
+
+          <div class="ai-fetch-row">
+            <button type="button" id="ai-fetch-btn" class="btn btn-ai">
+              <span class="ai-fetch-icon">✨</span> <span id="ai-fetch-btn-label">Fetch with AI</span>
+            </button>
+            <button type="button" id="ai-settings-btn" class="link-btn key-link-btn" title="Configure your local/cloud AI settings">AI Settings</button>
+            <button type="button" id="search-gemini-btn" class="btn btn-secondary btn-small" title="Opens Gemini in another tab and searches this word (requires the Gemini Bridge extension)">🔎 Search Gemini</button>
+          </div>
+          <span id="ai-fetch-status" class="ai-fetch-status hidden"></span>
+
+          <!-- Book title lives here, right beside the action buttons -->
+          <div class="form-group">
+            <label for="book-input">Book Title</label>
+            <input type="text" id="book-input" required placeholder="e.g. The Great Gatsby" list="book-suggestions">
+            <datalist id="book-suggestions"></datalist>
+          </div>
+        </div>
+
+        <!-- RIGHT: definitions + images, each internally scrollable so the
+             whole form stays on screen regardless of how many come back -->
+        <div class="form-right">
+          <!-- DEFINITIONS -->
+          <div class="form-group">
+            <div class="def-label-row">
+              <label>Definitions</label>
+              <span id="ai-loading-tag" class="tag tag-loading hidden">Looking up…</span>
+              <span id="context-loading-tag" class="tag tag-loading hidden">Asking AI…</span>
+              <span id="manual-mode-tag" class="tag tag-manual hidden">No match — add manually</span>
+              <span class="select-links">
+                <button type="button" class="link-btn" id="def-select-all-btn">All</button>
+                <button type="button" class="link-btn" id="def-select-none-btn">None</button>
+              </span>
+            </div>
+
+            <div id="definitions-list" class="definitions-list scroll-panel"></div>
+
+            <div class="manual-add-row">
+              <textarea id="definition-input" rows="2" placeholder="Write your own definition and press Enter…"></textarea>
+              <button type="button" id="add-definition-btn" class="btn btn-secondary btn-small">Add</button>
+            </div>
+          </div>
+
+          <!-- IMAGES -->
+          <div class="form-group">
+            <div class="def-label-row">
+              <label>Related Images</label>
+              <span id="image-loading-tag" class="tag tag-loading hidden">Searching…</span>
+              <span class="select-links">
+                <button type="button" class="link-btn" id="img-select-all-btn">All</button>
+                <button type="button" class="link-btn" id="img-select-none-btn">None</button>
+              </span>
+            </div>
+
+            <div id="images-gallery" class="images-gallery scroll-panel"></div>
+
+            <div class="manual-add-row">
+              <input type="url" id="image-url-input" placeholder="Paste an image URL, or paste a copied image (Ctrl/Cmd+V)…">
+              <button type="button" id="add-image-btn" class="btn btn-secondary btn-small">Add</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </form>
+  </section>
+
+  <!-- FILTER / SEARCH -->
+  <section class="card filter-card" id="filter-card">
+    <div class="filter-row" id="filter-row">
+      <div class="filter-field">
+        <label for="book-filter">Book</label>
+        <select id="book-filter">
+          <option value="">— All Books —</option>
+        </select>
+      </div>
+      <div class="filter-field filter-field-narrow">
+        <label for="page-filter">Page</label>
+        <input type="number" id="page-filter" min="1" placeholder="Any">
+      </div>
+      <div class="filter-field filter-field-grow">
+        <label for="search-input">Search word / definition</label>
+        <input type="text" id="search-input" placeholder="Type to search…">
+      </div>
+      <span id="entry-count" class="entry-count"></span>
+    </div>
+    <div class="export-import-row" id="export-import-row">
+      <button type="button" id="export-json-btn" class="btn btn-secondary btn-small">Export JSON</button>
+      <button type="button" id="export-pdf-btn" class="btn btn-secondary btn-small">Export PDF</button>
+      <button type="button" id="import-btn" class="btn btn-secondary btn-small">Import JSON</button>
+      <input type="file" id="import-file-input" accept="application/json" class="hidden">
+      <button type="button" id="delete-all-btn" class="btn btn-danger btn-small">Delete All</button>
+      <span class="export-dest-group">
+        <label class="export-dest-check" title="Download the file to this device">
+          <input type="checkbox" id="export-local-checkbox" checked><span>Download</span>
+        </label>
+        <label class="export-dest-check" id="export-drive-check-wrap" title="Also save a copy to your connected Google Drive">
+          <input type="checkbox" id="export-drive-checkbox"><span>Save to Drive</span>
+        </label>
+      </span>
+      <span class="export-hint">Exports the selected book above, or everything if none is selected.</span>
+    </div>
+  </section>
+
+  <!-- TABLE -->
+  <section class="card table-card" id="table-card">
+    <div id="table-container">
+      <p id="empty-state" class="empty-state">No entries yet. Add your first word above to begin your register.</p>
+    </div>
+  </section>
+
+</main>
+
+<!-- AI SETTINGS MODAL -->
+<div id="ai-settings-modal" class="modal hidden">
+  <div class="modal-content">
+    <h3>AI Settings</h3>
+    <p class="ai-settings-hint">
+      Works with any local server that speaks the OpenAI chat-completions API
+      (e.g. Ollama, LM Studio) or a hosted provider. The API key is only
+      needed for hosted/cloud providers — leave it blank for a local server.
+    </p>
+    <div class="form-group">
+      <label for="ai-settings-url">API URL</label>
+      <input type="text" id="ai-settings-url" placeholder="http://localhost:11434">
+    </div>
+    <div class="form-group">
+      <label for="ai-settings-model">Model Name</label>
+      <input type="text" id="ai-settings-model" placeholder="llama3.2:3b">
+    </div>
+    <div class="form-group">
+      <label for="ai-settings-key">API Key <span class="ai-settings-optional">(optional, for cloud providers)</span></label>
+      <input type="password" id="ai-settings-key" placeholder="Leave blank for local servers">
+    </div>
+    <div class="modal-actions">
+      <button id="ai-settings-reset-btn" class="btn btn-secondary" type="button">Reset to Defaults</button>
+      <button id="ai-settings-cancel-btn" class="btn btn-secondary" type="button">Cancel</button>
+      <button id="ai-settings-save-btn" class="btn btn-primary" type="button">Save Settings</button>
+    </div>
+  </div>
+</div>
+
+<!-- EDIT MODAL -->
+<div id="edit-modal" class="modal hidden">
+  <div class="modal-content">
+    <h3>Edit Entry</h3>
+    <div class="form-group">
+      <label for="edit-word">Word</label>
+      <input type="text" id="edit-word">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="edit-book">Book Title</label>
+        <input type="text" id="edit-book">
+      </div>
+      <div class="form-group form-group-narrow">
+        <label for="edit-page">Page</label>
+        <input type="number" id="edit-page" min="1">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <div class="def-label-row">
+        <label>Definitions</label>
+        <span class="select-links">
+          <button type="button" class="link-btn" id="edit-def-select-all-btn">All</button>
+          <button type="button" class="link-btn" id="edit-def-select-none-btn">None</button>
+        </span>
+      </div>
+      <div id="edit-definitions-list" class="definitions-list"></div>
+      <div class="manual-add-row">
+        <textarea id="edit-definition-input" rows="2" placeholder="Add another definition…"></textarea>
+        <button type="button" id="edit-add-definition-btn" class="btn btn-secondary btn-small">Add</button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <div class="def-label-row">
+        <label>Images</label>
+        <span class="select-links">
+          <button type="button" class="link-btn" id="edit-img-select-all-btn">All</button>
+          <button type="button" class="link-btn" id="edit-img-select-none-btn">None</button>
+        </span>
+      </div>
+      <div id="edit-images-gallery" class="images-gallery"></div>
+      <div class="manual-add-row">
+        <input type="url" id="edit-image-url-input" placeholder="Paste an image URL, or paste a copied image…">
+        <button type="button" id="edit-add-image-btn" class="btn btn-secondary btn-small">Add</button>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button id="cancel-edit-btn" class="btn btn-secondary" type="button">Cancel</button>
+      <button id="save-edit-btn" class="btn btn-primary" type="button">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<footer class="site-footer">
+  <p>Stored on your device · <span id="footer-total">0</span> words registered</p>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
