@@ -4153,7 +4153,8 @@ if (searchGeminiBtn) {
       alert("Type a word first, then click Search Gemini.");
       return;
     }
-    window.postMessage({ type: "SEARCH_GEMINI", word }, window.location.origin);
+    const bookTitle = bookInput.value.trim();
+    window.postMessage({ type: "SEARCH_GEMINI", word, bookTitle }, window.location.origin);
   });
 }
 
