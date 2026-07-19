@@ -1583,44 +1583,115 @@ tbody tr:hover {
    --glass-alpha, --glass-blur, --glass-tint are set on :root by JS from
    the three sliders in the 🔍 Display panel (see applyGlassPrefs in
    script.js) so every rule below reacts live as the person drags them —
-   nothing here is a fixed look. --glass-alpha / --glass-tint are
-   percentages, used directly as rgba() alpha values and as color-mix()
-   weights (mixing a color with transparent = translucency, mixing a
-   color with white = de-saturated "frosted" tint, the same two knobs
-   Apple's own Liquid Glass exposes). */
+   nothing here is a fixed look.
+
+   This theme now models real WATER BUBBLES rather than flat frosted
+   panes: each round/pill control gets (1) a near-empty transparent
+   core so the page truly shows through, like Apple's glass, (2) a ring
+   of stacked inset shadows that bend from bright to dark around the
+   inner edge the way light refracts through a sphere, and (3) two
+   small radial-gradient highlight pseudo-elements — a sharp primary
+   gloss near the top-left, a faint secondary bounce near the
+   bottom-right — the two catch-lights visible on every real bubble.
+   All three still scale off --glass-alpha/--glass-blur/--glass-tint so
+   the sliders keep working exactly as before. */
 body.bubbly-mode {
   --radius: 24px;
+
+  /* Shared bubble tokens, derived from the sliders once, reused by every
+     control below so the whole theme moves together. */
+  --bubble-core: radial-gradient(120% 140% at 30% 22%,
+      color-mix(in srgb, #fff calc(var(--glass-tint) * 0.55 + 10%), transparent) 0%,
+      color-mix(in srgb, #fff calc(var(--glass-tint) * 0.18), transparent) 30%,
+      transparent 55%,
+      color-mix(in srgb, var(--blue-pale) calc(var(--glass-alpha) * 0.3), transparent) 100%);
+  --bubble-ring-bright: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.75 + 15%), transparent);
+  --bubble-ring-dark: color-mix(in srgb, var(--blue-deep) calc(var(--glass-tint) * 0.5 + 16%), transparent);
+  --bubble-ring-ambient: color-mix(in srgb, var(--blue-soft) calc(var(--glass-tint) * 0.4), transparent);
+  --bubble-rim: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.5 + 30%), transparent);
+  --bubble-shell:
+    inset -9px -11px 17px -6px var(--bubble-ring-dark),
+    inset 9px 9px 15px -6px var(--bubble-ring-bright),
+    inset 0 0 20px -4px var(--bubble-ring-ambient),
+    inset 0 -1px 2px color-mix(in srgb, var(--blue-deep) calc(var(--glass-tint) * 0.3 + 8%), transparent),
+    0 1px 1px var(--bubble-rim),
+    0 8px 20px -7px rgba(22, 63, 99, 0.3);
 }
 
-/* Panels/cards become frosted glass — translucent, blurred, with a thin
-   bright edge so they read as "glass" sitting above the pale blue page
-   background rather than opaque paper. */
+/* Reusable gloss highlights — a sharp primary catch-light top-left, a
+   faint secondary bounce bottom-right. z-index:-1 inside an isolated
+   stacking context keeps them behind the control's own label/icon but
+   above its transparent core, exactly like the sheen they replace. */
+body.bubbly-mode .btn::before,
+body.bubbly-mode .icon-btn::before,
+body.bubbly-mode .storage-toggle-btn::before,
+body.bubbly-mode .switch-track::before {
+  content: "";
+  position: absolute;
+  top: 8%;
+  left: 12%;
+  width: 42%;
+  height: 32%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%,
+    color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 40%), transparent) 0%,
+    color-mix(in srgb, #fff calc(var(--glass-tint) * 0.3 + 15%), transparent) 45%,
+    transparent 75%);
+  transform: rotate(-16deg);
+  pointer-events: none;
+  z-index: -1;
+}
+
+body.bubbly-mode .btn::after,
+body.bubbly-mode .icon-btn::after,
+body.bubbly-mode .storage-toggle-btn::after {
+  content: "";
+  position: absolute;
+  bottom: 12%;
+  right: 16%;
+  width: 18%;
+  height: 14%;
+  border-radius: 50%;
+  background: radial-gradient(circle,
+    color-mix(in srgb, #fff calc(var(--glass-tint) * 0.4 + 20%), transparent) 0%,
+    transparent 80%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Panels/cards: same transparent-core + refraction-rim language, just
+   at a scale where legibility of the content inside matters more than
+   a big gloss blob — so no ::before/::after here, only the shell. */
 body.bubbly-mode .card,
 body.bubbly-mode .modal-content {
-  background: linear-gradient(180deg,
-    color-mix(in srgb, #fff var(--glass-alpha), transparent),
-    color-mix(in srgb, #fff calc(var(--glass-alpha) - 18%), transparent));
+  background: var(--bubble-core);
   backdrop-filter: blur(var(--glass-blur)) saturate(calc(140% + var(--glass-tint) * 0.4));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(calc(140% + var(--glass-tint) * 0.4));
-  border: 1px solid color-mix(in srgb, #fff calc(var(--glass-tint) * 0.7 + 15%), transparent);
-  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 25%), transparent) inset, 0 14px 34px rgba(22, 63, 99, 0.15);
+  border: 1px solid color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 12%), transparent);
+  box-shadow:
+    inset 0 1px 0 var(--bubble-ring-bright),
+    inset 0 -14px 26px -18px var(--bubble-ring-dark),
+    0 14px 34px rgba(22, 63, 99, 0.15);
   border-radius: 26px;
   transition: background 0.2s ease, backdrop-filter 0.2s ease;
 }
 
 body.bubbly-mode .storage-panel {
-  background: color-mix(in srgb, #fff calc(var(--glass-alpha) + 10%), transparent);
+  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.55 + 8%), transparent);
   backdrop-filter: blur(calc(var(--glass-blur) * 1.1)) saturate(calc(150% + var(--glass-tint) * 0.5));
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 1.1)) saturate(calc(150% + var(--glass-tint) * 0.5));
   border: 1px solid color-mix(in srgb, #fff calc(var(--glass-tint) * 0.7 + 20%), transparent);
   border-radius: 22px;
-  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 25%), transparent) inset, 0 16px 34px rgba(22, 63, 99, 0.2);
+  box-shadow:
+    inset 0 1px 0 var(--bubble-ring-bright),
+    inset 0 -12px 22px -16px var(--bubble-ring-dark),
+    0 16px 34px rgba(22, 63, 99, 0.2);
   transition: background 0.2s ease, backdrop-filter 0.2s ease;
 }
 
-/* ---------- Header gets a glossier, deeper-blue glass gradient, tint
-   blends it toward pure color and transparency lets the page glow
-   through it (a real frosted pane, not a flat fill) ---------- */
+/* ---------- Header keeps its own deep-blue glass gradient (needs a
+   readable tint behind white text) but picks up the refraction rim so
+   it still belongs to the same bubble family ---------- */
 body.bubbly-mode .site-header {
   background: linear-gradient(160deg,
     color-mix(in srgb, #1c4c78 var(--glass-tint), transparent) 0%,
@@ -1632,13 +1703,17 @@ body.bubbly-mode .site-header {
   transition: background 0.2s ease, backdrop-filter 0.2s ease;
 }
 
+/* ---------- The small round toolbar buttons: genuine bubbles — mostly
+   transparent core, refraction-ring shell, top-left gloss + bottom-right
+   bounce from the shared pseudo-elements above ---------- */
 body.bubbly-mode .storage-toggle-btn {
-  background: linear-gradient(160deg,
-    color-mix(in srgb, #fff calc(var(--glass-tint) * 0.7), transparent),
-    color-mix(in srgb, #fff calc(var(--glass-tint) * 0.15), transparent));
-  backdrop-filter: blur(calc(var(--glass-blur) * 0.5));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.5));
-  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.7 + 10%), transparent) inset, 0 4px 10px rgba(10, 30, 50, 0.25);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--bubble-core);
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.5)) saturate(150%);
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.5)) saturate(150%);
+  box-shadow: var(--bubble-shell);
   transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -1650,9 +1725,9 @@ body.bubbly-mode .storage-toggle-btn:active {
   transform: scale(0.92);
 }
 
-/* ---------- Buttons: full pill shape, glossy top highlight, springy
-   press feedback, and now genuinely translucent/blurred — the most
-   "Apple Liquid Glass" part of this theme ---------- */
+/* ---------- Buttons: full pill shape, genuinely see-through core, real
+   refraction-ring shading, springy press feedback — the bubble is the
+   button now, not a tinted rectangle with a sheen on top ---------- */
 body.bubbly-mode .btn {
   border-radius: 999px;
   position: relative;
@@ -1660,66 +1735,67 @@ body.bubbly-mode .btn {
   isolation: isolate;
   backdrop-filter: blur(calc(var(--glass-blur) * 0.45)) saturate(150%);
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.45)) saturate(150%);
-  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.5 + 20%), transparent) inset, 0 6px 16px rgba(22, 63, 99, 0.18);
+  box-shadow: var(--bubble-shell);
   transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, background 0.15s ease, filter 0.15s ease;
-}
-
-/* Soft glossy sheen across the top half of every button — the classic
-   "liquid" highlight, layered on top of whatever gradient the variant
-   below provides. Its strength tracks the tint slider. */
-body.bubbly-mode .btn::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 55% 0;
-  background: linear-gradient(180deg, color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 15%), transparent), transparent);
-  pointer-events: none;
-  z-index: -1;
 }
 
 body.bubbly-mode .btn:hover {
   transform: translateY(-2px) scale(1.02);
-  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.5 + 25%), transparent) inset, 0 12px 22px rgba(22, 63, 99, 0.24);
+  filter: brightness(1.04);
 }
 
 body.bubbly-mode .btn:active {
   transform: scale(0.94);
-  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.3 + 15%), transparent) inset, 0 3px 8px rgba(22, 63, 99, 0.2);
+  filter: brightness(0.98);
 }
 
+/* Variant colors now sit UNDER the transparent bubble core rather than
+   replacing it — dropped to roughly a third of the old alpha so the
+   page genuinely glows through, with the accent read as a faint tint
+   near the bottom edge (the way color pools at the base of a real
+   bubble) rather than a flat fill. */
 body.bubbly-mode .btn-primary {
-  background: linear-gradient(160deg,
-    color-mix(in srgb, #62a5e6 var(--glass-alpha), transparent),
-    color-mix(in srgb, var(--blue) var(--glass-alpha), transparent) 55%,
-    color-mix(in srgb, var(--blue-deep) var(--glass-alpha), transparent));
+  background:
+    var(--bubble-core),
+    linear-gradient(0deg,
+      color-mix(in srgb, var(--blue) calc(var(--glass-alpha) * 0.4), transparent) 0%,
+      transparent 65%);
 }
 
 body.bubbly-mode .btn-secondary {
-  background: linear-gradient(160deg,
-    color-mix(in srgb, #fff var(--glass-alpha), transparent),
-    color-mix(in srgb, var(--blue-pale) var(--glass-alpha), transparent));
+  background:
+    var(--bubble-core),
+    linear-gradient(0deg,
+      color-mix(in srgb, var(--blue-pale) calc(var(--glass-alpha) * 0.35), transparent) 0%,
+      transparent 65%);
   color: var(--blue-deep);
 }
 
 body.bubbly-mode .btn-danger {
-  background: linear-gradient(160deg,
-    color-mix(in srgb, #ffd9d8 var(--glass-alpha), transparent),
-    color-mix(in srgb, #f2b7b5 var(--glass-alpha), transparent));
+  background:
+    var(--bubble-core),
+    linear-gradient(0deg,
+      color-mix(in srgb, #f2b7b5 calc(var(--glass-alpha) * 0.4), transparent) 0%,
+      transparent 65%);
 }
 
 body.bubbly-mode .btn-ai {
-  background: linear-gradient(160deg,
-    color-mix(in srgb, #c3aef8 var(--glass-alpha), transparent),
-    color-mix(in srgb, var(--ai) var(--glass-alpha), transparent));
+  background:
+    var(--bubble-core),
+    linear-gradient(0deg,
+      color-mix(in srgb, var(--ai) calc(var(--glass-alpha) * 0.4), transparent) 0%,
+      transparent 65%);
 }
 
 body.bubbly-mode .icon-btn {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
   border-radius: 50%;
-  background: linear-gradient(160deg,
-    color-mix(in srgb, #fff var(--glass-alpha), transparent),
-    color-mix(in srgb, var(--blue-pale) var(--glass-alpha), transparent));
+  background: var(--bubble-core);
   backdrop-filter: blur(calc(var(--glass-blur) * 0.45)) saturate(150%);
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.45)) saturate(150%);
-  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 30%), transparent) inset, 0 3px 8px rgba(22, 63, 99, 0.12);
+  box-shadow: var(--bubble-shell);
   transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -1731,8 +1807,9 @@ body.bubbly-mode .icon-btn:active {
   transform: scale(0.9);
 }
 
-/* ---------- Inputs: soft rounded "pebble" fields with a gentle inner
-   shadow instead of a hard outline, also glass rather than flat white ---------- */
+/* ---------- Inputs: soft rounded "pebble" fields — a transparent glass
+   well rather than a bubble (a bubble shape would fight the text
+   inside), but still built from the same rim + inset language ---------- */
 body.bubbly-mode input[type="text"],
 body.bubbly-mode input[type="number"],
 body.bubbly-mode input[type="url"],
@@ -1740,11 +1817,11 @@ body.bubbly-mode input[type="password"],
 body.bubbly-mode textarea,
 body.bubbly-mode select {
   border-radius: 16px;
-  background: color-mix(in srgb, #fff calc(var(--glass-alpha) + 5%), transparent);
+  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.45 + 6%), transparent);
   backdrop-filter: blur(calc(var(--glass-blur) * 0.4));
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.4));
   border-color: color-mix(in srgb, var(--border) calc(var(--glass-tint) * 0.6 + 40%), transparent);
-  box-shadow: inset 0 1px 4px rgba(22, 63, 99, 0.1);
+  box-shadow: inset 0 1px 4px rgba(22, 63, 99, 0.1), inset 0 -1px 0 var(--bubble-ring-bright);
   transition: box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
 }
 
@@ -1754,36 +1831,40 @@ body.bubbly-mode input[type="url"]:focus,
 body.bubbly-mode input[type="password"]:focus,
 body.bubbly-mode textarea:focus,
 body.bubbly-mode select:focus {
-  background: color-mix(in srgb, #fff calc(var(--glass-alpha) + 25%), transparent);
+  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.6 + 15%), transparent);
   box-shadow: inset 0 1px 4px rgba(22, 63, 99, 0.08), 0 0 0 3px rgba(37, 99, 168, 0.18);
 }
 
-/* ---------- Pills: tags, definition-source labels, entry count ---------- */
+/* ---------- Pills: tags, definition-source labels, entry count — small
+   bubbles too, transparent core + rim, no full shell (they're dense in
+   the layout, a heavy inset ring would look muddy at that size) ---------- */
 body.bubbly-mode .tag,
 body.bubbly-mode .definition-source {
   border-radius: 999px;
-  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.5 + 20%), transparent) inset;
+  background: var(--bubble-core);
+  box-shadow: inset 0 1px 0 var(--bubble-ring-bright), inset 0 -1px 2px var(--bubble-ring-dark);
 }
 
 body.bubbly-mode .entry-count {
-  background: color-mix(in srgb, var(--blue-pale) var(--glass-alpha), transparent);
+  background: var(--bubble-core);
   padding: 0.25rem 0.7rem;
   border-radius: 999px;
+  box-shadow: inset 0 1px 0 var(--bubble-ring-bright), inset 0 -1px 2px var(--bubble-ring-dark);
 }
 
 /* ---------- Definition & image cards: rounder, glassier list items ---------- */
 body.bubbly-mode .definition-card {
   border-radius: 18px;
-  background: color-mix(in srgb, #fff var(--glass-alpha), transparent);
+  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.55), transparent);
   backdrop-filter: blur(calc(var(--glass-blur) * 0.35));
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.35));
-  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 25%), transparent) inset, 0 2px 8px rgba(22, 63, 99, 0.06);
+  box-shadow: inset 0 1px 0 var(--bubble-ring-bright), 0 2px 8px rgba(22, 63, 99, 0.06);
   transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, background 0.2s ease;
 }
 
 body.bubbly-mode .definition-card:hover {
   transform: translateY(-1px);
-  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 25%), transparent) inset, 0 6px 16px rgba(22, 63, 99, 0.1);
+  box-shadow: inset 0 1px 0 var(--bubble-ring-bright), 0 6px 16px rgba(22, 63, 99, 0.1);
 }
 
 body.bubbly-mode .image-card img {
@@ -1795,13 +1876,36 @@ body.bubbly-mode .image-select-checkbox {
 }
 
 /* ---------- Drag/resize handles keep their pill shape but pick up the
-   same glossy sheen so they feel part of the same interface ---------- */
+   same glossy rim so they feel part of the same interface ---------- */
 body.bubbly-mode .drag-handle {
-  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.5 + 20%), transparent) inset, 0 4px 10px rgba(139, 92, 246, 0.45);
+  box-shadow: inset 0 1px 0 var(--bubble-ring-bright), 0 4px 10px rgba(139, 92, 246, 0.45);
 }
 
 body.bubbly-mode .resize-handle {
-  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.5 + 20%), transparent) inset, 0 4px 10px rgba(139, 92, 246, 0.45);
+  box-shadow: inset 0 1px 0 var(--bubble-ring-bright), 0 4px 10px rgba(139, 92, 246, 0.45);
+}
+
+/* Toggle switch track/thumb join the same bubble family: transparent
+   track, glossy thumb with its own tiny highlight. */
+body.bubbly-mode .switch-track {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--bubble-core);
+  box-shadow: inset 0 1px 3px var(--bubble-ring-dark), inset 0 -1px 0 var(--bubble-ring-bright);
+}
+
+body.bubbly-mode .switch input:checked ~ .switch-track {
+  background:
+    var(--bubble-core),
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--blue) calc(var(--glass-alpha) * 0.5), transparent),
+      color-mix(in srgb, var(--blue-deep) calc(var(--glass-alpha) * 0.5), transparent));
+}
+
+body.bubbly-mode .switch-thumb {
+  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.7 + 20%), transparent);
+  box-shadow: var(--bubble-shell);
 }
 
 /* Respect reduced-motion preferences even inside the springier Liquid
