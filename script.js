@@ -4276,3 +4276,551 @@ window.addEventListener("message", (event) => {
   clearInterval(appReadyInterval);
   console.log("[VocabBridge] script.js handshake acknowledged by extension!");
 });
+
+/* =========================================================================
+   CUSTOMIZABLE KEYBOARD SHORTCUT SYSTEM
+   ---------------------------------------------------------------------
+   A single source of truth (SHORTCUT_FIELDS + shortcutConfig) drives:
+     1. The sliding "⌨️ Keyboard Shortcuts" sidebar (#settings-sidebar),
+        where every binding is click-to-record and saved to localStorage.
+     2. A global keydown dispatcher that fires the matching action the
+        instant a mapped key is pressed — even while a form field has
+        focus — unless the configured Pass-Through Modifier is held, in
+        which case we get out of the way entirely and let the browser
+        type the character normally.
+     3. Keyboard navigation + selection for the Definitions/Images lists.
+     4. The two-way Gemini-tab / App-tab focus switch, relayed to the
+        companion extension over the same window.postMessage channel
+        the Gemini Bridge already uses (see the block above this one).
+
+   Written as a single IIFE so its many small helpers don't leak into
+   the global namespace / collide with anything above.
+========================================================================= */
+(function initShortcutSystem() {
+  const SHORTCUT_STORAGE_KEY = "vocabRegister_shortcutConfig";
+
+  // ---- Defaults (all non-alphabet, so plain word/book typing is never
+  // affected unless a binding is deliberately reassigned) --------------
+  const DEFAULT_SHORTCUTS = {
+    passThroughModifier: "Alt",
+
+    defUp: "ArrowUp",
+    defDown: "ArrowDown",
+    imgLeft: "ArrowLeft",
+    imgRight: "ArrowRight",
+    selectItem: "Space",
+
+    focusGeminiTab: "F7",
+    focusAppTab: "F8",
+
+    playUs: "BracketLeft",
+    playUk: "BracketRight",
+
+    toggleSettings: "F1",
+    quickSearch: "F3",
+    advancedPanel: "F6",
+    manualBackup: "F9",
+
+    searchGemini: "Quote",
+    fetchAi: "F2",
+    addEntry: "Enter",
+    addManualDefinition: "Semicolon",
+    addManualImage: "F4",
+  };
+
+  // Rendering metadata for the sidebar — order here is display order.
+  const SHORTCUT_FIELDS = [
+    { key: "toggleSettings", label: "Settings Panel Toggle (⌨️)", group: "Header Bar" },
+    { key: "quickSearch", label: "Quick Search View (🔍 Display)", group: "Header Bar" },
+    { key: "advancedPanel", label: "Advanced Control Panel (🎛️ Customize)", group: "Header Bar" },
+    { key: "manualBackup", label: "Manual Backup / Save Layout (💾 Storage)", group: "Header Bar" },
+
+    { key: "searchGemini", label: "Search Gemini", group: "Main Actions" },
+    { key: "fetchAi", label: "Fetch with AI", group: "Main Actions" },
+    { key: "addEntry", label: "Add Entry", group: "Main Actions" },
+    { key: "addManualDefinition", label: "Add Manual Definition", group: "Main Actions" },
+    { key: "addManualImage", label: "Add Manual Image", group: "Main Actions" },
+
+    { key: "playUs", label: "Play US Pronunciation", group: "Pronunciation" },
+    { key: "playUk", label: "Play UK Pronunciation", group: "Pronunciation" },
+
+    { key: "defUp", label: "Definitions List — Up", group: "List Navigation" },
+    { key: "defDown", label: "Definitions List — Down", group: "List Navigation" },
+    { key: "imgLeft", label: "Images List — Left", group: "List Navigation" },
+    { key: "imgRight", label: "Images List — Right", group: "List Navigation" },
+    { key: "selectItem", label: "Select Highlighted Item", group: "List Navigation" },
+
+    { key: "focusGeminiTab", label: "Focus Gemini Tab", group: "Extension / Tabs" },
+    { key: "focusAppTab", label: "Return to App Tab", group: "Extension / Tabs" },
+  ];
+
+  const MODIFIER_OPTIONS = ["Alt", "Control", "Shift", "Meta"];
+
+  // ---- Pretty labels for KeyboardEvent.code values --------------------
+  const KEY_LABELS = {
+    ArrowUp: "↑ Up",
+    ArrowDown: "↓ Down",
+    ArrowLeft: "← Left",
+    ArrowRight: "→ Right",
+    Space: "Space",
+    Enter: "Enter ⏎",
+    Quote: "'",
+    Semicolon: ";",
+    BracketLeft: "[",
+    BracketRight: "]",
+    Escape: "Esc",
+  };
+  function labelForCode(code) {
+    if (!code) return "— unbound —";
+    if (KEY_LABELS[code]) return KEY_LABELS[code];
+    if (/^F([1-9]|1[0-9])$/.test(code)) return code;
+    if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+    if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+    return code;
+  }
+
+  // ---- Load / persist config ------------------------------------------
+  function loadConfig() {
+    try {
+      const raw = localStorage.getItem(SHORTCUT_STORAGE_KEY);
+      const saved = raw ? JSON.parse(raw) : {};
+      return { ...DEFAULT_SHORTCUTS, ...saved };
+    } catch (err) {
+      console.warn("[Shortcuts] Couldn't read saved shortcut config — using defaults.", err);
+      return { ...DEFAULT_SHORTCUTS };
+    }
+  }
+
+  let shortcutConfig = loadConfig();
+  let codeToAction = {};
+
+  function rebuildCodeToAction() {
+    codeToAction = {};
+    Object.keys(shortcutConfig).forEach((k) => {
+      if (k === "passThroughModifier") return;
+      if (shortcutConfig[k]) codeToAction[shortcutConfig[k]] = k;
+    });
+  }
+
+  function saveConfig() {
+    localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(shortcutConfig));
+    rebuildCodeToAction();
+    syncTabSwitchKeysToExtension();
+  }
+
+  // Tells the companion extension (if installed) which keys currently
+  // mean "focus Gemini tab" / "return to app tab", so content-gemini.js
+  // can listen for the *same* "return to app tab" key while you're
+  // sitting on the Gemini tab itself — see background.js / bridge-app.js
+  // for the relay, and content-gemini.js for where it's consumed.
+  function syncTabSwitchKeysToExtension() {
+    window.postMessage(
+      {
+        type: "SYNC_SHORTCUT_KEYS",
+        focusGeminiKey: shortcutConfig.focusGeminiTab,
+        focusAppKey: shortcutConfig.focusAppTab,
+      },
+      window.location.origin
+    );
+  }
+
+  /* -----------------------------------------------------------------
+     SIDEBAR: build + open/close + key-capture
+  ----------------------------------------------------------------- */
+  const settingsSidebar = document.getElementById("settings-sidebar");
+  const settingsSidebarBackdrop = document.getElementById("settings-sidebar-backdrop");
+  const shortcutsToggleBtn = document.getElementById("shortcuts-toggle-btn");
+  const settingsSidebarCloseBtn = document.getElementById("settings-sidebar-close-btn");
+  const shortcutFieldsList = document.getElementById("shortcut-fields-list");
+  const shortcutsResetBtn = document.getElementById("shortcuts-reset-btn");
+
+  function openSidebar() {
+    if (!settingsSidebar) return;
+    settingsSidebar.classList.add("open");
+    settingsSidebarBackdrop?.classList.add("open");
+    settingsSidebar.setAttribute("aria-hidden", "false");
+  }
+  function closeSidebar() {
+    if (!settingsSidebar) return;
+    settingsSidebar.classList.remove("open");
+    settingsSidebarBackdrop?.classList.remove("open");
+    settingsSidebar.setAttribute("aria-hidden", "true");
+    cancelRecording();
+  }
+  function toggleSidebar() {
+    if (!settingsSidebar) return;
+    if (settingsSidebar.classList.contains("open")) closeSidebar();
+    else openSidebar();
+  }
+
+  shortcutsToggleBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleSidebar();
+  });
+  settingsSidebarCloseBtn?.addEventListener("click", closeSidebar);
+  settingsSidebarBackdrop?.addEventListener("click", closeSidebar);
+
+  let recordingBtn = null;
+  let recordingKey = null;
+
+  function cancelRecording() {
+    if (recordingBtn) {
+      recordingBtn.classList.remove("listening");
+      recordingBtn.textContent = labelForCode(shortcutConfig[recordingKey]);
+    }
+    recordingBtn = null;
+    recordingKey = null;
+  }
+
+  // Physical modifier-only key codes — these belong in the Pass-Through
+  // Modifier dropdown, never as a standalone shortcut binding.
+  const MODIFIER_CODES = new Set([
+    "AltLeft", "AltRight", "ControlLeft", "ControlRight",
+    "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight",
+  ]);
+
+  function startRecording(btn, key) {
+    cancelRecording();
+    recordingBtn = btn;
+    recordingKey = key;
+    btn.classList.add("listening");
+    btn.textContent = "Press a key…";
+
+    // Capture phase + {once:true} so this fires (and fully swallows the
+    // event via stopPropagation) before the global dispatcher below —
+    // and before anything else on the page — ever sees the keystroke.
+    window.addEventListener(
+      "keydown",
+      (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (e.code === "Escape") {
+          cancelRecording();
+          return;
+        }
+        if (MODIFIER_CODES.has(e.code)) {
+          cancelRecording();
+          alert("That's a modifier key — pick it from the Pass-Through Modifier dropdown instead.");
+          return;
+        }
+
+        const newCode = e.code;
+        const clashKey = Object.keys(shortcutConfig).find(
+          (k) => k !== "passThroughModifier" && k !== key && shortcutConfig[k] === newCode
+        );
+        if (clashKey) {
+          const clashField = SHORTCUT_FIELDS.find((f) => f.key === clashKey);
+          const proceed = confirm(
+            `"${labelForCode(newCode)}" is already used for "${clashField ? clashField.label : clashKey}". ` +
+              `Assign it here anyway? (That other shortcut will become unbound.)`
+          );
+          if (!proceed) {
+            cancelRecording();
+            return;
+          }
+          shortcutConfig[clashKey] = null;
+        }
+
+        shortcutConfig[key] = newCode;
+        saveConfig();
+        cancelRecording();
+        renderSidebarRows();
+        applyShortcutTitles();
+      },
+      { capture: true, once: true }
+    );
+  }
+
+  function renderSidebarRows() {
+    if (!shortcutFieldsList) return;
+
+    let html = `<div class="shortcut-group-title">Pass-Through Modifier</div>
+      <div class="shortcut-row">
+        <span class="shortcut-row-label">Hold this while pressing a mapped key to type it literally</span>
+        <select id="shortcut-passthrough-select" class="shortcut-key-input">
+          ${MODIFIER_OPTIONS.map(
+            (m) => `<option value="${m}" ${m === shortcutConfig.passThroughModifier ? "selected" : ""}>${m}</option>`
+          ).join("")}
+        </select>
+      </div>`;
+
+    let lastGroup = null;
+    SHORTCUT_FIELDS.forEach((field) => {
+      if (field.group !== lastGroup) {
+        html += `<div class="shortcut-group-title">${escapeHtml(field.group)}</div>`;
+        lastGroup = field.group;
+      }
+      const code = shortcutConfig[field.key];
+      html += `
+        <div class="shortcut-row">
+          <span class="shortcut-row-label">${escapeHtml(field.label)}</span>
+          <button type="button" class="shortcut-key-input" data-shortcut-key="${field.key}">${escapeHtml(
+        labelForCode(code)
+      )}</button>
+        </div>`;
+    });
+
+    shortcutFieldsList.innerHTML = html;
+
+    document.getElementById("shortcut-passthrough-select")?.addEventListener("change", (e) => {
+      shortcutConfig.passThroughModifier = e.target.value;
+      saveConfig();
+    });
+
+    shortcutFieldsList.querySelectorAll("[data-shortcut-key]").forEach((btn) => {
+      btn.addEventListener("click", () => startRecording(btn, btn.dataset.shortcutKey));
+    });
+  }
+
+  shortcutsResetBtn?.addEventListener("click", () => {
+    if (!confirm("Reset all keyboard shortcuts to their defaults?")) return;
+    shortcutConfig = { ...DEFAULT_SHORTCUTS };
+    saveConfig();
+    renderSidebarRows();
+    applyShortcutTitles();
+  });
+
+  // Esc closes the sidebar (and cancels any in-progress key capture) —
+  // wired independently of the existing Esc-closes-customize-mode
+  // listener elsewhere in this file, so both work side by side.
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && settingsSidebar?.classList.contains("open")) closeSidebar();
+  });
+
+  /* -----------------------------------------------------------------
+     Button title hints — "Add Entry [Enter]" etc. Stores each
+     element's original title once (data-base-title) so re-applying
+     after a rebinding never stacks up duplicate "[X] [Y]" suffixes.
+  ----------------------------------------------------------------- */
+  function ensureBaseTitle(el, fallback) {
+    if (!el.dataset.baseTitle) {
+      el.dataset.baseTitle = el.getAttribute("title") || fallback;
+    }
+    return el.dataset.baseTitle;
+  }
+
+  function applyShortcutTitles() {
+    const targets = [
+      [document.getElementById("entry-form-submit-btn"), "addEntry", "Add Entry"],
+      [aiFetchBtn, "fetchAi", "Fetch with AI"],
+      [typeof searchGeminiBtn !== "undefined" ? searchGeminiBtn : null, "searchGemini", "Search Gemini"],
+      [addDefinitionBtn, "addManualDefinition", "Add this definition"],
+      [addImageBtn, "addManualImage", "Add this image"],
+      [pronUsBtn, "playUs", "Play American pronunciation"],
+      [pronUkBtn, "playUk", "Play British pronunciation"],
+      [shortcutsToggleBtn, "toggleSettings", "Keyboard Shortcuts"],
+      [displayToggleBtn, "quickSearch", "Display settings"],
+      [customizeToggleBtn, "advancedPanel", "Customize layout"],
+      [storageToggleBtn, "manualBackup", "Storage settings"],
+    ];
+    targets.forEach(([el, key, fallback]) => {
+      if (!el) return;
+      const base = ensureBaseTitle(el, fallback);
+      const code = shortcutConfig[key];
+      el.title = code ? `${base} [${labelForCode(code)}]` : base;
+    });
+  }
+
+  /* -----------------------------------------------------------------
+     LIST NAVIGATION (Definitions / Images) — works against whichever
+     pair of lists is currently visible: the main add-entry form, or
+     the edit modal, if it's open.
+  ----------------------------------------------------------------- */
+  function getDefListContext() {
+    const inEdit = !editModal.classList.contains("hidden");
+    return inEdit
+      ? { container: editDefinitionsList, list: editPendingDefinitions, cardClass: "definition-card", checkboxClass: "definition-checkbox" }
+      : { container: definitionsList, list: pendingDefinitions, cardClass: "definition-card", checkboxClass: "definition-checkbox" };
+  }
+  function getImgListContext() {
+    const inEdit = !editModal.classList.contains("hidden");
+    return inEdit
+      ? { container: editImagesGallery, list: editPendingImages, cardClass: "image-card", checkboxClass: "image-checkbox" }
+      : { container: imagesGallery, list: pendingImages, cardClass: "image-card", checkboxClass: "image-checkbox" };
+  }
+
+  let defNavId = null;
+  let imgNavId = null;
+  let lastNavKind = null; // "def" | "img" | null — which list Space acts on
+
+  function hasEntries(kind) {
+    const ctx = kind === "def" ? getDefListContext() : getImgListContext();
+    return ctx.list.length > 0;
+  }
+
+  function navigateList(kind, direction) {
+    const ctx = kind === "def" ? getDefListContext() : getImgListContext();
+    const cards = Array.from(ctx.container.querySelectorAll(`.${ctx.cardClass}`));
+    if (!cards.length) return;
+    const currentId = kind === "def" ? defNavId : imgNavId;
+    let idx = cards.findIndex((c) => c.dataset.id === currentId);
+    idx = idx === -1 ? (direction > 0 ? 0 : cards.length - 1) : (idx + direction + cards.length) % cards.length;
+    const newId = cards[idx].dataset.id;
+    if (kind === "def") defNavId = newId;
+    else imgNavId = newId;
+    lastNavKind = kind;
+    applyListHighlight(kind);
+  }
+
+  function applyListHighlight(kind) {
+    const ctx = kind === "def" ? getDefListContext() : getImgListContext();
+    const navId = kind === "def" ? defNavId : imgNavId;
+    ctx.container.querySelectorAll(`.${ctx.cardClass}`).forEach((c) => {
+      c.classList.toggle("shortcut-active-item", navId != null && c.dataset.id === navId);
+    });
+    if (navId) {
+      ctx.container.querySelector(`.${ctx.cardClass}[data-id="${navId}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }
+
+  // Simulates a mouse click on the highlighted card's checkbox — this
+  // reuses the existing onToggle/re-render wiring in renderDefinitions()/
+  // renderImages() exactly as-is, so no changes were needed there. The
+  // re-render wipes our highlight class, so we reapply it right after.
+  function selectHighlightedItem() {
+    const kind = lastNavKind;
+    if (!kind) return;
+    const ctx = kind === "def" ? getDefListContext() : getImgListContext();
+    const navId = kind === "def" ? defNavId : imgNavId;
+    if (!navId) return;
+    const card = ctx.container.querySelector(`.${ctx.cardClass}[data-id="${navId}"]`);
+    const checkbox = card?.querySelector(`.${ctx.checkboxClass}`);
+    if (!checkbox) return;
+    checkbox.click();
+    applyListHighlight(kind);
+  }
+
+  /* -----------------------------------------------------------------
+     GLOBAL KEY DISPATCHER
+  ----------------------------------------------------------------- */
+  document.addEventListener("keydown", (e) => {
+    if (e.isComposing) return;
+    if (recordingBtn) return; // sidebar is actively capturing a new binding
+
+    // Any modifier held at all means "leave this alone": if it's the
+    // configured Pass-Through Modifier, the point is to let the browser
+    // type the literal character normally; if it's some other combo, it
+    // might be a browser/OS shortcut we shouldn't step on either way.
+    if (e.altKey || e.ctrlKey || e.shiftKey || e.metaKey) return;
+
+    const action = codeToAction[e.code];
+    if (!action) return;
+
+    switch (action) {
+      case "toggleSettings":
+        e.preventDefault();
+        toggleSidebar();
+        break;
+
+      case "quickSearch":
+        e.preventDefault();
+        displayToggleBtn?.click();
+        break;
+
+      case "advancedPanel":
+        e.preventDefault();
+        customizeToggleBtn?.click();
+        break;
+
+      case "manualBackup":
+        e.preventDefault();
+        storageToggleBtn?.click();
+        break;
+
+      case "searchGemini":
+        e.preventDefault();
+        if (typeof searchGeminiBtn !== "undefined") searchGeminiBtn?.click();
+        break;
+
+      case "fetchAi":
+        e.preventDefault();
+        aiFetchBtn?.click();
+        break;
+
+      case "addEntry": {
+        // The default binding (Enter) is already handled — with its own
+        // careful per-field exclusions — by the pre-existing document
+        // Enter-listener earlier in this file. Only take over here once
+        // the person has actually rebound Add Entry to something else.
+        if (shortcutConfig.addEntry === "Enter") return;
+        if (!editModal.classList.contains("hidden")) return;
+        e.preventDefault();
+        guardedAddEntry();
+        break;
+      }
+
+      case "addManualDefinition":
+        e.preventDefault();
+        (editModal.classList.contains("hidden") ? addDefinitionBtn : editAddDefinitionBtn)?.click();
+        break;
+
+      case "addManualImage":
+        e.preventDefault();
+        (editModal.classList.contains("hidden") ? addImageBtn : editAddImageBtn)?.click();
+        break;
+
+      case "playUs":
+        e.preventDefault();
+        playPendingPronunciation("us");
+        break;
+
+      case "playUk":
+        e.preventDefault();
+        playPendingPronunciation("uk");
+        break;
+
+      case "defUp":
+        if (!hasEntries("def")) return;
+        e.preventDefault();
+        navigateList("def", -1);
+        break;
+
+      case "defDown":
+        if (!hasEntries("def")) return;
+        e.preventDefault();
+        navigateList("def", 1);
+        break;
+
+      case "imgLeft":
+        if (!hasEntries("img")) return;
+        e.preventDefault();
+        navigateList("img", -1);
+        break;
+
+      case "imgRight":
+        if (!hasEntries("img")) return;
+        e.preventDefault();
+        navigateList("img", 1);
+        break;
+
+      case "selectItem":
+        if (!lastNavKind) return; // nothing highlighted yet — let Space type a space
+        e.preventDefault();
+        selectHighlightedItem();
+        break;
+
+      case "focusGeminiTab":
+        e.preventDefault();
+        window.postMessage({ type: "FOCUS_GEMINI_TAB" }, window.location.origin);
+        break;
+
+      case "focusAppTab":
+        // This tab (the app) already has focus when this fires, so
+        // there's nothing to do here — the same binding is synced to
+        // the extension (see syncTabSwitchKeysToExtension above) so
+        // content-gemini.js can act on it while you're on Gemini's tab.
+        e.preventDefault();
+        break;
+
+      default:
+        break;
+    }
+  });
+
+  // ---- Init ------------------------------------------------------------
+  rebuildCodeToAction();
+  renderSidebarRows();
+  applyShortcutTitles();
+  syncTabSwitchKeysToExtension();
+})();

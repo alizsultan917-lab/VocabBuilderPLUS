@@ -20,6 +20,12 @@
 
   <div class="header-widgets">
 
+    <div id="shortcuts-widget" class="storage-widget">
+      <button type="button" id="shortcuts-toggle-btn" class="storage-toggle-btn" title="Keyboard Shortcuts">
+        <span class="storage-icon">⌨️</span>
+      </button>
+    </div>
+
     <div id="limits-widget" class="storage-widget">
       <button type="button" id="limits-toggle-btn" class="storage-toggle-btn" title="Fetch limits">
         <span class="storage-icon">⚙️</span>
@@ -189,6 +195,27 @@
 
   </div>
 </header>
+
+<!-- KEYBOARD SHORTCUTS SIDEBAR (Gemini-style sliding panel).
+     Rows are rendered by script.js from a single SHORTCUT_FIELDS config
+     array — see the "CUSTOMIZABLE KEYBOARD SHORTCUT SYSTEM" block near
+     the end of script.js. -->
+<div id="settings-sidebar-backdrop" class="settings-sidebar-backdrop"></div>
+<aside id="settings-sidebar" class="settings-sidebar" aria-hidden="true">
+  <div class="settings-sidebar-header">
+    <h2>⌨️ Keyboard Shortcuts</h2>
+    <button type="button" id="settings-sidebar-close-btn" class="icon-btn" title="Close">✕</button>
+  </div>
+  <p class="settings-sidebar-hint">
+    Click any key field below, then press the new key you want to assign. Hold your
+    <strong>Pass-Through Modifier</strong> while pressing a mapped key to type its
+    character literally instead of triggering the shortcut.
+  </p>
+  <div id="shortcut-fields-list" class="shortcut-fields-list"></div>
+  <div class="settings-sidebar-footer">
+    <button type="button" id="shortcuts-reset-btn" class="btn btn-secondary btn-small">Reset to Defaults</button>
+  </div>
+</aside>
 
 <main class="container">
 
