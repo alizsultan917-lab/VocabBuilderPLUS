@@ -1893,6 +1893,30 @@ select.shortcut-key-input {
   min-width: 96px;
 }
 
+/* Non-interactive "X + Y" display for the derived Increment/Decrement
+   Page Number chords — same footprint as .shortcut-key-input but never
+   clickable/listening, since these aren't independently recordable. */
+.shortcut-key-display {
+  min-width: 76px;
+  text-align: center;
+  padding: 0.32rem 0.5rem;
+  font-size: 0.76rem;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-weight: 600;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+
+.shortcut-row-hint {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  line-height: 1.4;
+  margin: 0.3rem 0 0;
+}
+
 .settings-sidebar-footer {
   margin-top: 0.8rem;
   padding-top: 0.8rem;

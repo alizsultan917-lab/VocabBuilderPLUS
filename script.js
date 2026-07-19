@@ -4313,6 +4313,22 @@ window.addEventListener("message", (event) => {
     focusGeminiTab: "F7",
     focusAppTab: "F8",
 
+    // Focus mappings — jump straight into the Word / Page bars.
+    focusWordInput: "Backslash",
+    focusPageInput: "Slash",
+
+    // Word Bar inline cursor navigation — only acts while the Word
+    // Input Bar itself is actively focused (see the dispatcher below).
+    wordCursorLeft: "Minus",
+    wordCursorRight: "Equal",
+
+    // Multi-key Page Calculation (simultaneous press) — Increment/
+    // Decrement Page Number aren't separate bindings of their own; they
+    // fire when focusPageInput is held down together with
+    // wordCursorRight/wordCursorLeft (default: '/' + '=' to increment,
+    // '/' + '-' to decrement). Rebinding either of those three keys
+    // above automatically updates which physical keys the chord needs.
+
     playUs: "BracketLeft",
     playUk: "BracketRight",
 
@@ -4352,6 +4368,11 @@ window.addEventListener("message", (event) => {
 
     { key: "focusGeminiTab", label: "Focus Gemini Tab", group: "Extension / Tabs" },
     { key: "focusAppTab", label: "Return to App Tab", group: "Extension / Tabs" },
+
+    { key: "focusWordInput", label: "Focus Word Input Bar", group: "Focus & Cursor" },
+    { key: "focusPageInput", label: "Focus Page Input Bar", group: "Focus & Cursor" },
+    { key: "wordCursorLeft", label: "Move Cursor Left in Word Bar", group: "Focus & Cursor" },
+    { key: "wordCursorRight", label: "Move Cursor Right in Word Bar", group: "Focus & Cursor" },
   ];
 
   const MODIFIER_OPTIONS = ["Alt", "Control", "Shift", "Meta"];
@@ -4369,6 +4390,10 @@ window.addEventListener("message", (event) => {
     BracketLeft: "[",
     BracketRight: "]",
     Escape: "Esc",
+    Backslash: "\\",
+    Slash: "/",
+    Minus: "-",
+    Equal: "=",
   };
   function labelForCode(code) {
     if (!code) return "— unbound —";
@@ -4563,6 +4588,32 @@ window.addEventListener("message", (event) => {
 
     shortcutFieldsList.innerHTML = html;
 
+    // ---- Multi-Key Page Calculation (Simultaneous Press) — informational
+    // only, since these two "bindings" are derived from whatever
+    // focusPageInput + wordCursorRight/wordCursorLeft are currently set
+    // to above, rather than being independently recordable keys of
+    // their own. Rebinding any of those three fields updates this
+    // display (and the actual chord the dispatcher listens for)
+    // automatically the next time the sidebar re-renders.
+    const chordSection = document.createElement("div");
+    chordSection.innerHTML = `
+      <div class="shortcut-group-title">Multi-Key Page Calculation (Simultaneous Press)</div>
+      <div class="shortcut-row">
+        <span class="shortcut-row-label">Increment Page Number</span>
+        <span class="shortcut-key-display">${escapeHtml(labelForCode(shortcutConfig.focusPageInput))} + ${escapeHtml(
+      labelForCode(shortcutConfig.wordCursorRight)
+    )}</span>
+      </div>
+      <div class="shortcut-row">
+        <span class="shortcut-row-label">Decrement Page Number</span>
+        <span class="shortcut-key-display">${escapeHtml(labelForCode(shortcutConfig.focusPageInput))} + ${escapeHtml(
+      labelForCode(shortcutConfig.wordCursorLeft)
+    )}</span>
+      </div>
+      <p class="shortcut-row-hint">Hold both keys of a pair down together — these aren't separately rebindable, they follow whatever "Focus Page Input Bar" / "Move Cursor Left/Right in Word Bar" are set to above.</p>
+    `;
+    shortcutFieldsList.appendChild(chordSection);
+
     document.getElementById("shortcut-passthrough-select")?.addEventListener("change", (e) => {
       shortcutConfig.passThroughModifier = e.target.value;
       saveConfig();
@@ -4613,6 +4664,8 @@ window.addEventListener("message", (event) => {
       [displayToggleBtn, "quickSearch", "Display settings"],
       [customizeToggleBtn, "advancedPanel", "Customize layout"],
       [storageToggleBtn, "manualBackup", "Storage settings"],
+      [wordInput, "focusWordInput", "Word"],
+      [pageInput, "focusPageInput", "Page No."],
     ];
     targets.forEach(([el, key, fallback]) => {
       if (!el) return;
@@ -4692,11 +4745,72 @@ window.addEventListener("message", (event) => {
   }
 
   /* -----------------------------------------------------------------
+     WORD BAR INLINE CURSOR NAVIGATION + MULTI-KEY PAGE CHORDS
+     ---------------------------------------------------------------
+     moveWordCursor() shifts the text caret in the Word Input Bar by one
+     character using its own selectionStart/selectionEnd — if there's an
+     existing text selection, moving collapses it in the requested
+     direction first rather than jumping from an arbitrary edge.
+
+     adjustPageNumber() reads the Page bar's current value, nudges it by
+     the given delta, and writes it straight back (never below 1) — used
+     by the Increment/Decrement Page Number chords below.
+  ----------------------------------------------------------------- */
+  function moveWordCursor(direction) {
+    const { selectionStart, selectionEnd } = wordInput;
+    const base = selectionStart === selectionEnd ? selectionStart : direction < 0 ? selectionStart : selectionEnd;
+    const newPos = Math.max(0, Math.min(wordInput.value.length, base + direction));
+    wordInput.setSelectionRange(newPos, newPos);
+  }
+
+  function adjustPageNumber(delta) {
+    const current = parseInt(pageInput.value, 10);
+    const base = Number.isFinite(current) ? current : 0;
+    const next = Math.max(1, base + delta);
+    pageInput.value = next;
+    pageInput.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  // Physical key-hold tracking (true/false), used ONLY to detect the
+  // Increment/Decrement Page Number chords — a genuine simultaneous
+  // hold of the configured Page-focus key together with the Word Bar
+  // cursor-left/right keys (default: '/' + '=' to increment, '/' + '-'
+  // to decrement). Updated on every keydown/keyup regardless of which
+  // element has focus, mirroring how every other global shortcut here
+  // already ignores focus context (except where explicitly noted, like
+  // the cursor-navigation actions below).
+  const heldKeys = {};
+
+  /* -----------------------------------------------------------------
      GLOBAL KEY DISPATCHER
   ----------------------------------------------------------------- */
   document.addEventListener("keydown", (e) => {
     if (e.isComposing) return;
     if (recordingBtn) return; // sidebar is actively capturing a new binding
+
+    if (!e.repeat) heldKeys[e.code] = true;
+
+    // ---- Multi-key chord check (Increment/Decrement Page Number) ----
+    // Checked before the pass-through-modifier gate below (a held
+    // modifier still falls through to "leave this alone", same as
+    // every single-key shortcut) and before the single-key switch, so
+    // a genuine simultaneous hold always wins over whichever key
+    // happened to be pressed first.
+    if (!e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+      const pageKey = shortcutConfig.focusPageInput;
+      const incKey = shortcutConfig.wordCursorRight;
+      const decKey = shortcutConfig.wordCursorLeft;
+      if (pageKey && incKey && heldKeys[pageKey] && heldKeys[incKey]) {
+        e.preventDefault();
+        adjustPageNumber(1);
+        return;
+      }
+      if (pageKey && decKey && heldKeys[pageKey] && heldKeys[decKey]) {
+        e.preventDefault();
+        adjustPageNumber(-1);
+        return;
+      }
+    }
 
     // Any modifier held at all means "leave this alone": if it's the
     // configured Pass-Through Modifier, the point is to let the browser
@@ -4813,9 +4927,42 @@ window.addEventListener("message", (event) => {
         e.preventDefault();
         break;
 
+      case "focusWordInput":
+        e.preventDefault();
+        wordInput.focus();
+        break;
+
+      case "focusPageInput":
+        e.preventDefault();
+        pageInput.focus();
+        pageInput.select();
+        break;
+
+      case "wordCursorLeft":
+        // Only acts while the Word Input Bar is actively focused —
+        // otherwise this key falls through and types its literal
+        // character normally wherever it was pressed.
+        if (document.activeElement !== wordInput) return;
+        e.preventDefault();
+        moveWordCursor(-1);
+        break;
+
+      case "wordCursorRight":
+        if (document.activeElement !== wordInput) return;
+        e.preventDefault();
+        moveWordCursor(1);
+        break;
+
       default:
         break;
     }
+  });
+
+  // Clears each key's held state the instant it's released, so the
+  // Increment/Decrement Page Number chord above only ever fires on a
+  // genuine simultaneous hold, never on a stale "was down earlier".
+  document.addEventListener("keyup", (e) => {
+    heldKeys[e.code] = false;
   });
 
   // ---- Init ------------------------------------------------------------
