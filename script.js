@@ -4213,5 +4213,39 @@ window.addEventListener("message", (event) => {
 // addPendingDefinition/addPendingImage/wordInput above are now defined, so
 // it's safe to deliver any Gemini data — including anything scraped and
 // queued before this page finished loading.
-console.log("[VocabBridge] script.js sending APP_READY handshake on:", window.location.href);
-window.postMessage({ type: "APP_READY" }, window.location.origin);
+//
+// bridge-app.js is a content script injected at document_idle — it can
+// easily still be initializing when script.js's own <script> tag runs,
+// so a single postMessage() here can fire before anyone is listening
+// and get lost forever. Instead, poll every 400ms until bridge-app.js
+// sends back APP_READY_ACK, then stop. Capped at ~20 attempts (~8s) so
+// this doesn't poll forever if the extension isn't installed/enabled.
+let appReadyAckReceived = false;
+let appReadyAttempts = 0;
+const APP_READY_MAX_ATTEMPTS = 20;
+
+const appReadyInterval = setInterval(() => {
+  if (appReadyAckReceived) {
+    clearInterval(appReadyInterval);
+    return;
+  }
+  if (++appReadyAttempts > APP_READY_MAX_ATTEMPTS) {
+    clearInterval(appReadyInterval);
+    console.warn(
+      "[VocabBridge] Gave up waiting for the extension's handshake ack after " +
+        APP_READY_MAX_ATTEMPTS +
+        " attempts — Gemini Bridge extension may not be installed/enabled."
+    );
+    return;
+  }
+  console.log("[VocabBridge] script.js sending APP_READY handshake...");
+  window.postMessage({ type: "APP_READY" }, window.location.origin);
+}, 400);
+
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  if (!event.data || event.data.type !== "APP_READY_ACK") return;
+  appReadyAckReceived = true;
+  clearInterval(appReadyInterval);
+  console.log("[VocabBridge] script.js handshake acknowledged by extension!");
+});
