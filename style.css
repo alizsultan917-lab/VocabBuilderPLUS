@@ -837,6 +837,62 @@ textarea {
   font-size: 0.95rem;
 }
 
+/* ---------- Search Gemini button ---------- */
+/* A distinct look from the other action buttons, echoing Gemini's own
+   sparkle-icon palette (blue → violet → warm pink) rather than reusing
+   the app's blue or purple-AI treatments — makes it instantly
+   recognizable as "the one that talks to Gemini". */
+.btn-gemini {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: linear-gradient(120deg, #4a86f7 0%, #9168e4 55%, #e05f9a 100%);
+  color: #fff;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* Soft diagonal sheen that sweeps across on hover — subtle, not a
+   distracting animation loop; only plays once per hover. */
+.btn-gemini::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.35) 48%, transparent 66%);
+  transform: translateX(-120%);
+  transition: transform 0.6s ease;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.btn-gemini:hover::before {
+  transform: translateX(120%);
+}
+
+.btn-gemini:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 4px 14px rgba(145, 104, 228, 0.35);
+}
+
+.btn-gemini .gemini-btn-icon,
+.btn-gemini .gemini-btn-label {
+  position: relative;
+  z-index: 1;
+}
+
+.btn-gemini .gemini-btn-icon {
+  font-size: 0.95rem;
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.5));
+}
+
+/* Matches the size/shape footprint every other customizable control gets
+   (see .customizable in the Free Placement section below) so the drag
+   and resize handles sit exactly where they do on every other button. */
+#search-gemini-btn.customizable {
+  min-width: 148px;
+}
+
 .ai-fetch-status {
   display: block;
   font-size: 0.82rem;

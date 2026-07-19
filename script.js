@@ -591,6 +591,7 @@ const CUSTOMIZABLE_IDS = [
   "entry-form-submit-btn",
   "ai-fetch-btn",
   "ai-settings-btn",
+  "search-gemini-btn",
   "add-definition-btn",
   "add-image-btn",
   "export-json-btn",
