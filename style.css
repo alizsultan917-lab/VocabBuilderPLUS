@@ -1,0 +1,1761 @@
+:root {
+  --bg: #eef3f9;
+  --paper: #ffffff;
+  --ink: #1c2b3a;
+  --ink-soft: #5b6b7c;
+  --blue: #2563a8;
+  --blue-deep: #163f63;
+  --blue-soft: #7fa8cc;
+  --blue-pale: #e4edf7;
+  --border: #dbe4ee;
+  --green: #2f7d5c;
+  --purple: #6a52c9;
+  --danger: #b3403f;
+  --ai: #7c3aed;
+  --shadow: 0 2px 14px rgba(22, 63, 99, 0.09), 0 1px 2px rgba(22, 63, 99, 0.06);
+  --shadow-lift: 0 10px 28px rgba(22, 63, 99, 0.16);
+  --radius: 16px;
+
+  /* User-adjustable display sizes (set via the 🔍 Display panel, JS
+     overrides these on :root once saved preferences are loaded). */
+  --search-bar-width: 220px;
+  --def-text-scale: 1;
+  --img-thumb-size: 150px;
+
+  /* 🫧 Liquid Interface glass controls (set via the 🔍 Display panel once
+     Liquid Interface is on; these defaults are only used before JS loads
+     saved prefs). --glass-alpha and --glass-tint are percentages so they
+     can be used directly as rgba() alpha values and color-mix() weights. */
+  --glass-alpha: 70%;
+  --glass-blur: 20px;
+  --glass-tint: 50%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Inter', system-ui, sans-serif;
+  line-height: 1.55;
+}
+
+h1, h2, h3 {
+  font-family: 'Playfair Display', Georgia, serif;
+  margin: 0;
+  color: var(--ink);
+}
+
+/* ---------- Header ---------- */
+.site-header {
+  position: relative;
+  /* Explicit stacking order (not just "auto"/0) so the header — and the
+     dropdown panels inside it — reliably paint above <main>'s cards.
+     Without this, once Liquid Interface gives both the header and the
+     cards backdrop-filter (which forces each into its own stacking
+     context even though neither is otherwise positioned), plain DOM
+     order would put <main>, which comes after <header>, on top —
+     visually burying the dropdowns and swallowing their clicks. Stays
+     below customize-mode's temporary lift (90) and modals (100). */
+  z-index: 70;
+  background: linear-gradient(135deg, var(--blue-deep), var(--blue) 65%, #2f78bd);
+  color: #eef4fb;
+  padding: 0.4rem 1rem;
+  text-align: center;
+  box-shadow: 0 2px 10px rgba(16, 41, 66, 0.2);
+}
+
+/* Faint glass-like sheen across the top edge — a small touch of depth
+   that doesn't change the blue palette, just how it catches the light. */
+.site-header::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 50%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+
+.site-header h1 {
+  color: #fff;
+  font-size: 0.98rem;
+  letter-spacing: 0.2px;
+  line-height: 1.2;
+}
+
+.subtitle {
+  margin-top: 0.05rem;
+  color: #c9dcef;
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
+
+/* ---------- Header widgets (storage + customize, tucked in the corner) ---------- */
+.header-widgets {
+  position: absolute;
+  top: 50%;
+  right: 0.7rem;
+  transform: translateY(-50%);
+  /* Must outrank every customize/free-placement stacking level (30 for
+     .customizable, 40 for .is-lifted, 41 for the drag/resize handle
+     badges) so an open dropdown (⚙️ Limits, 🔍 Display, 🎛️ Customize,
+     💾 Storage) always renders on top of draggable panels instead of
+     being covered by them — but still below .modal (100). */
+  z-index: 60;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.storage-widget {
+  position: relative;
+}
+
+.storage-toggle-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(4px);
+  color: #fff;
+  font-size: 0.78rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+
+.storage-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.storage-toggle-btn:active {
+  transform: scale(0.96);
+}
+
+.storage-toggle-btn.needs-attention {
+  border-color: #f4c15c;
+  box-shadow: 0 0 0 3px rgba(244, 193, 92, 0.28);
+}
+
+.storage-panel {
+  position: absolute;
+  top: 32px;
+  right: 0;
+  width: 270px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lift);
+  padding: 0.85rem 0.9rem;
+}
+
+.storage-status {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  margin: 0 0 0.6rem;
+  line-height: 1.45;
+}
+
+.storage-status-warning {
+  color: var(--danger);
+  background: #fbe4e4;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+}
+
+.storage-panel-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.storage-panel-actions:last-child {
+  margin-bottom: 0;
+}
+
+.storage-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.7rem 0;
+}
+
+.origin-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin: -0.35rem 0 0.6rem;
+}
+
+.origin-label {
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+}
+
+.origin-value {
+  font-size: 0.72rem;
+  background: var(--blue-pale);
+  color: var(--blue-deep);
+  padding: 0.1rem 0.4rem;
+  border-radius: 5px;
+  word-break: break-all;
+}
+
+.storage-sync-options {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+}
+
+.storage-sync-hint {
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+  margin: 0 0 0.35rem;
+}
+
+.storage-check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  color: var(--ink);
+  cursor: pointer;
+  margin-bottom: 0.3rem;
+}
+
+.storage-check-row input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+.limits-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.55rem;
+}
+
+.limits-field-row label {
+  margin: 0;
+  font-size: 0.82rem;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.limits-field-row input[type="number"] {
+  width: 62px;
+  padding: 0.3rem 0.4rem;
+  text-align: center;
+}
+
+.limits-group {
+  margin-bottom: 0.7rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.limits-group:last-of-type {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.limits-group-title {
+  margin: 0 0 0.4rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink-soft);
+}
+
+/* ---------- Bucket labels in the main entries table ---------- */
+.def-bucket {
+  margin-bottom: 0.4rem;
+}
+
+.def-bucket:last-child {
+  margin-bottom: 0;
+}
+
+.bucket-label {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 0.05rem 0.4rem;
+  border-radius: 6px;
+  margin-bottom: 0.2rem;
+}
+
+.bucket-label.bucket-system {
+  background: #e7f3ec;
+  color: var(--green);
+}
+
+.bucket-label.bucket-ai {
+  background: #ece7fb;
+  color: var(--ai);
+}
+
+.bucket-label.bucket-manual {
+  background: #fbe4e4;
+  color: var(--danger);
+}
+
+.row-images-gallery img[data-bucket="ai"] {
+  outline: 2px solid var(--ai);
+  outline-offset: -2px;
+}
+
+.row-images-gallery img[data-bucket="manual"] {
+  outline: 2px solid var(--danger);
+  outline-offset: -2px;
+}
+
+/* ---------- Display settings sliders ---------- */
+.slider-field-row {
+  margin-bottom: 0.7rem;
+}
+
+.slider-field-row:last-of-type {
+  margin-bottom: 0.5rem;
+}
+
+.slider-field-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.3rem;
+}
+
+.slider-field-label label {
+  margin: 0;
+  font-size: 0.82rem;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.slider-value {
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+}
+
+.slider-field-row input[type="range"] {
+  width: 100%;
+  accent-color: var(--blue);
+  cursor: pointer;
+  height: 18px;
+  padding: 0;
+}
+
+/* ---------- Liquid Interface: transparency / blur / tint controls ---------- */
+.glass-controls {
+  margin: -0.15rem 0 0.7rem;
+  padding: 0.65rem 0.7rem 0.15rem;
+  background: rgba(37, 99, 168, 0.06);
+  border: 1px solid rgba(37, 99, 168, 0.12);
+  border-radius: 14px;
+}
+
+/* ---------- Export destination checkboxes ---------- */
+.export-dest-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0 0.3rem;
+}
+
+.export-dest-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.export-dest-check input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+/* ---------- Customize / free-placement mode ---------- */
+@keyframes customize-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.35); }
+  50%      { box-shadow: 0 0 0 5px rgba(139, 92, 246, 0); }
+}
+
+@keyframes customize-pop-in {
+  from { opacity: 0; transform: translateY(2px) scale(0.9); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+body.customize-mode .customizable {
+  outline: 1.5px dashed rgba(139, 92, 246, 0.55);
+  outline-offset: 4px;
+  border-radius: 10px;
+  position: relative;
+  z-index: 30;
+  transition: outline-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+body.customize-mode .customizable:hover {
+  outline-color: var(--ai);
+}
+
+/* A calm "breathing" glow around whichever element the pointer is over,
+   signalling it's interactive right now — an affordance cue rather than a
+   constant distraction, so it only plays on hover, not on every element
+   at once. */
+body.customize-mode .customizable:hover {
+  animation: customize-breathe 1.6s ease-in-out infinite;
+}
+
+/* While actively being dragged or resized, the element visually "lifts"
+   off the page — subtle scale + shadow, Apple-style — and pauses the
+   breathing glow so motion stays crisp and responsive. */
+.customizable.is-lifted {
+  z-index: 40;
+  box-shadow: 0 18px 38px rgba(22, 63, 99, 0.22), 0 2px 8px rgba(22, 63, 99, 0.12);
+  outline-color: var(--ai) !important;
+  animation: none !important;
+}
+
+/* The header bar is itself a draggable .customizable target (so it can
+   be repositioned like everything else), but it also HOUSES the ⚙️/🔍/
+   🎛️/💾 dropdown panels. Being a .customizable element gives it its own
+   stacking context at z-index 30 (or 40 while lifted) — which traps
+   those dropdowns inside a context that later-in-DOM siblings (the
+   form/filter/table cards, also at z-index 30) can outrank, burying an
+   open dropdown behind other panels' drag handles. The #id selector
+   here outranks both `.customizable` (30) and `.customizable.is-lifted`
+   (40) by specificity regardless of source order, so the header and
+   anything open inside it always renders above every other draggable
+   panel in Free Placement mode — dragged/lifted or not. */
+body.customize-mode #site-header-bar.customizable {
+  z-index: 90;
+}
+
+/* Springy glide back to the default spot/size, used only momentarily by
+   "Reset Layout" so elements ease into place instead of snapping. */
+.layout-settling {
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+    width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+    height 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+    max-height 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Only the small handle badges are draggable — the rest of the element
+   (buttons, panels, etc.) stays fully clickable even in customize mode,
+   so turning Free Placement back off always works. */
+.drag-handle {
+  display: none;
+  align-items: center;
+  gap: 0.25rem;
+  position: absolute;
+  top: -13px;
+  left: 10px;
+  background: linear-gradient(135deg, #9f7aea, var(--ai));
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  padding: 0.22rem 0.55rem 0.22rem 0.45rem;
+  border-radius: 20px;
+  white-space: nowrap;
+  cursor: grab;
+  z-index: 41;
+  user-select: none;
+  touch-action: none;
+  line-height: 1.4;
+  box-shadow: 0 3px 8px rgba(139, 92, 246, 0.4), 0 0 0 2px var(--paper, #fff);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  animation: customize-pop-in 0.18s ease both;
+}
+
+.drag-handle-icon {
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.drag-handle:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 12px rgba(139, 92, 246, 0.5), 0 0 0 2px var(--paper, #fff);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+  transform: scale(0.96);
+}
+
+body.customize-mode .customizable .drag-handle {
+  display: inline-flex;
+}
+
+.resize-handle {
+  display: none;
+  position: absolute;
+  bottom: -9px;
+  right: -9px;
+  width: 22px;
+  height: 22px;
+  background: linear-gradient(135deg, #9f7aea, var(--ai));
+  color: #fff;
+  border-radius: 50%;
+  align-items: center;
+  justify-content: center;
+  cursor: nwse-resize;
+  z-index: 41;
+  user-select: none;
+  touch-action: none;
+  line-height: 1;
+  box-shadow: 0 3px 8px rgba(139, 92, 246, 0.4), 0 0 0 2px var(--paper, #fff);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  animation: customize-pop-in 0.18s ease both;
+}
+
+.resize-handle::before {
+  content: "⤡";
+  font-size: 0.7rem;
+}
+
+.resize-handle:hover {
+  transform: scale(1.1);
+  box-shadow: 0 5px 12px rgba(139, 92, 246, 0.5), 0 0 0 2px var(--paper, #fff);
+}
+
+.resize-handle:active {
+  cursor: nwse-resize;
+  transform: scale(0.94);
+}
+
+body.customize-mode .customizable .resize-handle {
+  display: flex;
+}
+
+/* Wrapper for native inputs/selects with no associated caption (currently
+   unused, kept for future customizable controls added without a label). */
+.resize-drag-wrap {
+  display: block;
+  width: 100%;
+}
+
+.resize-drag-wrap input,
+.resize-drag-wrap select,
+.resize-drag-wrap textarea {
+  width: 100%;
+  height: 100%;
+}
+
+/* Wrapper that keeps a control's caption (a <label>, or the
+   ".def-label-row" title+All/None row above the definitions/images
+   panels) tied to it as one unit — see findAssociatedLabel in script.js.
+   Laid out as a column: the caption keeps its natural height, and the
+   control/panel below it stretches to fill whatever's left. In the
+   default (un-resized) state this renders identically to the original
+   layout; once the frame gets an explicit height, the control is what
+   visibly grows or shrinks — the caption never does. */
+.customizable-group-wrap {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.customizable-group-wrap > label,
+.customizable-group-wrap > .def-label-row {
+  flex: 0 0 auto;
+}
+
+.customizable-group-wrap > input,
+.customizable-group-wrap > select,
+.customizable-group-wrap > textarea,
+.customizable-group-wrap > .pronunciation-panel,
+.customizable-group-wrap > .scroll-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ---------- Layout ---------- */
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1.6rem 1rem 3rem;
+}
+
+.card {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.5rem 1.6rem;
+  margin-bottom: 1.4rem;
+}
+
+.card h2 {
+  font-size: 1.2rem;
+  margin-bottom: 1.1rem;
+  color: var(--blue-deep);
+}
+
+/* ---------- Form ---------- */
+
+/* Two-column layout: word identity + pronunciation stay fixed on the left;
+   definitions/images (the parts that can grow long) live on the right in
+   their own internally-scrolling panels, so the whole form fits on screen
+   without the page itself needing to scroll. */
+.form-layout {
+  display: flex;
+  gap: 1.8rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.form-left {
+  flex: 0 1 280px;
+  display: flex;
+  flex-direction: column;
+}
+
+.form-left .form-row {
+  flex-wrap: nowrap;
+  gap: 0.7rem;
+}
+
+.form-left .form-row .form-group {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.form-left .form-row .form-group-narrow {
+  flex: 0 0 78px;
+}
+
+.form-right {
+  flex: 1 1 380px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.btn-submit {
+  width: 100%;
+  margin-top: 0.4rem;
+}
+
+.form-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.form-group {
+  flex: 1 1 200px;
+  margin-bottom: 1rem;
+}
+
+.form-group-narrow {
+  flex: 0 1 110px;
+}
+
+/* Bounded-height, internally-scrolling panels for definitions/images —
+   keeps the add-word card a fixed, predictable height no matter how many
+   results come back from a lookup. */
+.scroll-panel {
+  max-height: 230px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.scroll-panel::-webkit-scrollbar {
+  width: 7px;
+}
+
+.scroll-panel::-webkit-scrollbar-thumb {
+  background: var(--blue-soft);
+  border-radius: 20px;
+}
+
+.scroll-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  margin-bottom: 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+input[type="text"],
+input[type="number"],
+input[type="url"],
+textarea,
+select {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfdff;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.96rem;
+  color: var(--ink);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(37, 99, 168, 0.14);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 56px;
+}
+
+.def-label-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.def-label-row label {
+  margin-bottom: 0;
+}
+
+.select-links {
+  margin-left: auto;
+  display: flex;
+  gap: 0.6rem;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--blue);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.link-btn:hover {
+  color: var(--blue-deep);
+  text-decoration: underline;
+}
+
+.tag {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: 20px;
+}
+
+.tag-manual {
+  background: #fbe4e4;
+  color: var(--danger);
+}
+
+.tag-loading {
+  background: var(--blue-pale);
+  color: var(--blue);
+  animation: pulse 1.2s infinite ease-in-out;
+}
+
+.hidden {
+  display: none !important;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.btn-small {
+  padding: 0.35rem 0.85rem;
+  font-size: 0.8rem;
+}
+
+/* ---------- AI fetch row ---------- */
+.ai-fetch-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.btn-ai {
+  background: linear-gradient(135deg, var(--ai), #a172f0);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.btn-ai:hover {
+  filter: brightness(1.08);
+}
+
+.ai-fetch-icon {
+  font-size: 0.95rem;
+}
+
+.ai-fetch-status {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  margin-bottom: 1rem;
+}
+
+.key-link-btn {
+  margin-left: auto;
+}
+
+/* ---------- Pronunciation panel (add-word form) ---------- */
+.pronunciation-panel {
+  background: #fbfdff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.pron-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.pron-accent {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--blue);
+  background: var(--blue-pale);
+  border-radius: 5px;
+  padding: 0.12rem 0.4rem;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.pron-text {
+  flex: 1;
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pron-play-btn {
+  flex-shrink: 0;
+}
+
+/* ---------- Table: pronunciation & images ---------- */
+.word-text {
+  font-weight: 700;
+}
+
+.phonetic-line {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  margin-top: 0.15rem;
+}
+
+.pronounce-btns {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.pronounce-btns .icon-btn {
+  width: auto;
+  padding: 0 0.5rem;
+  font-size: 0.8rem;
+}
+
+.row-thumb {
+  width: 210px;
+  height: 210px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  box-shadow: 0 3px 12px rgba(22, 63, 99, 0.14);
+  cursor: zoom-in;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.row-thumb:hover {
+  transform: scale(1.04);
+  box-shadow: 0 8px 22px rgba(22, 63, 99, 0.26);
+}
+
+.no-image {
+  color: var(--border);
+  font-size: 1.2rem;
+}
+
+/* ---------- Buttons ---------- */
+.btn {
+  border: none;
+  border-radius: 9px;
+  padding: 0.68rem 1.4rem;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(22, 63, 99, 0.08);
+  transition: background 0.15s ease, transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.15s ease, box-shadow 0.15s ease;
+}
+
+.btn:hover {
+  box-shadow: 0 4px 12px rgba(22, 63, 99, 0.16);
+}
+
+.btn:active {
+  transform: scale(0.97);
+  box-shadow: 0 1px 2px rgba(22, 63, 99, 0.1);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--blue), var(--blue-deep));
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, #2a6cb5, var(--blue-deep));
+}
+
+.btn-secondary {
+  background: var(--blue-pale);
+  color: var(--blue-deep);
+}
+
+.btn-secondary:hover {
+  background: #d3e2f2;
+}
+
+.btn-danger {
+  background: #fbe4e4;
+  color: var(--danger);
+}
+
+.btn-danger:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.icon-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 0.3rem;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+}
+
+.icon-btn:hover {
+  background: var(--blue-pale);
+  border-color: var(--blue-soft);
+}
+
+.icon-btn:active {
+  transform: scale(0.94);
+}
+
+.icon-btn.danger:hover {
+  background: #fbe4e4;
+  border-color: var(--danger);
+}
+
+/* ---------- Filter ---------- */
+.filter-card {
+  padding: 1.1rem 1.6rem;
+}
+
+.filter-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.filter-row label {
+  margin-bottom: 0.35rem;
+  white-space: nowrap;
+}
+
+.filter-row select {
+  max-width: 300px;
+}
+
+.entry-count {
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+}
+
+.filter-field-narrow {
+  width: 100px;
+}
+
+.filter-field-grow {
+  flex: 1 1 220px;
+}
+
+#search-input {
+  width: var(--search-bar-width);
+  max-width: 100%;
+}
+
+.filter-field select,
+.filter-field input {
+  max-width: 100%;
+}
+
+.export-import-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+.export-hint {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* ---------- Table ---------- */
+.table-card {
+  padding: 0.5rem 0.5rem 1rem;
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--ink-soft);
+  padding: 2rem 1rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+thead th {
+  text-align: left;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--blue-deep);
+  border-bottom: 2px solid var(--blue-soft);
+  padding: 0.7rem 0.8rem;
+}
+
+tbody td {
+  padding: 0.7rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+tbody tr:hover {
+  background: var(--blue-pale);
+}
+
+.page-group-row td {
+  background: var(--blue-pale);
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 700;
+  color: var(--blue);
+  padding: 0.5rem 0.8rem;
+  border-top: 2px solid var(--blue-soft);
+  border-bottom: 1px solid var(--blue-soft);
+}
+
+.word-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.def-cell {
+  max-width: 320px;
+  color: var(--ink-soft);
+}
+
+.manual-inline-tag {
+  font-size: 0.65rem;
+  color: var(--danger);
+  font-weight: 700;
+  text-transform: uppercase;
+  margin-left: 0.3rem;
+}
+
+.actions-cell {
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  table, thead, tbody, th, td, tr {
+    display: block;
+  }
+  thead {
+    display: none;
+  }
+  tbody tr {
+    margin-bottom: 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.8rem;
+  }
+  tbody td {
+    border: none;
+    padding: 0.3rem 0;
+  }
+  tbody td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    font-weight: 700;
+  }
+  .row-thumb {
+    width: 130px;
+    height: 130px;
+  }
+  .page-group-row {
+    display: block;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+  }
+}
+
+/* ---------- AI settings modal ---------- */
+.ai-settings-hint {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  line-height: 1.45;
+  margin-bottom: 1rem;
+}
+
+.ai-settings-optional {
+  font-weight: normal;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+
+/* ---------- Modal ---------- */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(22, 63, 99, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+
+.modal-content {
+  background: var(--paper);
+  border-radius: var(--radius);
+  padding: 1.6rem;
+  width: 100%;
+  max-width: 440px;
+  max-height: 88vh;
+  overflow-y: auto;
+  box-shadow: 0 12px 34px rgba(0,0,0,0.25);
+}
+
+.modal-content h3 {
+  margin-bottom: 1.1rem;
+  color: var(--blue-deep);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+/* ---------- Footer ---------- */
+.site-footer {
+  text-align: center;
+  padding: 1.2rem;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+}
+
+/* ---------- Manual add rows (definitions / images) ---------- */
+.manual-add-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  margin-top: 0.5rem;
+}
+
+.manual-add-row textarea,
+.manual-add-row input {
+  flex: 1;
+}
+
+.manual-add-row .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ---------- Definitions list (form + edit modal) ---------- */
+.definitions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.definition-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  background: #fbfdff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+}
+
+.definition-card .definition-text {
+  flex: 1;
+  font-size: calc(0.95rem * var(--def-text-scale));
+  color: var(--ink);
+}
+
+.definition-card.unselected {
+  opacity: 0.45;
+}
+
+.definition-checkbox {
+  margin-top: 0.3rem;
+  flex-shrink: 0;
+  width: 17px;
+  height: 17px;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+.definition-source {
+  display: inline-block;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 0.1rem 0.5rem;
+  border-radius: 20px;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+.source-dictionary {
+  background: #e3f0e6;
+  color: var(--green);
+}
+
+.source-context {
+  background: #ece0f5;
+  color: var(--purple);
+}
+
+.source-ai {
+  background: #ede4fd;
+  color: var(--ai);
+}
+
+.source-manual {
+  background: #fbe4e4;
+  color: var(--danger);
+}
+
+.definition-remove-btn {
+  background: none;
+  border: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.15rem 0.3rem;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.definition-remove-btn:hover {
+  background: #fbe4e4;
+  color: var(--danger);
+}
+
+/* ---------- Images gallery (form + edit modal + table rows) ---------- */
+.images-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+
+.image-card {
+  position: relative;
+  width: var(--img-thumb-size);
+}
+
+.image-card.unselected {
+  opacity: 0.45;
+}
+
+.image-select-checkbox {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 24px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-select-checkbox input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+.image-card img {
+  width: var(--img-thumb-size);
+  height: var(--img-thumb-size);
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 8px rgba(22, 63, 99, 0.1);
+  display: block;
+  background: var(--blue-pale);
+}
+
+.image-card .image-remove-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(28, 43, 58, 0.75);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.image-card .image-remove-btn:hover {
+  background: var(--danger);
+}
+
+.row-images-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+}
+
+.row-definitions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: calc(1em * var(--def-text-scale));
+}
+
+.row-definitions li {
+  color: var(--ink-soft);
+}
+
+/* =========================================================================
+   🫧 LIQUID / BUBBLY INTERFACE — opt-in theme toggled from the 🔍 Display
+   panel (persisted in localStorage, applied as a "bubbly-mode" class on
+   <body>). Purely cosmetic: no layout, sizing, or behavior changes, just
+   an Apple-style glossy/rounded/glass treatment layered on top of the
+   same blue palette used everywhere else in the app.
+   ========================================================================= */
+
+/* ---------- The toggle switch itself (always styled this way, so it
+   reads as a live preview of what it turns on) ---------- */
+.bubbly-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.7rem;
+}
+
+.bubbly-toggle-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  min-width: 0;
+}
+
+.bubbly-toggle-title {
+  font-weight: 700;
+  font-size: 0.86rem;
+  color: var(--ink);
+}
+
+.bubbly-toggle-hint {
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 26px;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.switch-track {
+  position: absolute;
+  inset: 0;
+  background: var(--border);
+  border-radius: 999px;
+  box-shadow: inset 0 1px 2px rgba(22, 63, 99, 0.15);
+  transition: background 0.25s ease;
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(22, 63, 99, 0.35), 0 0 0 0.5px rgba(22, 63, 99, 0.08);
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.switch input:checked ~ .switch-track {
+  background: linear-gradient(135deg, var(--blue), var(--blue-deep));
+}
+
+.switch input:checked ~ .switch-track .switch-thumb {
+  transform: translateX(18px);
+}
+
+.switch input:focus-visible ~ .switch-track {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+/* ---------- Base tokens while Liquid Interface is on ----------
+   --glass-alpha, --glass-blur, --glass-tint are set on :root by JS from
+   the three sliders in the 🔍 Display panel (see applyGlassPrefs in
+   script.js) so every rule below reacts live as the person drags them —
+   nothing here is a fixed look. --glass-alpha / --glass-tint are
+   percentages, used directly as rgba() alpha values and as color-mix()
+   weights (mixing a color with transparent = translucency, mixing a
+   color with white = de-saturated "frosted" tint, the same two knobs
+   Apple's own Liquid Glass exposes). */
+body.bubbly-mode {
+  --radius: 24px;
+}
+
+/* Panels/cards become frosted glass — translucent, blurred, with a thin
+   bright edge so they read as "glass" sitting above the pale blue page
+   background rather than opaque paper. */
+body.bubbly-mode .card,
+body.bubbly-mode .modal-content {
+  background: linear-gradient(180deg,
+    color-mix(in srgb, #fff var(--glass-alpha), transparent),
+    color-mix(in srgb, #fff calc(var(--glass-alpha) - 18%), transparent));
+  backdrop-filter: blur(var(--glass-blur)) saturate(calc(140% + var(--glass-tint) * 0.4));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(calc(140% + var(--glass-tint) * 0.4));
+  border: 1px solid color-mix(in srgb, #fff calc(var(--glass-tint) * 0.7 + 15%), transparent);
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 25%), transparent) inset, 0 14px 34px rgba(22, 63, 99, 0.15);
+  border-radius: 26px;
+  transition: background 0.2s ease, backdrop-filter 0.2s ease;
+}
+
+body.bubbly-mode .storage-panel {
+  background: color-mix(in srgb, #fff calc(var(--glass-alpha) + 10%), transparent);
+  backdrop-filter: blur(calc(var(--glass-blur) * 1.1)) saturate(calc(150% + var(--glass-tint) * 0.5));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 1.1)) saturate(calc(150% + var(--glass-tint) * 0.5));
+  border: 1px solid color-mix(in srgb, #fff calc(var(--glass-tint) * 0.7 + 20%), transparent);
+  border-radius: 22px;
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 25%), transparent) inset, 0 16px 34px rgba(22, 63, 99, 0.2);
+  transition: background 0.2s ease, backdrop-filter 0.2s ease;
+}
+
+/* ---------- Header gets a glossier, deeper-blue glass gradient, tint
+   blends it toward pure color and transparency lets the page glow
+   through it (a real frosted pane, not a flat fill) ---------- */
+body.bubbly-mode .site-header {
+  background: linear-gradient(160deg,
+    color-mix(in srgb, #1c4c78 var(--glass-tint), transparent) 0%,
+    color-mix(in srgb, var(--blue) var(--glass-tint), transparent) 55%,
+    color-mix(in srgb, #4693dd var(--glass-tint), transparent) 100%);
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.6));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.6));
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.4), transparent) inset, 0 8px 26px rgba(16, 41, 66, 0.3);
+  transition: background 0.2s ease, backdrop-filter 0.2s ease;
+}
+
+body.bubbly-mode .storage-toggle-btn {
+  background: linear-gradient(160deg,
+    color-mix(in srgb, #fff calc(var(--glass-tint) * 0.7), transparent),
+    color-mix(in srgb, #fff calc(var(--glass-tint) * 0.15), transparent));
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.5));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.5));
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.7 + 10%), transparent) inset, 0 4px 10px rgba(10, 30, 50, 0.25);
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s ease, box-shadow 0.15s ease;
+}
+
+body.bubbly-mode .storage-toggle-btn:hover {
+  transform: translateY(-1px) scale(1.06);
+}
+
+body.bubbly-mode .storage-toggle-btn:active {
+  transform: scale(0.92);
+}
+
+/* ---------- Buttons: full pill shape, glossy top highlight, springy
+   press feedback, and now genuinely translucent/blurred — the most
+   "Apple Liquid Glass" part of this theme ---------- */
+body.bubbly-mode .btn {
+  border-radius: 999px;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.45)) saturate(150%);
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.45)) saturate(150%);
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.5 + 20%), transparent) inset, 0 6px 16px rgba(22, 63, 99, 0.18);
+  transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, background 0.15s ease, filter 0.15s ease;
+}
+
+/* Soft glossy sheen across the top half of every button — the classic
+   "liquid" highlight, layered on top of whatever gradient the variant
+   below provides. Its strength tracks the tint slider. */
+body.bubbly-mode .btn::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 55% 0;
+  background: linear-gradient(180deg, color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 15%), transparent), transparent);
+  pointer-events: none;
+  z-index: -1;
+}
+
+body.bubbly-mode .btn:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.5 + 25%), transparent) inset, 0 12px 22px rgba(22, 63, 99, 0.24);
+}
+
+body.bubbly-mode .btn:active {
+  transform: scale(0.94);
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.3 + 15%), transparent) inset, 0 3px 8px rgba(22, 63, 99, 0.2);
+}
+
+body.bubbly-mode .btn-primary {
+  background: linear-gradient(160deg,
+    color-mix(in srgb, #62a5e6 var(--glass-alpha), transparent),
+    color-mix(in srgb, var(--blue) var(--glass-alpha), transparent) 55%,
+    color-mix(in srgb, var(--blue-deep) var(--glass-alpha), transparent));
+}
+
+body.bubbly-mode .btn-secondary {
+  background: linear-gradient(160deg,
+    color-mix(in srgb, #fff var(--glass-alpha), transparent),
+    color-mix(in srgb, var(--blue-pale) var(--glass-alpha), transparent));
+  color: var(--blue-deep);
+}
+
+body.bubbly-mode .btn-danger {
+  background: linear-gradient(160deg,
+    color-mix(in srgb, #ffd9d8 var(--glass-alpha), transparent),
+    color-mix(in srgb, #f2b7b5 var(--glass-alpha), transparent));
+}
+
+body.bubbly-mode .btn-ai {
+  background: linear-gradient(160deg,
+    color-mix(in srgb, #c3aef8 var(--glass-alpha), transparent),
+    color-mix(in srgb, var(--ai) var(--glass-alpha), transparent));
+}
+
+body.bubbly-mode .icon-btn {
+  border-radius: 50%;
+  background: linear-gradient(160deg,
+    color-mix(in srgb, #fff var(--glass-alpha), transparent),
+    color-mix(in srgb, var(--blue-pale) var(--glass-alpha), transparent));
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.45)) saturate(150%);
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.45)) saturate(150%);
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 30%), transparent) inset, 0 3px 8px rgba(22, 63, 99, 0.12);
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+body.bubbly-mode .icon-btn:hover {
+  transform: scale(1.08);
+}
+
+body.bubbly-mode .icon-btn:active {
+  transform: scale(0.9);
+}
+
+/* ---------- Inputs: soft rounded "pebble" fields with a gentle inner
+   shadow instead of a hard outline, also glass rather than flat white ---------- */
+body.bubbly-mode input[type="text"],
+body.bubbly-mode input[type="number"],
+body.bubbly-mode input[type="url"],
+body.bubbly-mode input[type="password"],
+body.bubbly-mode textarea,
+body.bubbly-mode select {
+  border-radius: 16px;
+  background: color-mix(in srgb, #fff calc(var(--glass-alpha) + 5%), transparent);
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.4));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.4));
+  border-color: color-mix(in srgb, var(--border) calc(var(--glass-tint) * 0.6 + 40%), transparent);
+  box-shadow: inset 0 1px 4px rgba(22, 63, 99, 0.1);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+body.bubbly-mode input[type="text"]:focus,
+body.bubbly-mode input[type="number"]:focus,
+body.bubbly-mode input[type="url"]:focus,
+body.bubbly-mode input[type="password"]:focus,
+body.bubbly-mode textarea:focus,
+body.bubbly-mode select:focus {
+  background: color-mix(in srgb, #fff calc(var(--glass-alpha) + 25%), transparent);
+  box-shadow: inset 0 1px 4px rgba(22, 63, 99, 0.08), 0 0 0 3px rgba(37, 99, 168, 0.18);
+}
+
+/* ---------- Pills: tags, definition-source labels, entry count ---------- */
+body.bubbly-mode .tag,
+body.bubbly-mode .definition-source {
+  border-radius: 999px;
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.5 + 20%), transparent) inset;
+}
+
+body.bubbly-mode .entry-count {
+  background: color-mix(in srgb, var(--blue-pale) var(--glass-alpha), transparent);
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+}
+
+/* ---------- Definition & image cards: rounder, glassier list items ---------- */
+body.bubbly-mode .definition-card {
+  border-radius: 18px;
+  background: color-mix(in srgb, #fff var(--glass-alpha), transparent);
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.35));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.35));
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 25%), transparent) inset, 0 2px 8px rgba(22, 63, 99, 0.06);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, background 0.2s ease;
+}
+
+body.bubbly-mode .definition-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 25%), transparent) inset, 0 6px 16px rgba(22, 63, 99, 0.1);
+}
+
+body.bubbly-mode .image-card img {
+  border-radius: 18px;
+}
+
+body.bubbly-mode .image-select-checkbox {
+  border-radius: 50%;
+}
+
+/* ---------- Drag/resize handles keep their pill shape but pick up the
+   same glossy sheen so they feel part of the same interface ---------- */
+body.bubbly-mode .drag-handle {
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.5 + 20%), transparent) inset, 0 4px 10px rgba(139, 92, 246, 0.45);
+}
+
+body.bubbly-mode .resize-handle {
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.5 + 20%), transparent) inset, 0 4px 10px rgba(139, 92, 246, 0.45);
+}
+
+/* Respect reduced-motion preferences even inside the springier Liquid
+   theme — the visual style still applies, only the bounce is removed. */
+@media (prefers-reduced-motion: reduce) {
+  body.bubbly-mode .btn,
+  body.bubbly-mode .icon-btn,
+  body.bubbly-mode .storage-toggle-btn,
+  body.bubbly-mode .definition-card,
+  .switch-thumb {
+    transition-duration: 0.01ms !important;
+  }
+}
