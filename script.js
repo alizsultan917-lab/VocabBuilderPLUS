@@ -2494,13 +2494,16 @@ function renderPhoneticPreview(phonetics) {
 
 // Plays the word currently in the add-word form (before it's been saved as
 // an entry), using whatever accent-specific recorded audio the lookup
-// found, a Google Translate voice as a second try, and the browser's own
-// speech synthesis as a last resort. See playAudioChain() for the order.
+// found, then a genuinely accent-matched voice if one exists, Google
+// Translate's voice as a fallback, and the browser's own speech synthesis
+// as a last resort. See playAudioChain() for the full order.
 function playPendingPronunciation(accent) {
   const word = wordInput.value.trim();
   if (!word) return;
-  const audioUrl = normalizeAudioUrl(pendingPhonetics?.[accent]?.audio);
-  playAudioChain(word, accent, audioUrl);
+  const phonetic = pendingPhonetics?.[accent];
+  const audioUrl = normalizeAudioUrl(phonetic?.audio);
+  const speechText = phonetic?.source === "ai" ? cleanRespellingForSpeech(phonetic.text) || word : word;
+  playAudioChain(word, accent, audioUrl, speechText);
 }
 
 // Clicking a <button> normally moves keyboard focus onto that button,
@@ -3321,9 +3324,11 @@ function speakWithBrowserTTS(word, accent) {
 // Google Search (that's an internal, undocumented service) — but Google
 // Translate's spoken-word endpoint is the closest real-time, no-key voice
 // that's actually reachable from a browser. It's unofficial (not a
-// documented API, so it can change or get rate-limited without notice) and
-// speaks one generic voice rather than a true US/UK pair, which is why the
-// accent-tagged recordings from the dictionary lookup are tried first.
+// documented API, so it can change or get rate-limited without notice).
+// Crucially, it has NO accent parameter at all — "tl=en" always returns
+// the exact same single generic voice no matter what accent was asked
+// for, which is why it's no longer tried before a genuinely
+// accent-matched system voice (see playAudioChain below).
 function googleTranslateTtsUrl(word) {
   return `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&q=${encodeURIComponent(word)}&tl=en`;
 }
@@ -3336,32 +3341,65 @@ function tryPlayAudio(url) {
   });
 }
 
+// A Gemini-supplied respelling like "MEER-ee MAHZ DOO..." is meant to be
+// READ, not spoken literally — the hyphens are syllable breaks, not
+// pauses, and a trailing "…" is just the popup preview getting
+// truncated, not part of the word. Strip both before handing it to any
+// speech engine, or it comes out sounding like several separate words
+// with an odd pause where the ellipsis was.
+function cleanRespellingForSpeech(text) {
+  if (!text) return "";
+  return text
+    .replace(/[.…]+$/, "")
+    .replace(/[-–—]/g, " ")
+    .trim();
+}
+
 // Shared playback order for any word: (1) the accent-specific recorded
 // clip from the dictionary lookup, if we have one — most accurate for
-// US-vs-UK; (2) Google Translate's real-time voice endpoint; (3) the
-// browser's own offline speech synthesis, which always works but sounds
-// the most robotic and is the least accent-accurate.
-async function playAudioChain(word, accent, dictionaryAudioUrl) {
+// US-vs-UK, when it exists; (2) a genuinely accent-matched system voice,
+// if this device has one — this is the only remaining option that can
+// actually sound different for "US" vs "UK" on the SAME word/text; (3)
+// Google Translate's real-time voice as a fallback for when no such
+// system voice is installed — it sounds more natural, but since it has
+// no accent parameter, clicking US and UK back-to-back on the same word
+// will sound identical through this option specifically; (4) the
+// browser's default-voice speech synthesis as the final fallback.
+//
+// `speechText` is what actually gets spoken/sent to each engine — pass a
+// value distinct from `word` (e.g. an accent-specific Gemini respelling)
+// to get audibly different US/UK playback even when step (2)'s voice
+// lookup comes up empty and step (3)'s single generic voice is used for
+// both.
+async function playAudioChain(word, accent, dictionaryAudioUrl, speechText = word) {
   if (dictionaryAudioUrl) {
     try {
       await tryPlayAudio(dictionaryAudioUrl);
       return;
     } catch (err) {
-      console.warn(`${accent.toUpperCase()} dictionary clip failed (${err.message}) — trying Google's voice next.`, dictionaryAudioUrl);
+      console.warn(`${accent.toUpperCase()} dictionary clip failed (${err.message}) — trying next option.`, dictionaryAudioUrl);
     }
   }
+
+  if (pickVoice(accent)) {
+    speakWithBrowserTTS(speechText, accent);
+    return;
+  }
+
   try {
-    await tryPlayAudio(googleTranslateTtsUrl(word));
+    await tryPlayAudio(googleTranslateTtsUrl(speechText));
     return;
   } catch (err) {
     console.warn(`Google Translate voice failed (${err.message}) — falling back to on-device speech synthesis.`);
   }
-  speakWithBrowserTTS(word, accent);
+  speakWithBrowserTTS(speechText, accent);
 }
 
 function playPronunciation(entry, accent) {
-  const audioUrl = normalizeAudioUrl(entry.phonetics?.[accent]?.audio);
-  playAudioChain(entry.word, accent, audioUrl);
+  const phonetic = entry.phonetics?.[accent];
+  const audioUrl = normalizeAudioUrl(phonetic?.audio);
+  const speechText = phonetic?.source === "ai" ? cleanRespellingForSpeech(phonetic.text) || entry.word : entry.word;
+  playAudioChain(entry.word, accent, audioUrl, speechText);
 }
 
 /* ---------------------------------------------------------------------
