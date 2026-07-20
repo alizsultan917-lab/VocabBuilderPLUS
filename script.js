@@ -2479,6 +2479,17 @@ function renderImages(list, containerEl, onRemove, onToggle) {
 function renderPhoneticPreview(phonetics) {
   pronUsText.textContent = phonetics?.us?.text || "—";
   pronUkText.textContent = phonetics?.uk?.text || "—";
+
+  // Gemini-supplied respellings are an approximation (no verified IPA,
+  // no confirmed audio) rather than the Free Dictionary API's vetted
+  // data, so flag them with a small visual cue + tooltip instead of
+  // presenting them identically.
+  const usFromAi = phonetics?.us?.source === "ai";
+  const ukFromAi = phonetics?.uk?.source === "ai";
+  pronUsText.classList.toggle("pron-text-ai", usFromAi);
+  pronUkText.classList.toggle("pron-text-ai", ukFromAi);
+  pronUsText.title = usFromAi ? "Phonetic respelling from Gemini (approximate)" : "";
+  pronUkText.title = ukFromAi ? "Phonetic respelling from Gemini (approximate)" : "";
 }
 
 // Plays the word currently in the add-word form (before it's been saved as
@@ -3988,8 +3999,16 @@ function renderRowCells(entry, includeBookColumn) {
   const hasUK = !!entry.phonetics?.uk;
 
   const phoneticLine = [
-    hasUS ? `US ${escapeHtml(entry.phonetics.us.text || "")}` : "",
-    hasUK ? `UK ${escapeHtml(entry.phonetics.uk.text || "")}` : "",
+    hasUS
+      ? `<span class="${entry.phonetics.us.source === "ai" ? "pron-text-ai" : ""}" title="${
+          entry.phonetics.us.source === "ai" ? "Phonetic respelling from Gemini (approximate)" : ""
+        }">US ${escapeHtml(entry.phonetics.us.text || "")}</span>`
+      : "",
+    hasUK
+      ? `<span class="${entry.phonetics.uk.source === "ai" ? "pron-text-ai" : ""}" title="${
+          entry.phonetics.uk.source === "ai" ? "Phonetic respelling from Gemini (approximate)" : ""
+        }">UK ${escapeHtml(entry.phonetics.uk.text || "")}</span>`
+      : "",
   ]
     .filter(Boolean)
     .join(" &nbsp; ");
@@ -4195,11 +4214,13 @@ window.addEventListener("message", (event) => {
 
   try {
     const payload = event.data.payload || {};
-    // content-gemini.js already parses Gemini's strict
-    // "[Definition]|[ImageURL]" reply into these two fields before it
-    // ever leaves the extension — nothing left to split here.
+    // content-gemini.js already parses Gemini's reply into these fields
+    // (DEF: / US: / UK: labeled lines, plus whatever <img> it attached)
+    // before it ever leaves the extension — nothing left to split here.
     const definition = typeof payload.definition === "string" ? payload.definition.trim() : "";
     const imageUrl = typeof payload.imageUrl === "string" ? payload.imageUrl.trim() : "";
+    const usPronunciation = typeof payload.usPronunciation === "string" ? payload.usPronunciation.trim() : "";
+    const ukPronunciation = typeof payload.ukPronunciation === "string" ? payload.ukPronunciation.trim() : "";
     const wordForFallback = wordInput.value.trim();
 
     // Clear any stale pending definitions/images/tags before injecting
@@ -4215,6 +4236,18 @@ window.addEventListener("message", (event) => {
     if (imageUrl) {
       addImageWithFallback(imageUrl, wordForFallback);
     }
+
+    // Gemini can only ever supply the phonetic *text* here, never real
+    // recorded audio — so this is stored with audio: null. Pressing the
+    // 🔊 buttons still works exactly as before: playPendingPronunciation()
+    // falls through to the Google Translate voice / on-device speech
+    // synthesis chain (playAudioChain), which already picks the correct
+    // US/UK accent. This is what makes proper nouns and book-specific
+    // names — which the Free Dictionary API usually has no entry for at
+    // all — show a pronunciation instead of "—".
+    if (usPronunciation) pendingPhonetics.us = { text: usPronunciation, audio: null, source: "ai" };
+    if (ukPronunciation) pendingPhonetics.uk = { text: ukPronunciation, audio: null, source: "ai" };
+    if (usPronunciation || ukPronunciation) renderPhoneticPreview(pendingPhonetics);
 
     // Ready for the person to review/adjust and hit "Add Entry" —
     // fully auto-populated, zero further interaction needed to get here.

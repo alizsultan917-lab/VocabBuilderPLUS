@@ -942,6 +942,18 @@ textarea {
   white-space: nowrap;
 }
 
+/* Gemini-supplied phonetic respelling (approximate, no verified audio) —
+   distinguished from Free-Dictionary-API text with the same purple used
+   elsewhere for Gemini branding (see .btn-gemini). */
+.pron-text-ai {
+  color: var(--purple);
+  font-weight: 600;
+}
+.pron-text-ai::after {
+  content: " ✨";
+  font-style: normal;
+}
+
 .pron-play-btn {
   flex-shrink: 0;
 }

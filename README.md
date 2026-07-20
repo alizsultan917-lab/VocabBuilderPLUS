@@ -9,28 +9,48 @@
   literary lookup prompt into the chat box on request, then watches
   each response with a `MutationObserver` and — as soon as it detects
   the reply has finished streaming — automatically parses and scrapes
-  it. **Fully automated: no "Save to Register" button, no click.**
+  it: a definition, an attached image, and a US + UK phonetic
+  respelling. **Fully automated: no "Save to Register" button, no
+  click.**
 - `bridge-app.js` — runs on your app's page. Pure relay: turns
   `chrome.runtime` messages into `window.postMessage` and back, so your
   app's own `script.js` never has to touch the `chrome.*` API.
 
 ## The automated flow
 1. You click **"Search Gemini"** in your app (or it opens a new tab).
-2. `content-gemini.js` types this exact prompt into Gemini's chat box
-   and submits it:
-   > Context: Literary book. Provide ONLY: 1. A 2-line definition of
-   > `[word]` in this context. 2. A direct URL to a representative
-   > image. No conversational filler or formatting. Format:
-   > `[Definition]|[ImageURL]`.
+2. `content-gemini.js` types this prompt into Gemini's chat box and
+   submits it:
+   > Context: the book "[book title]". For the word/name "[word]",
+   > reply with EXACTLY these three labeled lines and nothing else —
+   > no greeting, no extra commentary:
+   > `DEF: <a 2-line definition of [word] in this context, plain text, no formatting>`
+   > `US: <the American-English pronunciation of [word] as a simple hyphenated phonetic respelling, stressed syllable in CAPITALS — e.g. "ih-FEM-er-uhl">`
+   > `UK: <the British-English pronunciation of [word], same respelling style>`
+   > Then attach one representative image.
 3. A `MutationObserver` watches the new response bubble. Once the DOM
    inside it stops changing for ~1.5s (and no "Stop generating" control
    is still visible), the reply is treated as finished.
-4. The bubble's text is scraped and split on `|` into `definition` and
-   `imageUrl`, then sent instantly to `background.js`, which relays it
-   to your app tab — no click, no popup, no manual copy/paste.
+4. The bubble is scraped: the real `<img>` Gemini attached (never a
+   typed-out URL — see "Known fragility" below for why), plus the
+   `DEF:` / `US:` / `UK:` lines parsed out of the text. All four pieces
+   are sent instantly to `background.js`, which relays them to your app
+   tab — no click, no popup, no manual copy/paste.
 5. Your app's existing bridge listener (in `script.js`) auto-populates
-   the pending definition + image fields, ready for you to review and
-   hit **Add Entry**.
+   the pending definition, image, and Pronunciation panel fields, ready
+   for you to review and hit **Add Entry**.
+
+### Pronunciation, specifically
+The Free Dictionary API that `script.js` normally uses for phonetics has
+no entries at all for most proper nouns — character names, place names,
+invented words — which is why the Pronunciation panel used to just show
+"—" for those. Gemini fills that gap: it can't produce real recorded
+audio, only text, so the `US:`/`UK:` respellings it returns are stored
+as text-only phonetics (no audio clip). Pressing the 🔊 buttons still
+works exactly as before — it falls through the app's existing
+Google-Translate-voice → on-device-speech-synthesis chain, which already
+picks the correct US/UK accent for whichever word is in the form. If a
+word *does* have real dictionary audio, that's left alone — Gemini's
+text only fills in the accents that were otherwise empty.
 
 ## Setup
 1. **Edit `manifest.json`.** The second `content_scripts` entry (`bridge-app.js`)
@@ -67,9 +87,13 @@ selector-independent (it just waits for the DOM to go quiet), so it's
 the most resilient part of the pipeline and shouldn't need updating
 even when Google reshuffles class names.
 
-If Gemini's reply doesn't contain a `|`, the extension logs a warning
-to the Gemini tab's console and skips relaying it (rather than sending
-garbage into your form) — check there first if entries stop arriving.
+If Gemini's reply doesn't include the `DEF:`/`US:`/`UK:` labels at all
+(e.g. it ignored the format, or you edited the prompt in the popup and
+removed them), the parser degrades gracefully — it treats the whole
+reply as the definition and simply leaves the Pronunciation panel
+empty, rather than sending garbage into your form. Check the Gemini
+tab's console for the logged `definition` / `US` / `UK` values if
+pronunciations stop arriving even though definitions still work.
 
 ## ⌨️ Customizable Keyboard Shortcuts (app-side)
 
