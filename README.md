@@ -20,19 +20,21 @@
 1. You click **"Search Gemini"** in your app (or it opens a new tab).
 2. `content-gemini.js` types this prompt into Gemini's chat box and
    submits it:
-   > Context: the book "[book title]". For the word/name "[word]",
-   > reply with EXACTLY these three labeled lines and nothing else —
-   > no greeting, no extra commentary:
-   > `DEF: <a 2-line definition of [word] in this context, plain text, no formatting>`
-   > `US: <the American-English pronunciation of [word] as a simple hyphenated phonetic respelling, stressed syllable in CAPITALS — e.g. "ih-FEM-er-uhl">`
-   > `UK: <the British-English pronunciation of [word], same respelling style>`
-   > Then attach one representative image.
+   > Context: the book "[book title]". Reply with ONE plain-text line,
+   > no markdown, no labels: a 2-line definition of "[word]" in this
+   > context, then "|", then [word]'s US pronunciation as a
+   > natural-sounding phonetic respelling (real American accent — e.g.
+   > pronounced "r", stressed syllable in CAPS, no IPA symbols), then
+   > "|", then [word]'s UK pronunciation the same way (real British
+   > accent — e.g. dropped final "r"). Then attach one representative
+   > image.
 3. A `MutationObserver` watches the new response bubble. Once the DOM
    inside it stops changing for ~1.5s (and no "Stop generating" control
    is still visible), the reply is treated as finished.
 4. The bubble is scraped: the real `<img>` Gemini attached (never a
-   typed-out URL — see "Known fragility" below for why), plus the
-   `DEF:` / `US:` / `UK:` lines parsed out of the text. All four pieces
+   typed-out URL — see "Known fragility" below for why), plus the text,
+   which `parseGeminiReply()` flattens and splits on `|` into
+   definition / US pronunciation / UK pronunciation. All four pieces
    are sent instantly to `background.js`, which relays them to your app
    tab — no click, no popup, no manual copy/paste.
 5. Your app's existing bridge listener (in `script.js`) auto-populates
@@ -44,13 +46,44 @@ The Free Dictionary API that `script.js` normally uses for phonetics has
 no entries at all for most proper nouns — character names, place names,
 invented words — which is why the Pronunciation panel used to just show
 "—" for those. Gemini fills that gap: it can't produce real recorded
-audio, only text, so the `US:`/`UK:` respellings it returns are stored
-as text-only phonetics (no audio clip). Pressing the 🔊 buttons still
-works exactly as before — it falls through the app's existing
-Google-Translate-voice → on-device-speech-synthesis chain, which already
-picks the correct US/UK accent for whichever word is in the form. If a
-word *does* have real dictionary audio, that's left alone — Gemini's
-text only fills in the accents that were otherwise empty.
+audio, only text, so the US/UK respellings it returns are stored as
+text-only phonetics (no audio clip).
+
+Pressing the 🔊 buttons plays, in order: (1) real recorded dictionary
+audio, if there is any; (2) a genuinely accent-matched system voice, if
+this device has one installed (e.g. Chrome's built-in "Google UK English
+Female" / "Google US English", preferred over lower-quality OS voices
+when both are present) — this speaks the **actual word**, letting the
+voice's own native pronunciation rules produce the accent, the same way
+Google's own pronunciation widget does it; (3) Google Translate's voice
+as a fallback for devices with no accent-specific system voice, which
+sounds natural but has no accent parameter at all, so it reads US and UK
+identically; (4) the browser's default-voice speech synthesis as a last
+resort. Only steps (3) and (4) fall back to speaking Gemini's respelling
+text instead of the plain word (via `cleanRespellingForSpeech()` in
+`script.js`, which strips syllable hyphens and any trailing punctuation)
+— since neither carries real accent information otherwise, reading
+different-looking text is the only way left to make "US" and "UK" sound
+different from each other. Feeding a respelling like "lai-luhk" into a
+real accent voice instead would make things *worse*, not better — a TTS
+engine reads it literally and mangles it, since it isn't an actual word
+— which is why step (2) always uses the real word. That's also why the
+prompt still asks for real accent-distinguishing pronunciation (a
+pronounced vs. dropped "r", vowel shifts) instead of just any
+different-looking spelling: it keeps the on-screen Pronunciation panel
+accurate and gives steps (3)/(4) their best shot when no proper voice is
+installed. If a word *does* have real dictionary audio, that's left
+alone — Gemini's text only fills in the accents that were otherwise
+empty.
+
+An earlier version of this asked Gemini for three separate labeled lines
+(`DEF:` / `US:` / `UK:`) instead of one pipe-delimited line. That turned
+out to be unreliable: Gemini's markdown renderer frequently puts each
+label on its own line/paragraph with the content on the *next* line,
+which breaks a same-line "label: content" parser. The single-line `|`
+format sidesteps that entirely — whitespace gets flattened before
+splitting, so it doesn't matter how the reply gets wrapped or
+paragraphed.
 
 ## Setup
 1. **Edit `manifest.json`.** The second `content_scripts` entry (`bridge-app.js`)
@@ -87,13 +120,13 @@ selector-independent (it just waits for the DOM to go quiet), so it's
 the most resilient part of the pipeline and shouldn't need updating
 even when Google reshuffles class names.
 
-If Gemini's reply doesn't include the `DEF:`/`US:`/`UK:` labels at all
-(e.g. it ignored the format, or you edited the prompt in the popup and
-removed them), the parser degrades gracefully — it treats the whole
-reply as the definition and simply leaves the Pronunciation panel
-empty, rather than sending garbage into your form. Check the Gemini
-tab's console for the logged `definition` / `US` / `UK` values if
-pronunciations stop arriving even though definitions still work.
+If Gemini's reply doesn't contain any `|` at all (e.g. it ignored the
+format, or you edited the prompt in the popup and removed the pipes),
+the parser degrades gracefully — it treats the whole reply as the
+definition and simply leaves the Pronunciation panel empty, rather than
+sending garbage into your form. Check the Gemini tab's console for the
+logged `definition` / `US` / `UK` values if pronunciations stop arriving
+even though definitions still work.
 
 ## ⌨️ Customizable Keyboard Shortcuts (app-side)
 
