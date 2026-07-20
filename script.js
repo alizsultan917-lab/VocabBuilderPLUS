@@ -2502,8 +2502,8 @@ function playPendingPronunciation(accent) {
   if (!word) return;
   const phonetic = pendingPhonetics?.[accent];
   const audioUrl = normalizeAudioUrl(phonetic?.audio);
-  const speechText = phonetic?.source === "ai" ? cleanRespellingForSpeech(phonetic.text) || word : word;
-  playAudioChain(word, accent, audioUrl, speechText);
+  const respelling = phonetic?.source === "ai" ? cleanRespellingForSpeech(phonetic.text) : "";
+  playAudioChain(word, accent, audioUrl, respelling);
 }
 
 // Clicking a <button> normally moves keyboard focus onto that button,
@@ -3269,21 +3269,33 @@ if ("speechSynthesis" in window) {
   window.speechSynthesis.onvoiceschanged = loadVoices;
 }
 
+// Given several voices that all technically match, prefer Chrome's own
+// "Google UK English Female/Male" / "Google US English" voices — these
+// are the same higher-quality, server-rendered voices behind Google's
+// own search pronunciation widget, and sound far more natural/accurate
+// than most OS-bundled voices (Microsoft's David/Zira, etc). Only
+// matters when >1 candidate shares a locale; falls back to the first
+// candidate otherwise.
+function preferGoogleVoice(candidates) {
+  if (!candidates.length) return null;
+  return candidates.find((v) => v.name.toLowerCase().includes("google")) || candidates[0];
+}
+
 function pickVoice(accent) {
   const isUK = accent === "uk";
   const targetLang = isUK ? "en-GB" : "en-US";
 
-  // Exact locale match first.
-  let voice = availableVoices.find((v) => v.lang === targetLang);
-  if (voice) return voice;
+  // Exact locale match first — prefer a "Google ..." voice among them.
+  const exactMatches = availableVoices.filter((v) => v.lang === targetLang);
+  if (exactMatches.length) return preferGoogleVoice(exactMatches);
 
   // Some browsers/OSes expose accent-appropriate voices under names
   // rather than a clean lang tag — match on those before giving up.
   const nameHints = isUK
     ? ["uk english", "british", "daniel", "kate", "hazel", "arthur", "english (united kingdom)"]
     : ["us english", "american", "samantha", "alex", "zira", "aria", "david", "english (united states)"];
-  voice = availableVoices.find((v) => nameHints.some((hint) => v.name.toLowerCase().includes(hint)));
-  if (voice) return voice;
+  const nameMatches = availableVoices.filter((v) => nameHints.some((hint) => v.name.toLowerCase().includes(hint)));
+  if (nameMatches.length) return preferGoogleVoice(nameMatches);
 
   // Broader "any English voice" fallback — but explicitly excluding the
   // OTHER accent's exact locale. Without this exclusion, asking for
@@ -3291,18 +3303,17 @@ function pickVoice(accent) {
   // hand back that en-US voice, making the "British" button sound
   // identical to "American" (which looked like British "not working").
   const otherLang = isUK ? "en-US" : "en-GB";
-  voice = availableVoices.find((v) => v.lang?.startsWith("en") && v.lang !== otherLang);
-  return voice || null;
+  const broadMatches = availableVoices.filter((v) => v.lang?.startsWith("en") && v.lang !== otherLang);
+  return preferGoogleVoice(broadMatches);
 }
 
-function speakWithBrowserTTS(word, accent) {
+function speakWithBrowserTTS(word, accent, voice = pickVoice(accent)) {
   if (!("speechSynthesis" in window)) {
     alert("Sorry, your browser doesn't support speech synthesis.");
     return;
   }
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(word);
-  const voice = pickVoice(accent);
   if (voice) {
     utterance.voice = voice;
     utterance.lang = voice.lang;
@@ -3366,12 +3377,23 @@ function cleanRespellingForSpeech(text) {
 // will sound identical through this option specifically; (4) the
 // browser's default-voice speech synthesis as the final fallback.
 //
-// `speechText` is what actually gets spoken/sent to each engine — pass a
-// value distinct from `word` (e.g. an accent-specific Gemini respelling)
-// to get audibly different US/UK playback even when step (2)'s voice
-// lookup comes up empty and step (3)'s single generic voice is used for
-// both.
-async function playAudioChain(word, accent, dictionaryAudioUrl, speechText = word) {
+// IMPORTANT: whenever a real accent-matched voice is available (step 2),
+// it speaks the REAL WORD, not the Gemini respelling. A phonetic
+// respelling like "lai-luhk" is meant to be READ by a person, not fed
+// literally into a TTS engine — most engines mangle it (it isn't a real
+// word), which is why AI-sourced pronunciations used to sound worse than
+// the dictionary clips even when a proper en-GB/en-US voice was
+// installed. A native voice given the actual word and the correct
+// lang/accent produces a far more accurate result on its own — that's
+// exactly how Google's own pronunciation widget does it.
+//
+// The respelling only gets used as a last resort: Google Translate's
+// endpoint (step 3) and the browser's default voice (step 4) don't carry
+// any accent information, so without it "US" and "UK" would render
+// identically. `respellingText`, if supplied, is what's spoken there
+// instead, purely to make the two buttons sound different from each
+// other when nothing better is available.
+async function playAudioChain(word, accent, dictionaryAudioUrl, respellingText = "") {
   if (dictionaryAudioUrl) {
     try {
       await tryPlayAudio(dictionaryAudioUrl);
@@ -3381,25 +3403,27 @@ async function playAudioChain(word, accent, dictionaryAudioUrl, speechText = wor
     }
   }
 
-  if (pickVoice(accent)) {
-    speakWithBrowserTTS(speechText, accent);
+  const matchedVoice = pickVoice(accent);
+  if (matchedVoice) {
+    speakWithBrowserTTS(word, accent, matchedVoice);
     return;
   }
 
+  const fallbackText = respellingText || word;
   try {
-    await tryPlayAudio(googleTranslateTtsUrl(speechText));
+    await tryPlayAudio(googleTranslateTtsUrl(fallbackText));
     return;
   } catch (err) {
     console.warn(`Google Translate voice failed (${err.message}) — falling back to on-device speech synthesis.`);
   }
-  speakWithBrowserTTS(speechText, accent);
+  speakWithBrowserTTS(fallbackText, accent);
 }
 
 function playPronunciation(entry, accent) {
   const phonetic = entry.phonetics?.[accent];
   const audioUrl = normalizeAudioUrl(phonetic?.audio);
-  const speechText = phonetic?.source === "ai" ? cleanRespellingForSpeech(phonetic.text) || entry.word : entry.word;
-  playAudioChain(entry.word, accent, audioUrl, speechText);
+  const respelling = phonetic?.source === "ai" ? cleanRespellingForSpeech(phonetic.text) : "";
+  playAudioChain(entry.word, accent, audioUrl, respelling);
 }
 
 /* ---------------------------------------------------------------------
