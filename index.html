@@ -234,7 +234,7 @@
             </div>
             <div class="form-group form-group-narrow">
               <label for="page-input">Page</label>
-              <input type="number" id="page-input" required min="1" placeholder="42">
+              <input type="text" id="page-input" required inputmode="numeric" placeholder="42 or 450-470" title="A single page (42) or a page range (450-470)">
             </div>
           </div>
 
@@ -335,7 +335,7 @@
       </div>
       <div class="filter-field filter-field-narrow">
         <label for="page-filter">Page</label>
-        <input type="number" id="page-filter" min="1" placeholder="Any">
+        <input type="text" id="page-filter" inputmode="numeric" placeholder="Any" title="Enter a page number — matches an exact page, or falls back to any range that contains it">
       </div>
       <div class="filter-field filter-field-grow">
         <label for="search-input">Search word / definition</label>
@@ -414,7 +414,7 @@
       </div>
       <div class="form-group form-group-narrow">
         <label for="edit-page">Page</label>
-        <input type="number" id="edit-page" min="1">
+        <input type="text" id="edit-page" inputmode="numeric" title="A single page (42) or a page range (450-470)">
       </div>
     </div>
 
