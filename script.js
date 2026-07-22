@@ -160,7 +160,10 @@ let usingCloudStorage = false; // true once Drive is connected and a token has b
 /* ---------------------------------------------------------------------
    STATE
    entry = {
-     id, word, bookTitle, pageNo, timestamp,
+     id, word, bookTitle, pageStart, pageEnd, timestamp,
+     // pageStart === pageEnd for a plain single-page entry; pageEnd > pageStart
+     // for a real page range (e.g. "450-470"). Legacy entries saved under the
+     // old single `pageNo` field are migrated to this shape on load.
      seq,                                    // monotonic "order first entered" index
      definitions: [{ id, text, source }],    // source: dictionary | context:<book> | ai | manual
      images: [{ id, url, source }],          // source: auto | ai | manual
@@ -1398,6 +1401,18 @@ async function loadEntries() {
     }
   });
 
+  // MIGRATION 3: entries saved before page ranges existed have a single
+  // `pageNo` field. Convert those to pageStart === pageEnd === pageNo so
+  // every downstream consumer only ever has to deal with a range.
+  entries.forEach((e) => {
+    if (typeof e.pageStart !== "number" && typeof e.pageNo === "number") {
+      e.pageStart = e.pageNo;
+      e.pageEnd = e.pageNo;
+      delete e.pageNo;
+      needsMigration = true;
+    }
+  });
+
   // Backfill `seq` for entries saved before this field existed, so
   // "order first entered" stays stable even across same-millisecond
   // timestamp collisions or future re-imports. Order is derived from
@@ -1964,6 +1979,64 @@ function generateId() {
 function normalizeAudioUrl(url) {
   if (!url) return null;
   return url.startsWith("//") ? `https:${url}` : url;
+}
+
+/* ---------------------------------------------------------------------
+   PAGE RANGES
+   Entries carry `pageStart`/`pageEnd` rather than a single `pageNo`, so a
+   word can be tagged to a whole page span (e.g. "450-470") as well as a
+   single page. Single pages are stored uniformly as pageStart === pageEnd,
+   so every other part of the app (sorting, filtering, export) only ever
+   has to reason about a range.
+--------------------------------------------------------------------- */
+
+// Accepts "450", "450-470", "450–470" (en dash), "450—470" (em dash), or
+// "450 to 470". Returns { pageStart, pageEnd } or null if the text isn't a
+// valid page/range (non-numeric, non-positive, or start > end).
+function parsePageRangeInput(raw) {
+  const text = String(raw ?? "").trim();
+  if (!text) return null;
+
+  const rangeMatch = text.match(/^(\d+)\s*(?:-|–|—|to)\s*(\d+)$/i);
+  if (rangeMatch) {
+    const pageStart = parseInt(rangeMatch[1], 10);
+    const pageEnd = parseInt(rangeMatch[2], 10);
+    if (!Number.isInteger(pageStart) || !Number.isInteger(pageEnd)) return null;
+    if (pageStart < 1 || pageEnd < 1) return null;
+    if (pageStart > pageEnd) return null;
+    return { pageStart, pageEnd };
+  }
+
+  if (/^\d+$/.test(text)) {
+    const pageStart = parseInt(text, 10);
+    if (pageStart < 1) return null;
+    return { pageStart, pageEnd: pageStart };
+  }
+
+  return null;
+}
+
+// Human-readable label for a page range: "Page 42" for a single page,
+// "Page 450-470" for a real range.
+function formatPageLabel(pageStart, pageEnd) {
+  return pageStart === pageEnd ? `Page ${pageStart}` : `Page ${pageStart}-${pageEnd}`;
+}
+
+// Round-trips a range back into the compact text a person would type
+// ("42" or "450-470"), used to prefill the Page input when editing.
+function formatPageRangeText(pageStart, pageEnd) {
+  return pageStart === pageEnd ? String(pageStart) : `${pageStart}-${pageEnd}`;
+}
+
+// Shared ordering used everywhere entries are processed for display,
+// JSON export, or PDF export: Book (alphabetical) → Page start (ascending)
+// → seq (the order the word was first entered). This guarantees that if
+// "Word A" was added before "Word B" on the same page/range, "Word A"
+// always appears first, regardless of any later edits.
+function compareEntriesForExport(a, b) {
+  if (a.bookTitle !== b.bookTitle) return a.bookTitle.localeCompare(b.bookTitle);
+  if (a.pageStart !== b.pageStart) return a.pageStart - b.pageStart;
+  return (a.seq ?? a.timestamp) - (b.seq ?? b.timestamp);
 }
 
 /* ---------------------------------------------------------------------
@@ -3046,7 +3119,7 @@ addImageBtn.addEventListener("click", () => {
 function addEntryFromForm() {
   const word = wordInput.value.trim();
   const bookTitle = bookInput.value.trim();
-  const pageNo = parseInt(pageInput.value, 10);
+  const pageRange = parsePageRangeInput(pageInput.value);
 
   if (!word) {
     alert("Please enter a word before adding.");
@@ -3058,8 +3131,8 @@ function addEntryFromForm() {
     bookInput.focus();
     return;
   }
-  if (!pageNo || pageNo < 1) {
-    alert("Please enter a valid page number before adding.");
+  if (!pageRange) {
+    alert("Please enter a valid page number or page range (e.g. 42 or 450-470) before adding.");
     pageInput.focus();
     return;
   }
@@ -3084,7 +3157,8 @@ function addEntryFromForm() {
     id: generateId(),
     word,
     bookTitle,
-    pageNo,
+    pageStart: pageRange.pageStart,
+    pageEnd: pageRange.pageEnd,
     timestamp: Date.now(),
     seq: nextSeq++, // guarantees stable "order first entered" for PDF/JSON export
     systemDefinitions: definitionsToSave.filter((d) => bucketOf(d.source) === "system"),
@@ -3098,7 +3172,7 @@ function addEntryFromForm() {
 
   entries.push(entry);
   saveEntries();
-  saveLastBookPage(bookTitle, pageNo);
+  saveLastBookPage(bookTitle, formatPageRangeText(pageRange.pageStart, pageRange.pageEnd));
 
   // Reset only the word/definitions/images — keep Book & Page as-is.
   wordInput.value = "";
@@ -3145,7 +3219,7 @@ function openEditModal(id) {
   editingId = id;
   editWord.value = entry.word;
   editBook.value = entry.bookTitle;
-  editPage.value = entry.pageNo;
+  editPage.value = formatPageRangeText(entry.pageStart, entry.pageEnd);
 
   // Definitions/images already saved to an entry are, by definition,
   // ones the person chose to keep — so they stay ticked in the editor.
@@ -3251,10 +3325,10 @@ saveEditBtn.addEventListener("click", () => {
 
   const newWord = editWord.value.trim();
   const newBook = editBook.value.trim();
-  const newPage = parseInt(editPage.value, 10);
+  const newPageRange = parsePageRangeInput(editPage.value);
 
-  if (!newWord || !newBook || !newPage) {
-    alert("Word, Book Title, and Page No. cannot be empty.");
+  if (!newWord || !newBook || !newPageRange) {
+    alert("Word, Book Title, and Page No. (e.g. 42 or 450-470) cannot be empty or invalid.");
     return;
   }
 
@@ -3268,7 +3342,8 @@ saveEditBtn.addEventListener("click", () => {
 
   entry.word = newWord;
   entry.bookTitle = newBook;
-  entry.pageNo = newPage;
+  entry.pageStart = newPageRange.pageStart;
+  entry.pageEnd = newPageRange.pageEnd;
   entry.systemDefinitions = definitionsToSave.filter((d) => bucketOf(d.source) === "system");
   entry.aiDefinitions = definitionsToSave.filter((d) => bucketOf(d.source) === "ai");
   entry.manualDefinitions = definitionsToSave.filter((d) => bucketOf(d.source) === "manual");
@@ -3496,33 +3571,66 @@ searchInput.addEventListener("input", debounce(renderTable, 200));
 /* ---------------------------------------------------------------------
    EXPORT / IMPORT
 --------------------------------------------------------------------- */
+// Groups an already-sorted flat entry list into the nested
+// book → page-range → words tree used for JSON export. Page Ranges act as
+// "chapters" and Words act as "sub-chapters", per the export schema.
+function buildBooksTree(flatEntries) {
+  const byBook = new Map();
+  flatEntries.forEach((e) => {
+    if (!byBook.has(e.bookTitle)) byBook.set(e.bookTitle, new Map());
+    const byPage = byBook.get(e.bookTitle);
+    const pageKey = `${e.pageStart}-${e.pageEnd}`;
+    if (!byPage.has(pageKey)) {
+      byPage.set(pageKey, { pageLabel: formatPageLabel(e.pageStart, e.pageEnd), pageStart: e.pageStart, pageEnd: e.pageEnd, words: [] });
+    }
+    byPage.get(pageKey).words.push({
+      word: e.word,
+      definitions: e.definitions,
+      phonetics: e.phonetics,
+      images: e.images,
+      seq: e.seq,
+    });
+  });
+
+  return [...byBook.entries()].map(([bookTitle, byPage]) => ({
+    bookTitle,
+    pages: [...byPage.values()],
+  }));
+}
+
 function buildExportPayload() {
   const selectedBook = bookFilter.value;
   const relevant = selectedBook ? entries.filter((e) => e.bookTitle === selectedBook) : entries.slice();
 
-  // Book (alphabetical) → Page (ascending) → seq (the order you first
-  // entered the word) — this ordering drives both JSON and PDF export.
-  const sorted = relevant.slice().sort((a, b) => {
-    if (a.bookTitle !== b.bookTitle) return a.bookTitle.localeCompare(b.bookTitle);
-    if (a.pageNo !== b.pageNo) return a.pageNo - b.pageNo;
-    return (a.seq ?? a.timestamp) - (b.seq ?? b.timestamp);
+  // Book (alphabetical) → Page start (ascending) → seq (the order you
+  // first entered the word) — this ordering drives both JSON and PDF
+  // export, and matches the strict sequencing used across the app's UI.
+  const sorted = relevant.slice().sort(compareEntriesForExport);
+
+  const flatEntries = sorted.map((e) => {
+    const { definitions, images } = getFilteredData(e);
+    return {
+      word: e.word,
+      bookTitle: e.bookTitle,
+      pageStart: e.pageStart,
+      pageEnd: e.pageEnd,
+      pageLabel: formatPageLabel(e.pageStart, e.pageEnd),
+      seq: e.seq,
+      definitions: definitions.map((d) => ({ text: d.text, source: d.source })),
+      phonetics: e.phonetics,
+      images: images.map((img) => img.url),
+    };
   });
 
   return {
     exportedAt: new Date().toISOString(),
     scope: selectedBook || "All Books",
-    entries: sorted.map((e) => {
-      const { definitions, images } = getFilteredData(e);
-      return {
-        word: e.word,
-        bookTitle: e.bookTitle,
-        pageNo: e.pageNo,
-        seq: e.seq,
-        definitions: definitions.map((d) => ({ text: d.text, source: d.source })),
-        phonetics: e.phonetics,
-        images: images.map((img) => img.url),
-      };
-    }),
+    // Flat, already-sorted list — kept for the PDF builder, which walks
+    // entries in this exact order rather than re-deriving the tree.
+    entries: flatEntries,
+    // Nested tree — Page Ranges as chapters, Words as sub-chapters —
+    // this is the shape written out to the JSON export file.
+    books: buildBooksTree(flatEntries),
   };
 }
 
@@ -3599,7 +3707,15 @@ exportJsonBtn.addEventListener("click", async () => {
   const chosenName = window.prompt("Name this JSON file:", defaultName);
   if (chosenName === null) return; // cancelled
 
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  // The file on disk is the nested tree (Page Ranges as chapters, Words as
+  // sub-chapters) plus export metadata — the flat `entries` list on
+  // `payload` is an internal shape used only to drive the PDF builder.
+  const jsonOutput = {
+    exportedAt: payload.exportedAt,
+    scope: payload.scope,
+    books: payload.books,
+  };
+  const blob = new Blob([JSON.stringify(jsonOutput, null, 2)], { type: "application/json" });
   await deliverExport(blob, `${chosenName || defaultName}.json`, "application/json");
 });
 
@@ -3733,6 +3849,19 @@ async function buildPdfBlob(payload) {
   doc.setTextColor(...PDF_COLOR.ink);
   y += 22;
 
+  // ---- PDF outline / bookmarks -----------------------------------------
+  // Mirrors the exported JSON tree (books → pages → words) as a navigable
+  // sidebar outline, the same way a textbook PDF lists chapters and
+  // sub-chapters: each Page (or page range) is a top-level bookmark, and
+  // each Word on it is a nested sub-bookmark that jumps straight to the
+  // page it's printed on. Not every jsPDF build ships the outline module,
+  // so this degrades gracefully — the PDF still exports fine without a
+  // sidebar if `doc.outline` isn't available.
+  const supportsOutline = !!(doc.outline && typeof doc.outline.add === "function");
+  function currentPdfPageNumber() {
+    return doc.internal.getCurrentPageInfo().pageNumber;
+  }
+
   // Group entries by book, then by page — entries within each page are
   // already sorted in "first entered" order by buildExportPayload().
   const byBook = new Map();
@@ -3743,6 +3872,7 @@ async function buildPdfBlob(payload) {
 
   for (const [book, bookEntries] of byBook) {
     ensureSpace(28);
+    const bookNode = supportsOutline ? doc.outline.add(null, book, { pageNumber: currentPdfPageNumber() }) : null;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(15);
     doc.setTextColor(...PDF_COLOR.blue);
@@ -3756,24 +3886,31 @@ async function buildPdfBlob(payload) {
 
     const byPage = new Map();
     bookEntries.forEach((e) => {
-      if (!byPage.has(e.pageNo)) byPage.set(e.pageNo, []);
-      byPage.get(e.pageNo).push(e);
+      const pageKey = `${e.pageStart}-${e.pageEnd}`;
+      if (!byPage.has(pageKey)) byPage.set(pageKey, { label: e.pageLabel, entries: [] });
+      byPage.get(pageKey).entries.push(e);
     });
 
-    for (const [page, pageEntries] of byPage) {
+    for (const { label: pageLabel, entries: pageEntries } of byPage.values()) {
       // Page-group band, mirrors the on-screen grouped table.
       ensureSpace(24);
+      const pageNode = supportsOutline
+        ? doc.outline.add(bookNode, pageLabel, { pageNumber: currentPdfPageNumber() })
+        : null;
       doc.setFillColor(...PDF_COLOR.blueBand);
       doc.rect(margin, y - 12, maxWidth, 19, "F");
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
       doc.setTextColor(...PDF_COLOR.blue);
-      doc.text(`Page ${page}`, margin + 8, y + 1);
+      doc.text(pageLabel, margin + 8, y + 1);
       doc.setTextColor(...PDF_COLOR.ink);
       y += 22;
 
       for (const entry of pageEntries) {
         ensureSpace(20);
+        if (supportsOutline) {
+          doc.outline.add(pageNode, entry.word, { pageNumber: currentPdfPageNumber() });
+        }
         // Word — set in blue to stand out from the body text.
         doc.setFont("helvetica", "bold");
         doc.setFontSize(13);
@@ -3929,17 +4066,46 @@ importFileInput.addEventListener("change", () => {
   reader.onload = () => {
     try {
       const parsed = JSON.parse(reader.result);
-      const incoming = Array.isArray(parsed?.entries) ? parsed.entries : [];
+
+      // Current export shape is a nested books → pages → words tree;
+      // flatten it back into one raw-entry-per-word list. Older flat
+      // exports (an `entries` array) are still accepted for compatibility.
+      let incoming = [];
+      if (Array.isArray(parsed?.books)) {
+        parsed.books.forEach((book) => {
+          (book.pages || []).forEach((page) => {
+            (page.words || []).forEach((w) => {
+              incoming.push({
+                word: w.word,
+                bookTitle: book.bookTitle,
+                pageStart: page.pageStart,
+                pageEnd: page.pageEnd,
+                definitions: w.definitions,
+                phonetics: w.phonetics,
+                images: w.images,
+              });
+            });
+          });
+        });
+      } else if (Array.isArray(parsed?.entries)) {
+        incoming = parsed.entries;
+      }
+
       if (incoming.length === 0) {
         alert("This file doesn't contain any recognizable entries.");
         return;
       }
 
-      const existingKeys = new Set(entries.map((e) => `${e.word}|${e.bookTitle}|${e.pageNo}`));
+      const existingKeys = new Set(entries.map((e) => `${e.word}|${e.bookTitle}|${e.pageStart}-${e.pageEnd}`));
       let added = 0;
 
       incoming.forEach((raw) => {
-        const key = `${raw.word}|${raw.bookTitle}|${raw.pageNo}`;
+        // Accept both the current range shape and legacy single-page exports.
+        const pageStart = typeof raw.pageStart === "number" ? raw.pageStart : raw.pageNo;
+        const pageEnd = typeof raw.pageEnd === "number" ? raw.pageEnd : raw.pageNo;
+        if (typeof pageStart !== "number" || typeof pageEnd !== "number") return;
+
+        const key = `${raw.word}|${raw.bookTitle}|${pageStart}-${pageEnd}`;
         if (existingKeys.has(key)) return; // skip duplicates
         existingKeys.add(key);
 
@@ -3954,7 +4120,8 @@ importFileInput.addEventListener("change", () => {
           id: generateId(),
           word: raw.word,
           bookTitle: raw.bookTitle,
-          pageNo: raw.pageNo,
+          pageStart,
+          pageEnd,
           timestamp: Date.now(),
           // Assigned in the order entries appear in the file, so relative
           // "first entered" order from the source export is preserved.
@@ -3993,9 +4160,31 @@ function getFilteredEntries() {
   const pageQuery = pageFilter.value.trim();
   const searchQuery = searchInput.value.trim().toLowerCase();
 
+  // Smart Page Range Filtering: a bare page number (e.g. "456") first
+  // tries to match entries tagged to that exact single page. If nothing
+  // explicit matches, fall back to any range that encompasses it (e.g. an
+  // entry tagged "450-470" shows up when the person filters on "456").
+  let pageQueryNum = null;
+  let useRangeFallback = false;
+  if (pageQuery) {
+    pageQueryNum = parseInt(pageQuery, 10);
+    if (Number.isInteger(pageQueryNum)) {
+      const hasExactMatch = entries.some(
+        (e) => e.pageStart === pageQueryNum && e.pageEnd === pageQueryNum && (!selectedBook || e.bookTitle === selectedBook)
+      );
+      useRangeFallback = !hasExactMatch;
+    }
+  }
+
   return entries.filter((e) => {
     if (selectedBook && e.bookTitle !== selectedBook) return false;
-    if (pageQuery && String(e.pageNo) !== pageQuery) return false;
+    if (pageQuery) {
+      if (!Number.isInteger(pageQueryNum)) return false;
+      const matches = useRangeFallback
+        ? e.pageStart <= pageQueryNum && pageQueryNum <= e.pageEnd
+        : e.pageStart === pageQueryNum && e.pageEnd === pageQueryNum;
+      if (!matches) return false;
+    }
     if (searchQuery) {
       const haystack = [
         e.word,
@@ -4122,7 +4311,7 @@ function renderRowCells(entry, includeBookColumn) {
     ${
       includeBookColumn
         ? `<td data-label="Book">${escapeHtml(entry.bookTitle)}</td>
-           <td data-label="Page">${entry.pageNo}</td>`
+           <td data-label="Page">${entry.pageStart === entry.pageEnd ? entry.pageStart : `${entry.pageStart}-${entry.pageEnd}`}</td>`
         : ""
     }
     ${renderDefinitionCell(entry)}
@@ -4134,7 +4323,11 @@ function renderRowCells(entry, includeBookColumn) {
 }
 
 function renderFlatTable(list) {
-  const sorted = list.slice().sort((a, b) => b.timestamp - a.timestamp);
+  // Strict chronological/hierarchical sequencing: Book (alphabetical) →
+  // Page start (ascending) → seq (order first entered) — the same
+  // ordering used for JSON/PDF export, kept consistent everywhere entries
+  // are displayed.
+  const sorted = list.slice().sort(compareEntriesForExport);
 
   const rows = sorted
     .map((entry) => `<tr>${renderRowCells(entry, true)}</tr>`)
@@ -4162,16 +4355,17 @@ function renderFlatTable(list) {
 function renderGroupedByPage(list) {
   const byPage = new Map();
   list.forEach((entry) => {
-    if (!byPage.has(entry.pageNo)) byPage.set(entry.pageNo, []);
-    byPage.get(entry.pageNo).push(entry);
+    const pageKey = `${entry.pageStart}-${entry.pageEnd}`;
+    if (!byPage.has(pageKey)) byPage.set(pageKey, { pageStart: entry.pageStart, pageEnd: entry.pageEnd, entries: [] });
+    byPage.get(pageKey).entries.push(entry);
   });
 
-  const sortedPages = [...byPage.keys()].sort((a, b) => a - b);
+  const sortedGroups = [...byPage.values()].sort((a, b) => a.pageStart - b.pageStart);
 
   let rows = "";
-  sortedPages.forEach((page) => {
-    rows += `<tr class="page-group-row"><td colspan="4">Page ${page}</td></tr>`;
-    const wordsOnPage = byPage.get(page).sort((a, b) => (a.seq ?? a.timestamp) - (b.seq ?? b.timestamp));
+  sortedGroups.forEach(({ pageStart, pageEnd, entries: pageEntries }) => {
+    rows += `<tr class="page-group-row"><td colspan="4">${formatPageLabel(pageStart, pageEnd)}</td></tr>`;
+    const wordsOnPage = pageEntries.sort((a, b) => (a.seq ?? a.timestamp) - (b.seq ?? b.timestamp));
     wordsOnPage.forEach((entry) => {
       rows += `<tr>${renderRowCells(entry, false)}</tr>`;
     });
@@ -4950,10 +5144,15 @@ window.addEventListener("message", (event) => {
   }
 
   function adjustPageNumber(delta) {
-    const current = parseInt(pageInput.value, 10);
-    const base = Number.isFinite(current) ? current : 0;
-    const next = Math.max(1, base + delta);
-    pageInput.value = next;
+    // Range-aware: nudges both ends of a page range together (e.g.
+    // "450-470" -> "451-471"), preserving the range's width. A plain
+    // single page just nudges that one number, same as before.
+    const parsed = parsePageRangeInput(pageInput.value);
+    const pageStart = parsed ? parsed.pageStart : 0;
+    const pageEnd = parsed ? parsed.pageEnd : 0;
+    const nextStart = Math.max(1, pageStart + delta);
+    const nextEnd = Math.max(nextStart, pageEnd + delta);
+    pageInput.value = formatPageRangeText(nextStart, nextEnd);
     pageInput.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
