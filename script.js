@@ -2820,26 +2820,56 @@ aiFetchBtn.addEventListener("click", async () => {
    form-level listener below catches Enter no matter which control
    inside the form currently has focus (checkboxes included), so adding
    an entry works the same whether or not you've just ticked something.
+
+   Guarding against the double-fire: a single Enter press in a text
+   field can trigger BOTH the native "submit" event (synchronous, fires
+   immediately as part of the browser's default action for that
+   keydown) AND our own setTimeout(...,0) fallback scheduled by the
+   keydown listener below (needed for the datalist-popup edge case,
+   where native submission never fires at all). Those two must resolve
+   to exactly one add — this used to be done with a 300ms wall-clock
+   window, but that broke once the entry table got long enough that
+   re-rendering it after a successful add took longer than 300ms: the
+   fallback would fire, see the guard window had "expired", and run
+   addEntryFromForm() again against the now-already-cleared Word field,
+   throwing "Please enter a word before adding." Tracking a single
+   mutable "attempt token" instead of elapsed time sidesteps that
+   entirely — whichever of the two paths (sync submit vs. the deferred
+   fallback) runs first consumes the token and the other becomes a
+   no-op, no matter how long the add itself takes to finish rendering.
 --------------------------------------------------------------------- */
-let lastAddAt = 0;
-function guardedAddEntry() {
-  const now = Date.now();
-  if (now - lastAddAt < 300) return; // collapses double-fires into one add
-  lastAddAt = now;
+let pendingAddToken = null;
+
+function beginAddAttempt() {
+  const token = Symbol("addAttempt");
+  pendingAddToken = token;
+  return token;
+}
+
+function guardedAddEntry(token) {
+  // A token from a keypress already consumed by the other path (or a
+  // stale token from an earlier press) is a no-op — only the first of
+  // the two triggers for a given press is allowed through.
+  if (token !== pendingAddToken) return;
+  pendingAddToken = null;
   addEntryFromForm();
 }
 
 [wordInput, bookInput, pageInput].forEach((el) => {
   el.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" || e.isComposing) return;
+    const token = beginAddAttempt();
     // Let any datalist "commit" finish updating the field's value first.
-    setTimeout(guardedAddEntry, 0);
+    setTimeout(() => guardedAddEntry(token), 0);
   });
 });
 
 form.addEventListener("submit", (e) => {
   e.preventDefault();
-  guardedAddEntry();
+  // Native submission fires synchronously, before the fallback above
+  // gets a chance to run — reuse its token if a keydown just started
+  // one, otherwise (submit triggered some other way) mint a fresh one.
+  guardedAddEntry(pendingAddToken ?? beginAddAttempt());
 });
 
 // Catches Enter from anywhere in (or even outside, if focus fell back to
@@ -2872,8 +2902,10 @@ document.addEventListener("keydown", (e) => {
   // element that was focused) — never inside the table or footer.
   if (target !== document.body && !form.contains(target)) return;
   e.preventDefault();
-  setTimeout(guardedAddEntry, 0);
+  const token = beginAddAttempt();
+  setTimeout(() => guardedAddEntry(token), 0);
 });
+
 
 imageUrlInput.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
@@ -4397,8 +4429,14 @@ window.addEventListener("message", (event) => {
 
   // ---- Defaults (all non-alphabet, so plain word/book typing is never
   // affected unless a binding is deliberately reassigned) --------------
+  // passThroughModifier defaults to Control rather than Alt: Alt+Space
+  // specifically is intercepted by Windows itself (it opens the current
+  // window's system menu) before the browser ever receives the
+  // keystroke, so it could never actually work as a pass-through for the
+  // Space-based selectItem shortcut. Control doesn't carry that
+  // OS-level conflict.
   const DEFAULT_SHORTCUTS = {
-    passThroughModifier: "Alt",
+    passThroughModifier: "Control",
 
     defUp: "ArrowUp",
     defDown: "ArrowDown",
@@ -4505,7 +4543,17 @@ window.addEventListener("message", (event) => {
     try {
       const raw = localStorage.getItem(SHORTCUT_STORAGE_KEY);
       const saved = raw ? JSON.parse(raw) : {};
-      return { ...DEFAULT_SHORTCUTS, ...saved };
+      const merged = { ...DEFAULT_SHORTCUTS, ...saved };
+      // One-time migration: anyone still sitting on the old "Alt" default
+      // gets moved to "Control" automatically, since Alt+Space could
+      // never actually work (see the note above DEFAULT_SHORTCUTS). If
+      // you deliberately re-pick Alt afterward, passThroughModifierConfirmed
+      // gets set (see the sidebar's change handler below) so this
+      // migration leaves it alone on every later load.
+      if (saved.passThroughModifier === "Alt" && !saved.passThroughModifierConfirmed) {
+        merged.passThroughModifier = "Control";
+      }
+      return merged;
     } catch (err) {
       console.warn("[Shortcuts] Couldn't read saved shortcut config — using defaults.", err);
       return { ...DEFAULT_SHORTCUTS };
@@ -4518,7 +4566,7 @@ window.addEventListener("message", (event) => {
   function rebuildCodeToAction() {
     codeToAction = {};
     Object.keys(shortcutConfig).forEach((k) => {
-      if (k === "passThroughModifier") return;
+      if (k === "passThroughModifier" || k === "passThroughModifierConfirmed") return;
       if (shortcutConfig[k]) codeToAction[shortcutConfig[k]] = k;
     });
   }
@@ -4628,7 +4676,7 @@ window.addEventListener("message", (event) => {
 
         const newCode = e.code;
         const clashKey = Object.keys(shortcutConfig).find(
-          (k) => k !== "passThroughModifier" && k !== key && shortcutConfig[k] === newCode
+          (k) => k !== "passThroughModifier" && k !== "passThroughModifierConfirmed" && k !== key && shortcutConfig[k] === newCode
         );
         if (clashKey) {
           const clashField = SHORTCUT_FIELDS.find((f) => f.key === clashKey);
@@ -4712,6 +4760,7 @@ window.addEventListener("message", (event) => {
 
     document.getElementById("shortcut-passthrough-select")?.addEventListener("change", (e) => {
       shortcutConfig.passThroughModifier = e.target.value;
+      shortcutConfig.passThroughModifierConfirmed = true;
       saveConfig();
     });
 
@@ -4956,7 +5005,7 @@ window.addEventListener("message", (event) => {
         if (shortcutConfig.addEntry === "Enter") return;
         if (!editModal.classList.contains("hidden")) return;
         e.preventDefault();
-        guardedAddEntry();
+        guardedAddEntry(beginAddAttempt());
         break;
       }
 
