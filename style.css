@@ -1597,76 +1597,117 @@ tbody tr:hover {
    script.js) so every rule below reacts live as the person drags them —
    nothing here is a fixed look.
 
-   This theme now models real WATER BUBBLES rather than flat frosted
-   panes: each round/pill control gets (1) a near-empty transparent
-   core so the page truly shows through, like Apple's glass, (2) a ring
-   of stacked inset shadows that bend from bright to dark around the
-   inner edge the way light refracts through a sphere, and (3) two
-   small radial-gradient highlight pseudo-elements — a sharp primary
-   gloss near the top-left, a faint secondary bounce near the
-   bottom-right — the two catch-lights visible on every real bubble.
-   All three still scale off --glass-alpha/--glass-blur/--glass-tint so
+   This models a real GLASS/WATER SPHERE (photographed studio bubbles,
+   the kind with a crisp near-black crescent along the top rim, two soft
+   round highlight blooms, and an almost-clear body) rather than a flat
+   frosted pane:
+     1. --bubble-core is the element's own background: two soft highlight
+        blooms positioned upper-left/upper-right, a faint tint pooling at
+        the very bottom, and an otherwise near-transparent fill — so the
+        page genuinely shows through, the way glass does.
+     2. --bubble-ring is a crisp conic-gradient — dark and tight across
+        the top arc, fading to almost nothing on the sides, a softer
+        mid-tone across the bottom arc — painted as a thin ring via a
+        ::before that uses the padding+mask-composite trick to draw only
+        the border-width band, not the whole shape. This is what actually
+        reads as "glass" rather than "blurred circle": real glass shows a
+        sharp edge, not a soft one.
+     3. --bubble-shell (box-shadow) stays as a light outer contact shadow
+        plus a thin bright inner catch at the bottom edge, so each bubble
+        still looks like it's sitting on the page rather than floating.
+   All three keep scaling off --glass-alpha/--glass-blur/--glass-tint so
    the sliders keep working exactly as before. */
 body.bubbly-mode {
   --radius: 24px;
 
-  /* Shared bubble tokens, derived from the sliders once, reused by every
-     control below so the whole theme moves together. */
-  --bubble-core: radial-gradient(120% 140% at 30% 22%,
-      color-mix(in srgb, #fff calc(var(--glass-tint) * 0.55 + 10%), transparent) 0%,
-      color-mix(in srgb, #fff calc(var(--glass-tint) * 0.18), transparent) 30%,
-      transparent 55%,
-      color-mix(in srgb, var(--blue-pale) calc(var(--glass-alpha) * 0.3), transparent) 100%);
+  /* Highlight blooms + ring, derived from the sliders once, reused by
+     every control below so the whole theme moves together. */
+  --bubble-hl1: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.55 + 68%), transparent);
+  --bubble-hl1-mid: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.3 + 26%), transparent);
+  --bubble-hl2: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.4 + 46%), transparent);
+  --bubble-ambient: color-mix(in srgb, var(--blue-soft) calc(var(--glass-tint) * 0.22), transparent);
+  --bubble-base: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.12), transparent);
+
+  --bubble-core:
+    radial-gradient(38% 30% at 27% 24%, var(--bubble-hl1) 0%, var(--bubble-hl1-mid) 45%, transparent 75%),
+    radial-gradient(28% 24% at 71% 20%, var(--bubble-hl2) 0%, transparent 78%),
+    radial-gradient(90% 55% at 50% 100%, var(--bubble-ambient) 0%, transparent 60%),
+    var(--bubble-base);
+
   --bubble-ring-bright: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.75 + 15%), transparent);
-  --bubble-ring-dark: color-mix(in srgb, var(--blue-deep) calc(var(--glass-tint) * 0.5 + 16%), transparent);
+  --bubble-ring-dark: color-mix(in srgb, var(--blue-deep) calc(var(--glass-tint) * 0.6 + 34%), transparent);
+  --bubble-ring-mid: color-mix(in srgb, var(--blue-deep) calc(var(--glass-tint) * 0.32 + 10%), transparent);
+  --bubble-ring-faint: color-mix(in srgb, var(--blue-deep) calc(var(--glass-tint) * 0.08), transparent);
   --bubble-ring-ambient: color-mix(in srgb, var(--blue-soft) calc(var(--glass-tint) * 0.4), transparent);
   --bubble-rim: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.5 + 30%), transparent);
+
+  --bubble-ring:
+    conic-gradient(from 270deg at 50% 50%,
+      var(--bubble-ring-faint) 0deg,
+      var(--bubble-ring-faint) 22deg,
+      var(--bubble-ring-dark) 52deg,
+      var(--bubble-ring-dark) 128deg,
+      var(--bubble-ring-faint) 158deg,
+      transparent 180deg,
+      var(--bubble-ring-mid) 208deg,
+      var(--bubble-ring-mid) 332deg,
+      var(--bubble-ring-faint) 338deg,
+      var(--bubble-ring-faint) 360deg);
+
   --bubble-shell:
-    inset -9px -11px 17px -6px var(--bubble-ring-dark),
-    inset 9px 9px 15px -6px var(--bubble-ring-bright),
-    inset 0 0 20px -4px var(--bubble-ring-ambient),
-    inset 0 -1px 2px color-mix(in srgb, var(--blue-deep) calc(var(--glass-tint) * 0.3 + 8%), transparent),
+    inset 0 -3px 5px -2px var(--bubble-rim),
     0 1px 1px var(--bubble-rim),
-    0 8px 20px -7px rgba(22, 63, 99, 0.3);
+    0 10px 20px -10px rgba(22, 63, 99, 0.4);
 }
 
-/* Reusable gloss highlights — a sharp primary catch-light top-left, a
-   faint secondary bounce bottom-right. z-index:-1 inside an isolated
-   stacking context keeps them behind the control's own label/icon but
-   above its transparent core, exactly like the sheen they replace. */
+/* The crisp glass rim: a thin conic-gradient ring drawn only across the
+   border band via the padding+mask-composite "double background,
+   xor'd" trick, so the crescent is sharp the way a real glass edge is —
+   not a soft blurred glow. border-radius: inherit means this works on
+   full circles (icon buttons, the switch track) and pill buttons alike.
+   z-index:-1 keeps it under each control's own label/icon but above its
+   near-transparent core. */
+body.bubbly-mode .btn,
+body.bubbly-mode .icon-btn,
+body.bubbly-mode .storage-toggle-btn,
+body.bubbly-mode .switch-track {
+  position: relative;
+  isolation: isolate;
+}
+
 body.bubbly-mode .btn::before,
 body.bubbly-mode .icon-btn::before,
 body.bubbly-mode .storage-toggle-btn::before,
 body.bubbly-mode .switch-track::before {
   content: "";
   position: absolute;
-  top: 8%;
-  left: 12%;
-  width: 42%;
-  height: 32%;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%,
-    color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 40%), transparent) 0%,
-    color-mix(in srgb, #fff calc(var(--glass-tint) * 0.3 + 15%), transparent) 45%,
-    transparent 75%);
-  transform: rotate(-16deg);
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  background: var(--bubble-ring);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
   pointer-events: none;
   z-index: -1;
 }
 
-body.bubbly-mode .btn::after,
-body.bubbly-mode .icon-btn::after,
-body.bubbly-mode .storage-toggle-btn::after {
+/* Small extra ::after touch on buttons only: a faint downward bloom at
+   the very base of the pill, echoing the soft bright ellipse a real
+   glass sphere throws right where it meets a surface. Kept subtle and
+   only on .btn (not the small round controls, where it would be too
+   busy at that size). */
+body.bubbly-mode .btn::after {
   content: "";
   position: absolute;
-  bottom: 12%;
-  right: 16%;
-  width: 18%;
-  height: 14%;
-  border-radius: 50%;
-  background: radial-gradient(circle,
-    color-mix(in srgb, #fff calc(var(--glass-tint) * 0.4 + 20%), transparent) 0%,
-    transparent 80%);
+  left: 15%;
+  right: 15%;
+  bottom: 6%;
+  height: 30%;
+  border-radius: 999px;
+  background: radial-gradient(50% 100% at 50% 100%,
+    var(--bubble-rim) 0%,
+    transparent 75%);
   pointer-events: none;
   z-index: -1;
 }
