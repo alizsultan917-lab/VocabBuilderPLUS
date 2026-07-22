@@ -4926,6 +4926,56 @@ window.addEventListener("message", (event) => {
   // the cursor-navigation actions below).
   const heldKeys = {};
 
+  // True for controls where typing a literal character makes sense —
+  // i.e. genuine text entry (Word/Book/Page bars, manual definition/
+  // image-URL boxes, Search, table filters, and their edit-modal
+  // equivalents). Deliberately false for checkboxes/radios/buttons.
+  function isTextEntryElement(el) {
+    if (!el) return false;
+    if (el.tagName === "TEXTAREA") return true;
+    if (el.tagName !== "INPUT") return false;
+    const type = (el.type || "text").toLowerCase();
+    return type !== "checkbox" && type !== "radio" && type !== "button" && type !== "submit";
+  }
+
+  // True only when EXACTLY the configured Pass-Through Modifier is held
+  // (no other modifiers at the same time) — keeps things predictable if
+  // someone happens to hold two modifiers together for an unrelated
+  // reason.
+  function isConfiguredModifierHeld(e) {
+    switch (shortcutConfig.passThroughModifier) {
+      case "Alt":
+        return e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey;
+      case "Control":
+        return e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
+      case "Shift":
+        return e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey;
+      case "Meta":
+        return e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey;
+      default:
+        return false;
+    }
+  }
+
+  // Manually types `char` into `el` at the current cursor position (or
+  // over the current selection). Needed because holding Control/Alt/Meta
+  // — unlike Shift — makes the browser treat the keypress as a pure
+  // command rather than typed text: it never fires its own "insert this
+  // character" default action at all, with or without our own
+  // preventDefault(). Letting the event "fall through" (as the pass-
+  // through modifier used to) relied on the browser doing that
+  // insertion itself, which is exactly what doesn't happen — this
+  // does it explicitly instead, then fires a real "input" event so
+  // anything listening for changes on the field still sees it.
+  function insertLiteralCharacter(el, char) {
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    el.value = el.value.slice(0, start) + char + el.value.slice(end);
+    const newPos = start + char.length;
+    el.setSelectionRange?.(newPos, newPos);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
   /* -----------------------------------------------------------------
      GLOBAL KEY DISPATCHER
   ----------------------------------------------------------------- */
@@ -4957,10 +5007,33 @@ window.addEventListener("message", (event) => {
       }
     }
 
-    // Any modifier held at all means "leave this alone": if it's the
-    // configured Pass-Through Modifier, the point is to let the browser
-    // type the literal character normally; if it's some other combo, it
-    // might be a browser/OS shortcut we shouldn't step on either way.
+    // ---- Pass-Through Modifier: type the literal character ourselves ----
+    // Holding the configured modifier while pressing a key that's bound
+    // to one of our shortcuts should type that key's own character (e.g.
+    // Space) instead of triggering the shortcut. But Control/Alt/Meta
+    // held down suppress the browser's normal character-typing action
+    // entirely — simply doing nothing here (as before) left the
+    // keystroke producing no character at all, not a passed-through one.
+    // So when this fires while a real text field has focus, insert the
+    // character ourselves.
+    if (
+      isConfiguredModifierHeld(e) &&
+      codeToAction[e.code] &&
+      e.key.length === 1 &&
+      isTextEntryElement(document.activeElement)
+    ) {
+      e.preventDefault();
+      insertLiteralCharacter(document.activeElement, e.key);
+      return;
+    }
+
+    // Any modifier held at all means "leave this alone" for everything
+    // else: if it's the configured Pass-Through Modifier but nothing
+    // above applied (not a bound key, or focus isn't in a text field),
+    // there's nothing useful to do here — the browser's own handling
+    // (or lack thereof) for that combo takes over. If it's some other
+    // combo, it might be a browser/OS shortcut we shouldn't step on
+    // either way.
     if (e.altKey || e.ctrlKey || e.shiftKey || e.metaKey) return;
 
     const action = codeToAction[e.code];
