@@ -4429,14 +4429,18 @@ window.addEventListener("message", (event) => {
 
   // ---- Defaults (all non-alphabet, so plain word/book typing is never
   // affected unless a binding is deliberately reassigned) --------------
-  // passThroughModifier defaults to Control rather than Alt: Alt+Space
-  // specifically is intercepted by Windows itself (it opens the current
-  // window's system menu) before the browser ever receives the
-  // keystroke, so it could never actually work as a pass-through for the
-  // Space-based selectItem shortcut. Control doesn't carry that
-  // OS-level conflict.
+  // passThroughModifier defaults to Shift — it's a real modifier key
+  // (the browser reports it natively via e.shiftKey), it has no native
+  // default action of its own to fight with, and — unlike Alt or
+  // Control/Meta — it doesn't collide with common OS/browser shortcuts
+  // (Alt+Space opens Windows' system menu before the browser ever sees
+  // it; Ctrl/Cmd+<key> is used everywhere). This is only the default —
+  // like every other shortcut in this file, it's click-to-record: click
+  // the Pass-Through Modifier button in the sidebar and press any key —
+  // CapsLock, Tab, ContextMenu, Alt, a letter, whatever — to use that
+  // instead.
   const DEFAULT_SHORTCUTS = {
-    passThroughModifier: "Control",
+    passThroughModifier: "Shift",
 
     defUp: "ArrowUp",
     defDown: "ArrowDown",
@@ -4509,7 +4513,15 @@ window.addEventListener("message", (event) => {
     { key: "wordCursorRight", label: "Move Cursor Right in Word Bar", group: "Focus & Cursor" },
   ];
 
-  const MODIFIER_OPTIONS = ["Alt", "Control", "Shift", "Meta"];
+  // The Pass-Through Modifier can be set to literally any key (see
+  // startRecording() below) — not just a fixed list. Shift/Alt/Control/
+  // Meta are real modifier keys, so the browser exposes them directly
+  // as e.shiftKey/altKey/ctrlKey/metaKey and isConfiguredModifierHeld()
+  // checks those natively. Anything else (CapsLock, Tab, ContextMenu, a
+  // letter, an F-key...) is an ordinary key with no such flag, so its
+  // "held" state is tracked by hand via `heldKeys` instead — see
+  // isConfiguredModifierHeld() and the dispatcher below.
+  const NATIVE_MODIFIER_FLAGS = { Shift: "shiftKey", Alt: "altKey", Control: "ctrlKey", Meta: "metaKey" };
 
   // ---- Pretty labels for KeyboardEvent.code values --------------------
   const KEY_LABELS = {
@@ -4528,6 +4540,9 @@ window.addEventListener("message", (event) => {
     Slash: "/",
     Minus: "-",
     Equal: "=",
+    CapsLock: "Caps Lock",
+    Tab: "Tab ⇥",
+    ContextMenu: "Menu ☰",
   };
   function labelForCode(code) {
     if (!code) return "— unbound —";
@@ -4544,15 +4559,6 @@ window.addEventListener("message", (event) => {
       const raw = localStorage.getItem(SHORTCUT_STORAGE_KEY);
       const saved = raw ? JSON.parse(raw) : {};
       const merged = { ...DEFAULT_SHORTCUTS, ...saved };
-      // One-time migration: anyone still sitting on the old "Alt" default
-      // gets moved to "Control" automatically, since Alt+Space could
-      // never actually work (see the note above DEFAULT_SHORTCUTS). If
-      // you deliberately re-pick Alt afterward, passThroughModifierConfirmed
-      // gets set (see the sidebar's change handler below) so this
-      // migration leaves it alone on every later load.
-      if (saved.passThroughModifier === "Alt" && !saved.passThroughModifierConfirmed) {
-        merged.passThroughModifier = "Control";
-      }
       return merged;
     } catch (err) {
       console.warn("[Shortcuts] Couldn't read saved shortcut config — using defaults.", err);
@@ -4566,7 +4572,7 @@ window.addEventListener("message", (event) => {
   function rebuildCodeToAction() {
     codeToAction = {};
     Object.keys(shortcutConfig).forEach((k) => {
-      if (k === "passThroughModifier" || k === "passThroughModifierConfirmed") return;
+      if (k === "passThroughModifier") return;
       if (shortcutConfig[k]) codeToAction[shortcutConfig[k]] = k;
     });
   }
@@ -4641,12 +4647,22 @@ window.addEventListener("message", (event) => {
     recordingKey = null;
   }
 
-  // Physical modifier-only key codes — these belong in the Pass-Through
-  // Modifier dropdown, never as a standalone shortcut binding.
+  // Physical modifier-only key codes and the family name each normalizes
+  // to. Regular shortcut fields still reject these outright (a bare
+  // Shift/Alt/Control/Meta press makes no sense as a standalone
+  // "trigger this action" binding) — but the Pass-Through Modifier field
+  // uses this map to fold ShiftLeft/ShiftRight into plain "Shift" and so
+  // on, so either physical key works no matter which one gets pressed.
   const MODIFIER_CODES = new Set([
     "AltLeft", "AltRight", "ControlLeft", "ControlRight",
     "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight",
   ]);
+  const NATIVE_MODIFIER_FAMILY = {
+    AltLeft: "Alt", AltRight: "Alt",
+    ControlLeft: "Control", ControlRight: "Control",
+    ShiftLeft: "Shift", ShiftRight: "Shift",
+    MetaLeft: "Meta", MetaRight: "Meta",
+  };
 
   function startRecording(btn, key) {
     cancelRecording();
@@ -4654,6 +4670,12 @@ window.addEventListener("message", (event) => {
     recordingKey = key;
     btn.classList.add("listening");
     btn.textContent = "Press a key…";
+
+    // The Pass-Through Modifier isn't a "press this to trigger an
+    // action" binding like every other field — it's whatever key you
+    // hold down, so it's allowed to be literally anything, including
+    // Shift/Alt/Control/Meta themselves.
+    const isPassThroughField = key === "passThroughModifier";
 
     // Capture phase + {once:true} so this fires (and fully swallows the
     // event via stopPropagation) before the global dispatcher below —
@@ -4668,15 +4690,42 @@ window.addEventListener("message", (event) => {
           cancelRecording();
           return;
         }
-        if (MODIFIER_CODES.has(e.code)) {
+        if (!isPassThroughField && MODIFIER_CODES.has(e.code)) {
           cancelRecording();
-          alert("That's a modifier key — pick it from the Pass-Through Modifier dropdown instead.");
+          alert("That's a modifier key — it can only be set as the Pass-Through Modifier, not a standalone shortcut.");
           return;
         }
 
-        const newCode = e.code;
+        const newCode = isPassThroughField && NATIVE_MODIFIER_FAMILY[e.code]
+          ? NATIVE_MODIFIER_FAMILY[e.code]
+          : e.code;
+
+        if (isPassThroughField) {
+          // A held modifier isn't a single-press shortcut, so it doesn't
+          // go through the clash check below — but if the chosen key
+          // normally types a visible character (a letter, digit, Space,
+          // punctuation...), holding it alone will stop it from typing
+          // that character anywhere else in the app, so confirm first
+          // instead of silently surprising you later.
+          if (e.key.length === 1) {
+            const proceed = confirm(
+              `"${labelForCode(newCode)}" normally types a character. Using it as your Pass-Through Modifier means holding it by itself will stop it from typing that character anywhere in the app. Continue?`
+            );
+            if (!proceed) {
+              cancelRecording();
+              return;
+            }
+          }
+          shortcutConfig.passThroughModifier = newCode;
+          saveConfig();
+          cancelRecording();
+          renderSidebarRows();
+          applyShortcutTitles();
+          return;
+        }
+
         const clashKey = Object.keys(shortcutConfig).find(
-          (k) => k !== "passThroughModifier" && k !== "passThroughModifierConfirmed" && k !== key && shortcutConfig[k] === newCode
+          (k) => k !== "passThroughModifier" && k !== key && shortcutConfig[k] === newCode
         );
         if (clashKey) {
           const clashField = SHORTCUT_FIELDS.find((f) => f.key === clashKey);
@@ -4707,11 +4756,9 @@ window.addEventListener("message", (event) => {
     let html = `<div class="shortcut-group-title">Pass-Through Modifier</div>
       <div class="shortcut-row">
         <span class="shortcut-row-label">Hold this while pressing a mapped key to type it literally</span>
-        <select id="shortcut-passthrough-select" class="shortcut-key-input">
-          ${MODIFIER_OPTIONS.map(
-            (m) => `<option value="${m}" ${m === shortcutConfig.passThroughModifier ? "selected" : ""}>${m}</option>`
-          ).join("")}
-        </select>
+        <button type="button" class="shortcut-key-input" data-shortcut-key="passThroughModifier">${escapeHtml(
+          labelForCode(shortcutConfig.passThroughModifier)
+        )}</button>
       </div>`;
 
     let lastGroup = null;
@@ -4757,12 +4804,6 @@ window.addEventListener("message", (event) => {
       <p class="shortcut-row-hint">Hold both keys of a pair down together — these aren't separately rebindable, they follow whatever "Focus Page Input Bar" / "Move Cursor Left/Right in Word Bar" are set to above.</p>
     `;
     shortcutFieldsList.appendChild(chordSection);
-
-    document.getElementById("shortcut-passthrough-select")?.addEventListener("change", (e) => {
-      shortcutConfig.passThroughModifier = e.target.value;
-      shortcutConfig.passThroughModifierConfirmed = true;
-      saveConfig();
-    });
 
     shortcutFieldsList.querySelectorAll("[data-shortcut-key]").forEach((btn) => {
       btn.addEventListener("click", () => startRecording(btn, btn.dataset.shortcutKey));
@@ -4942,19 +4983,30 @@ window.addEventListener("message", (event) => {
   // (no other modifiers at the same time) — keeps things predictable if
   // someone happens to hold two modifiers together for an unrelated
   // reason.
+  //
+  // Shift/Alt/Control/Meta are real modifier keys, so the browser
+  // reports each directly via its own e.*Key flag and that's checked
+  // natively below. Any other key (CapsLock, Tab, ContextMenu, a
+  // letter, an F-key — whatever got recorded) is ordinary — nothing in
+  // the KeyboardEvent API reflects its held state — so those rely on
+  // `heldKeys`, which the dispatcher below keeps up to date on every
+  // keydown/keyup regardless of focus (the same tracking the
+  // Page-Number chord uses).
   function isConfiguredModifierHeld(e) {
-    switch (shortcutConfig.passThroughModifier) {
-      case "Alt":
-        return e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey;
-      case "Control":
-        return e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
-      case "Shift":
-        return e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey;
-      case "Meta":
-        return e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey;
-      default:
-        return false;
+    const modifier = shortcutConfig.passThroughModifier;
+    if (!modifier) return false;
+    const flag = NATIVE_MODIFIER_FLAGS[modifier];
+    if (flag) {
+      return ["altKey", "ctrlKey", "shiftKey", "metaKey"].every((f) => (f === flag ? e[f] : !e[f]));
     }
+    return (
+      !!heldKeys[modifier] &&
+      e.code !== modifier &&
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.shiftKey &&
+      !e.metaKey
+    );
   }
 
   // Manually types `char` into `el` at the current cursor position (or
@@ -4967,6 +5019,10 @@ window.addEventListener("message", (event) => {
   // insertion itself, which is exactly what doesn't happen — this
   // does it explicitly instead, then fires a real "input" event so
   // anything listening for changes on the field still sees it.
+  // The same is true — for a different reason — of any non-modifier key
+  // (CapsLock, Tab, ContextMenu, a letter...): those aren't modifiers at
+  // all, so the browser's normal typing behavior was never going to
+  // fire for them regardless.
   function insertLiteralCharacter(el, char) {
     const start = el.selectionStart ?? el.value.length;
     const end = el.selectionEnd ?? el.value.length;
@@ -4984,6 +5040,26 @@ window.addEventListener("message", (event) => {
     if (recordingBtn) return; // sidebar is actively capturing a new binding
 
     if (!e.repeat) heldKeys[e.code] = true;
+
+    // ---- Neutralize the pass-through modifier's own default action ----
+    // Non-modifier keys each have some native default action of their
+    // own on keydown — CapsLock toggles Caps Lock, Tab shifts focus,
+    // ContextMenu opens the right-click menu, a letter types itself —
+    // regardless of what's held afterward. None of that is useful while
+    // the key is just being held to unlock literal typing for the
+    // *next* keypress, so it's suppressed here. Shift/Alt/Control/Meta
+    // have no such default action of their own, so they need nothing.
+    if (
+      shortcutConfig.passThroughModifier &&
+      !NATIVE_MODIFIER_FLAGS[shortcutConfig.passThroughModifier] &&
+      e.code === shortcutConfig.passThroughModifier &&
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.shiftKey &&
+      !e.metaKey
+    ) {
+      e.preventDefault();
+    }
 
     // ---- Multi-key chord check (Increment/Decrement Page Number) ----
     // Checked before the pass-through-modifier gate below (a held

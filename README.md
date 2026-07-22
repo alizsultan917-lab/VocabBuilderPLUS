@@ -137,8 +137,9 @@ buttons, US/UK pronunciation, Definitions/Images list navigation +
 selection, and the two tab-switch keys below. Bindings save to
 `localStorage` instantly and survive reloads. Click any key field, then
 press the new key; hold the configurable **Pass-Through Modifier**
-(default `Alt`) while pressing a mapped key to type it as a literal
-character instead of triggering the shortcut.
+(default `Shift`, click-to-record just like every other binding — set
+it to any key you like) while pressing a mapped key to type it as a
+literal character instead of triggering the shortcut.
 
 Two of those bindings — **Focus Gemini Tab** (`F7`) and **Return to App
 Tab** (`F8`) — are synced to this extension automatically (see
