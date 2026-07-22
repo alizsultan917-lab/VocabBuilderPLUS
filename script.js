@@ -68,6 +68,8 @@ const BUBBLY_MODE_STORAGE = "litVocabBubblyMode";
 const GLASS_TRANSPARENCY_STORAGE = "litVocabGlassTransparency";
 const GLASS_BLUR_STORAGE = "litVocabGlassBlur";
 const GLASS_TINT_STORAGE = "litVocabGlassTint";
+const FISH_MODE_STORAGE = "litVocabFishMode";
+const FISH_SPECIES_STORAGE = "litVocabFishSpecies";
 const DEFAULT_SEARCH_WIDTH = 220;   // px
 const DEFAULT_DEF_TEXT_SCALE = 100; // % (stored as whole percent, applied as a ratio)
 const DEFAULT_IMG_THUMB_SIZE = 150; // px
@@ -75,6 +77,9 @@ const DEFAULT_BUBBLY_MODE = false;
 const DEFAULT_GLASS_TRANSPARENCY = 30; // % — how see-through the glass is (0 = opaque, 100 = fully transparent)
 const DEFAULT_GLASS_BLUR = 20;         // px — backdrop blur radius
 const DEFAULT_GLASS_TINT = 50;         // % — strength of the color tint / glossy highlight
+const DEFAULT_FISH_MODE = true;
+const FISH_SPECIES_IDS = ["clownfish", "betta", "angelfish", "guppy", "pufferfish"];
+const DEFAULT_FISH_SPECIES_PREFS = { clownfish: true, betta: true, angelfish: true, guppy: true, pufferfish: true };
 const SEARCH_WIDTH_MIN = 140;
 const SEARCH_WIDTH_MAX = 640;
 const DEF_TEXT_SCALE_MIN = 75;
@@ -297,6 +302,14 @@ const glassBlurInput = document.getElementById("glass-blur-input");
 const glassBlurValue = document.getElementById("glass-blur-value");
 const glassTintInput = document.getElementById("glass-tint-input");
 const glassTintValue = document.getElementById("glass-tint-value");
+const fishModeToggle = document.getElementById("fish-mode-toggle");
+const fishSpeciesControls = document.getElementById("fish-species-controls");
+const fishSpeciesCheckboxes = Array.from(
+  document.querySelectorAll("#fish-species-controls input[data-species]")
+);
+const addSharkBtn = document.getElementById("add-shark-btn");
+const removeSharkBtn = document.getElementById("remove-shark-btn");
+const sharkCountLabel = document.getElementById("shark-count-label");
 
 const exportLocalCheckbox = document.getElementById("export-local-checkbox");
 const exportDriveCheckbox = document.getElementById("export-drive-checkbox");
@@ -1806,7 +1819,914 @@ function setBubblyMode(on) {
 }
 
 function applyBubblyMode() {
-  document.body.classList.toggle("bubbly-mode", getBubblyMode());
+  const on = getBubblyMode();
+  document.body.classList.toggle("bubbly-mode", on);
+  if (on) {
+    // All three are lazy/guarded internally — cheap to call on every
+    // toggle, they only actually do work the first time this fires.
+    initBubbleTilt();
+    initBubbleField();
+    initFishField();
+  }
+}
+
+// ---------- 3D pointer tilt ("pop out of the screen") ----------
+// Delegated on document (rather than bound per-button) so it keeps
+// working on buttons/cards created after page load without any extra
+// rebinding. Only does anything while body.bubbly-mode is active and
+// the pointer is over a .btn / .icon-btn / .storage-toggle-btn — see
+// the matching --tilt-rx/--tilt-ry/--tilt-tz consumers in style.css.
+const BUBBLE_TILT_SELECTOR = ".btn, .icon-btn, .storage-toggle-btn";
+const BUBBLE_TILT_MAX_DEG = 10;
+const BUBBLE_TILT_MAX_TZ = 16;
+const PREFERS_REDUCED_MOTION =
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+let bubbleTiltInitDone = false;
+let bubbleTiltActiveEl = null;
+
+function clearBubbleTilt(el) {
+  if (!el) return;
+  el.style.removeProperty("--tilt-rx");
+  el.style.removeProperty("--tilt-ry");
+  el.style.removeProperty("--tilt-tz");
+}
+
+function initBubbleTilt() {
+  if (bubbleTiltInitDone || PREFERS_REDUCED_MOTION) return;
+  bubbleTiltInitDone = true;
+
+  document.addEventListener(
+    "pointermove",
+    (e) => {
+      if (!document.body.classList.contains("bubbly-mode")) return;
+      const el = e.target.closest ? e.target.closest(BUBBLE_TILT_SELECTOR) : null;
+
+      if (el !== bubbleTiltActiveEl) {
+        clearBubbleTilt(bubbleTiltActiveEl);
+        bubbleTiltActiveEl = el;
+      }
+      if (!el) return;
+
+      const rect = el.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const px = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+      const py = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+
+      // Tilt away from wherever the cursor sits within the control —
+      // top of the bubble tilts back, bottom tilts toward you, same on
+      // the left/right axis — like pressing a fingertip into a soft
+      // glass sphere and having it lean away from the touch point.
+      const rx = (0.5 - py) * 2 * BUBBLE_TILT_MAX_DEG;
+      const ry = (px - 0.5) * 2 * BUBBLE_TILT_MAX_DEG;
+      // Pops out furthest near the center, tapering toward the edges,
+      // so it reads as a rounded volume bulging toward the viewer
+      // rather than a flat card tipping on a hinge.
+      const distFromCenter = Math.min(1, Math.hypot(px - 0.5, py - 0.5) * 2);
+      const tz = BUBBLE_TILT_MAX_TZ * (1 - distFromCenter * 0.4);
+
+      el.style.setProperty("--tilt-rx", `${rx.toFixed(2)}deg`);
+      el.style.setProperty("--tilt-ry", `${ry.toFixed(2)}deg`);
+      el.style.setProperty("--tilt-tz", `${tz.toFixed(1)}px`);
+    },
+    { passive: true }
+  );
+
+  // Covers the pointer leaving the whole window (not just sliding onto
+  // another element, which the check above already handles).
+  document.addEventListener("pointerleave", () => {
+    clearBubbleTilt(bubbleTiltActiveEl);
+    bubbleTiltActiveEl = null;
+  });
+}
+
+// ---------- Ambient bubble field ----------
+// Fills the empty #bubble-field overlay (see index.html) with a set of
+// .bubble-particle divs that then just rise forever on the CSS
+// bubble-rise-3d animation — see style.css for the visual recipe.
+// Built once, lazily, the first time Liquid Interface is switched on;
+// visibility after that is purely the CSS opacity toggle on
+// body.bubbly-mode, so no further JS is needed to show/hide it.
+const BUBBLE_FIELD_COUNT = 16;
+let bubbleFieldBuilt = false;
+
+function initBubbleField() {
+  if (bubbleFieldBuilt) return;
+  const field = document.getElementById("bubble-field");
+  if (!field) return;
+  bubbleFieldBuilt = true;
+
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < BUBBLE_FIELD_COUNT; i++) {
+    const particle = document.createElement("div");
+    particle.className = "bubble-particle";
+    const size = 14 + Math.random() * 46; // 14–60px
+    const left = Math.random() * 100; // vw %
+    const duration = 10 + Math.random() * 10; // 10–20s to cross the screen
+    // Negative delay starts each bubble partway through its own rise
+    // so the field looks already-in-motion on the very first frame,
+    // instead of every bubble launching together from the bottom.
+    const delay = -Math.random() * duration;
+    const opacity = 0.25 + Math.random() * 0.4;
+    particle.style.setProperty("--bsize", `${size.toFixed(0)}px`);
+    particle.style.setProperty("--bx", `${left.toFixed(1)}%`);
+    particle.style.setProperty("--bdur", `${duration.toFixed(1)}s`);
+    particle.style.setProperty("--bdelay", `${delay.toFixed(1)}s`);
+    particle.style.setProperty("--bopacity", opacity.toFixed(2));
+    frag.appendChild(particle);
+  }
+  field.appendChild(frag);
+}
+
+// ---------- 🐠 Liquid Interface Marine Ecosystem (Delta-Time Physics) ----------
+// JS-driven vector physics replaces CSS swim animations. Fish react to
+// bubbles, mouse, sharks; sharks hunt with steering AI. See style.css.
+const FISH_SVG_VIEWBOX = "-10 -10 120 80";
+const FISH_SPECIES_MARKUP = {
+  clownfish: `
+    <path class="fish-tail" d="M20,30 L2,14 L2,46 Z" fill="#ff7a30"/>
+    <ellipse class="fish-body" cx="56" cy="30" rx="30" ry="17" fill="#ff7a30"/>
+    <path d="M34,14 L40,3 L47,15 Z" fill="#ff7a30"/>
+    <path d="M32,15 Q41,30 32,45 L40,45 Q49,30 40,15 Z" fill="#fff" stroke="#2b2320" stroke-width="1.5"/>
+    <path d="M56,13 Q63,30 56,47 L63,47 Q71,30 63,13 Z" fill="#fff" stroke="#2b2320" stroke-width="1.5"/>
+    <circle class="fish-eye-white" cx="80" cy="25" r="6" fill="#fff"/>
+    <circle class="fish-pupil" cx="82" cy="25" r="3" fill="#241a14"/>
+  `,
+  betta: `
+    <path class="fish-tail fish-fin-wave" d="M25,30 C8,8 -8,10 -8,30 C-8,50 8,52 25,30 Z" fill="#5b6cff" opacity="0.85"/>
+    <ellipse class="fish-body" cx="58" cy="30" rx="26" ry="14" fill="#3346c9"/>
+    <path class="fish-fin-wave betta-fin-top" d="M40,16 C29,3 18,4 14,14 C25,20 35,20 40,16 Z" fill="#5b6cff" opacity="0.8"/>
+    <path class="fish-fin-wave betta-fin-bot" d="M40,44 C29,57 18,56 14,46 C25,40 35,40 40,44 Z" fill="#5b6cff" opacity="0.8"/>
+    <circle class="fish-eye-white" cx="78" cy="26" r="5" fill="#fff"/>
+    <circle class="fish-pupil" cx="80" cy="26" r="2.4" fill="#151b3d"/>
+  `,
+  angelfish: `
+    <path class="fish-tail" d="M22,30 L4,20 L4,40 Z" fill="#dfe6ee"/>
+    <path class="fish-body" d="M55,6 C75,10 78,30 75,30 C78,30 75,50 55,54 C40,50 30,40 30,30 C30,20 40,10 55,6 Z" fill="#e7edf3" stroke="#94a3b8" stroke-width="1"/>
+    <rect x="48" y="8" width="6" height="44" fill="#2b3444" opacity="0.85"/>
+    <path d="M52,5 L58,-6 L60,7 Z" fill="#dfe6ee"/>
+    <path d="M52,55 L58,66 L60,53 Z" fill="#dfe6ee"/>
+    <circle class="fish-eye-white" cx="72" cy="24" r="5" fill="#fff"/>
+    <circle class="fish-pupil" cx="74" cy="24" r="2.4" fill="#1b2230"/>
+  `,
+  guppy: `
+    <path class="fish-tail" d="M18,30 L2,20 L2,40 Z" fill="#ff5fa2"/>
+    <ellipse class="fish-body" cx="55" cy="30" rx="22" ry="10" fill="#7c5cff"/>
+    <ellipse cx="61" cy="28" rx="9" ry="4.5" fill="#ff5fa2" opacity="0.7"/>
+    <circle class="fish-eye-white" cx="72" cy="27" r="4" fill="#fff"/>
+    <circle class="fish-pupil" cx="73.5" cy="27" r="2" fill="#241a14"/>
+  `,
+  pufferfish: `
+    <path class="fish-tail fish-fin-rotate" d="M28,30 L12,20 L12,40 Z" fill="#ffd23f"/>
+    <circle class="fish-body" cx="55" cy="30" r="26" fill="#ffd23f"/>
+    <circle cx="43" cy="8" r="2.2" fill="#f2b705"/>
+    <circle cx="61" cy="4" r="2.2" fill="#f2b705"/>
+    <circle cx="29" cy="18" r="2.2" fill="#f2b705"/>
+    <circle cx="27" cy="42" r="2.2" fill="#f2b705"/>
+    <circle cx="43" cy="54" r="2.2" fill="#f2b705"/>
+    <circle cx="63" cy="56" r="2.2" fill="#f2b705"/>
+    <circle class="fish-eye-white" cx="72" cy="24" r="6" fill="#fff"/>
+    <circle class="fish-pupil" cx="74" cy="24" r="3" fill="#241a14"/>
+  `,
+  shark: `
+    <path class="fish-tail shark-tail-seg" d="M18,30 L0,18 L0,42 Z" fill="#1a3a6e"/>
+    <path class="fish-tail shark-tail-seg" d="M28,30 L12,16 L12,44 Z" fill="#234a82" opacity="0.9"/>
+    <ellipse class="fish-body shark-body" cx="62" cy="30" rx="34" ry="16" fill="#1e4d8c"/>
+    <path class="shark-dorsal" d="M48,14 L54,-2 L60,14 Z" fill="#163a6b"/>
+    <path class="shark-fin" d="M38,38 L32,52 L46,42 Z" fill="#234a82" opacity="0.85"/>
+    <path class="shark-gill" d="M52,22 Q54,30 52,38" fill="none" stroke="#0f2847" stroke-width="2"/>
+    <path class="shark-gill" d="M58,22 Q60,30 58,38" fill="none" stroke="#0f2847" stroke-width="2"/>
+    <circle class="fish-eye-white" cx="88" cy="26" r="5" fill="#e8f4ff"/>
+    <circle class="fish-pupil" cx="89" cy="26" r="2.5" fill="#0a1628"/>
+  `,
+};
+const FISH_SIZE_RANGES = {
+  clownfish: [46, 62],
+  betta: [50, 68],
+  angelfish: [50, 70],
+  guppy: [30, 42],
+  pufferfish: [38, 52],
+  shark: [72, 96],
+};
+
+const FISH_PREY_COUNT = 12;
+const FISH_MOUSE_RADIUS = 100;
+const FISH_BUBBLE_RADIUS = 60;
+const FISH_SHARK_PANIC_RADIUS = 200;
+const SHARK_STRIKE_RADIUS = 150;
+const SHARK_CATCH_RADIUS = 20;
+const SHARK_CONFUSE_TIMEOUT = 5;
+const SHARK_EAT_PAUSE = 1.5;
+const PREY_RESPAWN_DELAY = 5;
+
+const fishEngine = {
+  state: {
+    fishes: [],
+    mouse: { x: -9999, y: -9999 },
+    width: 0,
+    height: 0,
+    running: false,
+    lastTime: 0,
+    nextId: 1,
+    respawnTimers: [],
+  },
+  field: null,
+  rafId: null,
+  built: false,
+  listenersBound: false,
+};
+
+const SPECIES_PHYSICS = {
+  clownfish: { maxSpeed: 140, maxForce: 320, mass: 1, burst: true },
+  betta: { maxSpeed: 95, maxForce: 180, mass: 1.1, glide: true },
+  angelfish: { maxSpeed: 80, maxForce: 150, mass: 1.3, vertical: true },
+  guppy: { maxSpeed: 180, maxForce: 400, mass: 0.7, zigzag: true },
+  pufferfish: { maxSpeed: 65, maxForce: 120, mass: 1.8, heavy: true },
+  shark: { maxSpeed: 200, maxForce: 280, mass: 2.5 },
+};
+
+function fishVec(x = 0, y = 0) { return { x, y }; }
+function fishLen(v) { return Math.hypot(v.x, v.y); }
+function fishNorm(v) {
+  const l = fishLen(v);
+  return l > 0.0001 ? { x: v.x / l, y: v.y / l } : { x: 0, y: 0 };
+}
+function fishSub(a, b) { return { x: a.x - b.x, y: a.y - b.y }; }
+function fishAdd(a, b) { return { x: a.x + b.x, y: a.y + b.y }; }
+function fishScale(v, s) { return { x: v.x * s, y: v.y * s }; }
+function fishDist(a, b) { return fishLen(fishSub(a, b)); }
+function fishLimit(v, max) {
+  const l = fishLen(v);
+  if (l > max) return fishScale(fishNorm(v), max);
+  return v;
+}
+function fishClamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+function fishLerp(a, b, t) { return a + (b - a) * t; }
+function fishRand(min, max) { return min + Math.random() * (max - min); }
+
+function fishSteerSeek(pos, vel, target, maxSpeed, maxForce) {
+  const desired = fishScale(fishNorm(fishSub(target, pos)), maxSpeed);
+  const steer = fishSub(desired, vel);
+  return fishLimit(steer, maxForce);
+}
+
+function fishSteerFlee(pos, vel, threat, fleeRadius, maxSpeed, maxForce) {
+  const d = fishDist(pos, threat);
+  if (d > fleeRadius || d < 0.001) return fishVec();
+  const strength = (fleeRadius - d) / fleeRadius;
+  const desired = fishScale(fishNorm(fishSub(pos, threat)), maxSpeed * strength);
+  const steer = fishSub(desired, vel);
+  return fishLimit(steer, maxForce * (1 + strength));
+}
+
+function fishApplyForce(fish, force, dt) {
+  const accel = fishScale(force, 1 / (fish.mass || 1));
+  fish.vx += accel.x * dt;
+  fish.vy += accel.y * dt;
+}
+
+function fishWrapBounds(fish, w, h, pad) {
+  if (fish.x < -pad) fish.x = w + pad;
+  if (fish.x > w + pad) fish.x = -pad;
+  if (fish.y < -pad) fish.y = h + pad;
+  if (fish.y > h + pad) fish.y = -pad;
+}
+
+function fishPerimeterSpawn(w, h) {
+  const edge = Math.floor(Math.random() * 4);
+  const m = 40;
+  if (edge === 0) return { x: fishRand(-m, w + m), y: -m };
+  if (edge === 1) return { x: w + m, y: fishRand(-m, h + m) };
+  if (edge === 2) return { x: fishRand(-m, w + m), y: h + m };
+  return { x: -m, y: fishRand(-m, h + m) };
+}
+
+function fishSpeciesHidden(species) {
+  return document.body.classList.contains(`fish-hide-${species}`);
+}
+
+function fishCreateDOM(fish) {
+  const el = document.createElement("div");
+  el.className = `fish-particle species-${fish.species} type-${fish.type}`;
+  el.dataset.fishId = String(fish.id);
+  el.style.width = `${fish.size}px`;
+  el.style.height = `${fish.size * 0.6}px`;
+  const orient = document.createElement("div");
+  orient.className = "fish-orient";
+  orient.innerHTML = `<svg class="fish-svg" viewBox="${FISH_SVG_VIEWBOX}">${FISH_SPECIES_MARKUP[fish.species]}</svg>`;
+  el.appendChild(orient);
+  fish.el = el;
+  fish.orientEl = orient;
+  fish.pupilEl = orient.querySelector(".fish-pupil");
+  fish.tailEl = orient.querySelector(".fish-tail");
+  if (fish.pupilEl) {
+    fish.pupilBase = {
+      cx: parseFloat(fish.pupilEl.getAttribute("cx") || "0"),
+      cy: parseFloat(fish.pupilEl.getAttribute("cy") || "0"),
+    };
+  }
+  return el;
+}
+
+function fishSpawnPrey(species, pos) {
+  const [minS, maxS] = FISH_SIZE_RANGES[species] || [40, 60];
+  const w = fishEngine.state.width || window.innerWidth;
+  const h = fishEngine.state.height || window.innerHeight;
+  const spawn = pos || { x: fishRand(0, w), y: fishRand(h * 0.08, h * 0.88) };
+  const cfg = SPECIES_PHYSICS[species] || SPECIES_PHYSICS.clownfish;
+  const fish = {
+    id: fishEngine.state.nextId++,
+    type: "prey",
+    species,
+    x: spawn.x,
+    y: spawn.y,
+    vx: fishRand(-40, 40),
+    vy: fishRand(-20, 20),
+    targetVelocity: fishVec(),
+    size: fishRand(minS, maxS),
+    angle: 0,
+    scaleX: 1,
+    scaleY: 1,
+    extraRot: 0,
+    currentBehavior: "wandering",
+    behaviorTimer: fishRand(8, 15),
+    trickActive: null,
+    trickTimer: 0,
+    panic: false,
+    mass: cfg.mass,
+    maxSpeed: cfg.maxSpeed,
+    maxForce: cfg.maxForce,
+    wanderAngle: Math.random() * Math.PI * 2,
+    burstPhase: 0,
+    zigzagPhase: 0,
+    pupilOffset: { x: 0, y: 0 },
+    tailHz: 0.7,
+    tailAmp: 16,
+    removing: false,
+    frozen: false,
+  };
+  fishCreateDOM(fish);
+  fishEngine.field.appendChild(fish.el);
+  fishEngine.state.fishes.push(fish);
+  return fish;
+}
+
+function fishSpawnShark(pos) {
+  const w = fishEngine.state.width || window.innerWidth;
+  const h = fishEngine.state.height || window.innerHeight;
+  const spawn = pos || fishPerimeterSpawn(w, h);
+  const cfg = SPECIES_PHYSICS.shark;
+  const fish = {
+    id: fishEngine.state.nextId++,
+    type: "shark",
+    species: "shark",
+    x: spawn.x,
+    y: spawn.y,
+    vx: fishRand(-30, 30),
+    vy: fishRand(-30, 30),
+    targetVelocity: fishVec(),
+    size: fishRand(FISH_SIZE_RANGES.shark[0], FISH_SIZE_RANGES.shark[1]),
+    angle: 0,
+    scaleX: 1,
+    scaleY: 1,
+    extraRot: 0,
+    currentBehavior: "wandering",
+    behaviorTimer: 0,
+    targetPreyId: null,
+    huntTimer: 0,
+    strikeMode: false,
+    confuseSpin: 0,
+    chewTimer: 0,
+    mass: cfg.mass,
+    maxSpeed: cfg.maxSpeed,
+    maxForce: cfg.maxForce,
+    wanderAngle: Math.random() * Math.PI * 2,
+    pupilOffset: { x: 0, y: 0 },
+    tailHz: 0.5,
+    removing: false,
+    frozen: false,
+  };
+  fishCreateDOM(fish);
+  fish.el.classList.add("shark-particle");
+  fishEngine.field.appendChild(fish.el);
+  fishEngine.state.fishes.push(fish);
+  return fish;
+}
+
+function fishGetBubblePositions() {
+  const field = document.getElementById("bubble-field");
+  if (!field) return [];
+  const bubbles = [];
+  field.querySelectorAll(".bubble-particle").forEach((el) => {
+    const r = el.getBoundingClientRect();
+    if (r.width < 1) return;
+    const draftX = parseFloat(el.dataset.draftX || "0") || 0;
+    const draftY = parseFloat(el.dataset.draftY || "0") || 0;
+    bubbles.push({
+      el,
+      x: r.left + r.width / 2 + draftX,
+      y: r.top + r.height / 2 + draftY,
+      r: r.width / 2,
+    });
+  });
+  return bubbles;
+}
+
+function fishPushBubbleDraft(bubble, fishVx, fishVy) {
+  if (!bubble.el) return;
+  let dx = (parseFloat(bubble.el.dataset.draftX) || 0) + fishVx * 0.012;
+  let dy = (parseFloat(bubble.el.dataset.draftY) || 0) + fishVy * 0.008;
+  dx *= 0.92;
+  dy *= 0.92;
+  bubble.el.dataset.draftX = dx.toFixed(2);
+  bubble.el.dataset.draftY = dy.toFixed(2);
+  bubble.el.style.setProperty("--bdraft-x", `${dx}px`);
+  bubble.el.style.setProperty("--bdraft-y", `${dy}px`);
+}
+
+function fishNearestPrey(shark) {
+  let best = null;
+  let bestD = Infinity;
+  fishEngine.state.fishes.forEach((f) => {
+    if (f.type !== "prey" || f.removing || f.frozen || fishSpeciesHidden(f.species)) return;
+    const d = fishDist(shark, f);
+    if (d < bestD) { bestD = d; best = f; }
+  });
+  return best;
+}
+
+function fishSharkTargeting(shark, dt) {
+  if (shark.currentBehavior === "eating") return;
+  if (shark.confuseSpin > 0) {
+    shark.confuseSpin -= dt;
+    shark.extraRot += 18 * dt * 60;
+    shark.currentBehavior = "wandering";
+    return;
+  }
+  let target = fishEngine.state.fishes.find((f) => f.id === shark.targetPreyId && !f.removing && !f.frozen);
+  if (!target) {
+    target = fishNearestPrey(shark);
+    shark.targetPreyId = target ? target.id : null;
+    shark.huntTimer = 0;
+    shark.strikeMode = false;
+  }
+  if (!target) {
+    shark.currentBehavior = "wandering";
+    shark.strikeMode = false;
+    return;
+  }
+  const d = fishDist(shark, target);
+  shark.huntTimer += dt;
+  if (shark.huntTimer > SHARK_CONFUSE_TIMEOUT && d > SHARK_STRIKE_RADIUS) {
+    shark.confuseSpin = 1.2;
+    shark.targetPreyId = null;
+    shark.huntTimer = 0;
+    shark.strikeMode = false;
+    return;
+  }
+  if (d < SHARK_STRIKE_RADIUS) {
+    shark.strikeMode = true;
+    shark.currentBehavior = "hunting";
+  } else {
+    shark.strikeMode = false;
+    shark.currentBehavior = "hunting";
+  }
+  const cfg = SPECIES_PHYSICS.shark;
+  const speedMul = shark.strikeMode ? 2 : 1;
+  const toPrey = fishSub(target, shark);
+  const perp = fishNorm({ x: -toPrey.y, y: toPrey.x });
+  const ambushOffset = fishScale(perp, shark.strikeMode ? 0 : 80 * Math.sin(Date.now() * 0.001 + shark.id));
+  const aim = fishAdd(target, ambushOffset);
+  const force = fishSteerSeek(shark, fishVec(shark.vx, shark.vy), aim, cfg.maxSpeed * speedMul, cfg.maxForce);
+  fishApplyForce(shark, force, 1);
+  if (shark.strikeMode && d < SHARK_CATCH_RADIUS) fishConsumePrey(shark, target);
+}
+
+function fishConsumePrey(shark, prey) {
+  if (prey.removing) return;
+  prey.removing = true;
+  prey.frozen = true;
+  prey.vx = 0;
+  prey.vy = 0;
+  prey.el.classList.add("fish-being-eaten");
+  setTimeout(() => {
+    if (prey.el && prey.el.parentNode) prey.el.parentNode.removeChild(prey.el);
+    fishEngine.state.fishes = fishEngine.state.fishes.filter((f) => f.id !== prey.id);
+  }, 150);
+  fishSpawnFeastBurst(prey.x, prey.y);
+  fishSpawnChompText(prey.x, prey.y);
+  shark.currentBehavior = "eating";
+  shark.chewTimer = SHARK_EAT_PAUSE;
+  shark.strikeMode = false;
+  shark.targetPreyId = null;
+  shark.vx *= 0.1;
+  shark.vy *= 0.1;
+  setTimeout(() => {
+    const species = FISH_SPECIES_IDS[Math.floor(Math.random() * FISH_SPECIES_IDS.length)];
+    if (!fishSpeciesHidden(species)) fishSpawnPrey(species, fishPerimeterSpawn(fishEngine.state.width, fishEngine.state.height));
+  }, PREY_RESPAWN_DELAY * 1000);
+}
+
+function fishSpawnFeastBurst(x, y) {
+  const n = 4 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < n; i++) {
+    const p = document.createElement("div");
+    p.className = "feast-particle";
+    const ang = (Math.PI * 2 * i) / n + Math.random() * 0.5;
+    const dist = 8 + Math.random() * 18;
+    p.style.left = `${x}px`;
+    p.style.top = `${y}px`;
+    p.style.setProperty("--fbx", `${Math.cos(ang) * dist}px`);
+    p.style.setProperty("--fby", `${Math.sin(ang) * dist}px`);
+    fishEngine.field.appendChild(p);
+    setTimeout(() => p.remove(), 700);
+  }
+}
+
+function fishSpawnChompText(x, y) {
+  const t = document.createElement("div");
+  t.className = "chomp-text";
+  t.textContent = "Chomp!";
+  t.style.left = `${x}px`;
+  t.style.top = `${y}px`;
+  fishEngine.field.appendChild(t);
+  setTimeout(() => t.remove(), 900);
+}
+
+function fishUpdatePreyTrick(fish, dt) {
+  if (fish.trickActive) {
+    fish.trickTimer -= dt;
+    if (fish.trickTimer <= 0) {
+      fish.trickActive = null;
+      fish.extraRot = 0;
+      fish.scaleX = 1;
+      fish.scaleY = 1;
+      fish.el.classList.remove("fish-trick-active");
+      fish.behaviorTimer = fishRand(8, 15);
+    }
+    return;
+  }
+  fish.behaviorTimer -= dt;
+  if (fish.behaviorTimer > 0) return;
+  fish.el.classList.add("fish-trick-active");
+  switch (fish.species) {
+    case "clownfish":
+      fish.trickActive = "wobbly-roll";
+      fish.trickTimer = 1.1;
+      break;
+    case "betta":
+      fish.trickActive = "flourish-flare";
+      fish.trickTimer = 1.8;
+      fish.scaleX = fish.scaleY = 1.2;
+      break;
+    case "angelfish":
+      fish.trickActive = "curious-peek";
+      fish.trickTimer = 2;
+      fish.scaleY = 1.15;
+      break;
+    case "guppy":
+      fish.trickActive = "happy-twirl";
+      fish.trickTimer = 1.2;
+      break;
+    case "pufferfish":
+      fish.trickActive = "puff-balloon";
+      fish.trickTimer = 2;
+      fish.scaleX = fish.scaleY = 2.5;
+      fish.vy -= 25;
+      break;
+    default:
+      fish.behaviorTimer = fishRand(8, 15);
+      fish.el.classList.remove("fish-trick-active");
+  }
+}
+
+function fishBubbleDodgeForce(fish, bubble, cfg) {
+  const away = fishSteerFlee(fish, fishVec(fish.vx, fish.vy), bubble, FISH_BUBBLE_RADIUS, cfg.maxSpeed * 1.2, cfg.maxForce);
+  if (fish.species === "angelfish" || fish.species === "betta") {
+    const tangent = fishNorm({ x: -away.y, y: away.x });
+    return fishAdd(away, fishScale(tangent, cfg.maxForce * 0.6));
+  }
+  if (fish.species === "clownfish" || fish.species === "guppy") {
+    return fishScale(away, 1.8);
+  }
+  if (fish.species === "pufferfish") {
+    fish.scaleX = fish.scaleY = 0.85;
+    return fishScale(away, 0.7);
+  }
+  return away;
+}
+
+function fishUpdatePrey(fish, dt, bubbles, sharks) {
+  if (fish.frozen || fish.removing || fishSpeciesHidden(fish.species)) return;
+  const cfg = SPECIES_PHYSICS[fish.species] || SPECIES_PHYSICS.clownfish;
+  let force = fishVec();
+  let behavior = "wandering";
+  fish.panic = false;
+
+  const mouseD = fishDist(fish, fishEngine.state.mouse);
+  if (mouseD < FISH_MOUSE_RADIUS) {
+    behavior = "fleeing_mouse";
+    force = fishAdd(force, fishSteerFlee(fish, fishVec(fish.vx, fish.vy), fishEngine.state.mouse, FISH_MOUSE_RADIUS, cfg.maxSpeed * 1.6, cfg.maxForce * 2));
+  }
+
+  let nearestShark = null;
+  let sharkD = Infinity;
+  sharks.forEach((s) => {
+    if (s.currentBehavior === "eating" || s.removing) return;
+    const d = fishDist(fish, s);
+    if (d < sharkD) { sharkD = d; nearestShark = s; }
+    if (s.targetPreyId === fish.id && d < FISH_SHARK_PANIC_RADIUS) {
+      behavior = "evading_shark";
+      fish.panic = true;
+      force = fishAdd(force, fishSteerFlee(fish, fishVec(fish.vx, fish.vy), s, FISH_SHARK_PANIC_RADIUS, cfg.maxSpeed * 2.5, cfg.maxForce * 2.5));
+    }
+  });
+
+  bubbles.forEach((b) => {
+    const d = fishDist(fish, b);
+    if (d < FISH_BUBBLE_RADIUS + b.r) {
+      if (behavior === "wandering") behavior = "evading_bubble";
+      force = fishAdd(force, fishBubbleDodgeForce(fish, b, cfg));
+    }
+    if (d < 90 && fishLen(fishVec(fish.vx, fish.vy)) > 60) fishPushBubbleDraft(b, fish.vx, fish.vy);
+  });
+
+  if (behavior === "wandering") {
+    fishUpdatePreyTrick(fish, dt);
+    if (fish.trickActive === "wobbly-roll") fish.extraRot += 360 * dt;
+    if (fish.trickActive === "happy-twirl") {
+      fish.wanderAngle += 12 * dt;
+      force = fishAdd(force, fishScale(fishNorm({ x: Math.cos(fish.wanderAngle), y: Math.sin(fish.wanderAngle) }), cfg.maxForce));
+    }
+    if (fish.trickActive === "curious-peek") {
+      fish.extraRot = Math.sin(Date.now() * 0.008) * 8;
+    }
+    const wanderTarget = {
+      x: fish.x + Math.cos(fish.wanderAngle) * 120,
+      y: fish.y + Math.sin(fish.wanderAngle) * 80,
+    };
+    fish.wanderAngle += fishRand(-0.4, 0.4) * dt;
+    if (cfg.burst && fish.species === "clownfish") {
+      fish.burstPhase += dt;
+      if (fish.burstPhase > 1.2) { fish.burstPhase = 0; force = fishAdd(force, fishSteerSeek(fish, fishVec(fish.vx, fish.vy), wanderTarget, cfg.maxSpeed, cfg.maxForce * 1.4)); }
+      else if (fish.burstPhase > 0.9) { fish.vx *= 0.95; fish.vy *= 0.95; }
+    } else if (cfg.zigzag) {
+      fish.zigzagPhase += dt * 8;
+      wanderTarget.x += Math.sin(fish.zigzagPhase) * 60;
+      force = fishAdd(force, fishSteerSeek(fish, fishVec(fish.vx, fish.vy), wanderTarget, cfg.maxSpeed, cfg.maxForce));
+    } else if (cfg.vertical && fish.species === "angelfish") {
+      wanderTarget.y += Math.sin(Date.now() * 0.001 + fish.id) * 40;
+      force = fishAdd(force, fishSteerSeek(fish, fishVec(fish.vx, fish.vy), wanderTarget, cfg.maxSpeed * 0.85, cfg.maxForce));
+    } else {
+      force = fishAdd(force, fishSteerSeek(fish, fishVec(fish.vx, fish.vy), wanderTarget, cfg.maxSpeed, cfg.maxForce * 0.7));
+    }
+  }
+
+  fish.currentBehavior = behavior;
+  fishApplyForce(fish, force, dt);
+  const speedCap = fish.panic ? cfg.maxSpeed * 2.5 : cfg.maxSpeed;
+  const vel = fishLimit(fishVec(fish.vx, fish.vy), speedCap);
+  fish.vx = vel.x;
+  fish.vy = vel.y;
+  fish.x += fish.vx * dt;
+  fish.y += fish.vy * dt;
+  fishWrapBounds(fish, fishEngine.state.width, fishEngine.state.height, 60);
+  if (!fish.trickActive && behavior !== "evading_bubble") {
+    fish.scaleX = fish.scaleY = 1;
+  }
+
+  const spd = fishLen(vel);
+  fish.tailHz = fishLerp(0.35, fish.panic ? 2.2 : 1.4, Math.min(spd / cfg.maxSpeed, 1));
+  fish.tailAmp = fish.panic ? 22 : fishLerp(8, 16, Math.min(spd / cfg.maxSpeed, 1));
+  if (Math.abs(fish.vx) > 2) fish.orientEl.style.transform = fish.vx < 0 ? "scaleX(-1)" : "scaleX(1)";
+  fish.angle = Math.atan2(fish.vy, Math.abs(fish.vx) + 0.001) * (180 / Math.PI) * 0.35;
+
+  let look = fishNorm(vel);
+  if (nearestShark && sharkD < FISH_SHARK_PANIC_RADIUS) {
+    const flee = fishNorm(fishSub(fish, nearestShark));
+    look = flee;
+  }
+  if (fish.pupilEl && fish.pupilBase) {
+    fish.pupilOffset.x = fishLerp(fish.pupilOffset.x, look.x * 1.8, 0.08);
+    fish.pupilOffset.y = fishLerp(fish.pupilOffset.y, look.y * 1.2, 0.08);
+    fish.pupilEl.setAttribute("cx", (fish.pupilBase.cx + fish.pupilOffset.x).toFixed(2));
+    fish.pupilEl.setAttribute("cy", (fish.pupilBase.cy + fish.pupilOffset.y).toFixed(2));
+  }
+}
+
+function fishUpdateShark(shark, dt) {
+  if (shark.removing) return;
+  if (shark.currentBehavior === "eating") {
+    shark.chewTimer -= dt;
+    shark.extraRot = Math.sin(Date.now() * 0.02) * 6;
+    if (shark.chewTimer <= 0) {
+      shark.currentBehavior = "wandering";
+      shark.extraRot = 0;
+    }
+    return;
+  }
+  fishSharkTargeting(shark, dt);
+  const cfg = SPECIES_PHYSICS.shark;
+  if (shark.currentBehavior === "wandering") {
+    const wanderTarget = {
+      x: shark.x + Math.cos(shark.wanderAngle) * 160,
+      y: shark.y + Math.sin(shark.wanderAngle) * 100,
+    };
+    shark.wanderAngle += fishRand(-0.3, 0.3) * dt;
+    fishApplyForce(shark, fishSteerSeek(shark, fishVec(shark.vx, shark.vy), wanderTarget, cfg.maxSpeed * 0.6, cfg.maxForce * 0.5), dt);
+  }
+  const vel = fishLimit(fishVec(shark.vx, shark.vy), cfg.maxSpeed * (shark.strikeMode ? 2 : 1));
+  shark.vx = vel.x;
+  shark.vy = vel.y;
+  shark.x += shark.vx * dt;
+  shark.y += shark.vy * dt;
+  fishWrapBounds(shark, fishEngine.state.width, fishEngine.state.height, 80);
+  shark.tailHz = fishLerp(0.4, 1.1, Math.min(fishLen(vel) / cfg.maxSpeed, 1));
+  if (Math.abs(shark.vx) > 2) shark.orientEl.style.transform = shark.vx < 0 ? "scaleX(-1)" : "scaleX(1)";
+  shark.angle = Math.atan2(shark.vy, Math.abs(shark.vx) + 0.001) * (180 / Math.PI) * 0.25;
+}
+
+function fishRenderEntity(fish) {
+  if (!fish.el || fish.removing) return;
+  const rot = fish.angle + (fish.extraRot || 0);
+  fish.el.style.transform = `translate3d(${fish.x.toFixed(1)}px,${fish.y.toFixed(1)}px,0) rotate(${rot.toFixed(2)}deg) scale(${fish.scaleX || 1},${fish.scaleY || 1})`;
+  fish.el.style.setProperty("--tail-hz", `${(fish.tailHz || 0.7).toFixed(2)}`);
+  fish.el.style.setProperty("--tail-amp", `${(fish.tailAmp || 16).toFixed(0)}deg`);
+  fish.el.classList.toggle("fish-panic", !!fish.panic);
+  fish.el.dataset.behavior = fish.currentBehavior;
+}
+
+function fishClearSharkThreats() {
+  fishEngine.state.fishes.forEach((f) => {
+    if (f.type !== "prey") return;
+    if (f.currentBehavior === "evading_shark") f.currentBehavior = "wandering";
+    f.panic = false;
+  });
+}
+
+function fishTick(now) {
+  if (!fishEngine.state.running) return;
+  if (!document.body.classList.contains("bubbly-mode") || !document.body.classList.contains("fish-mode-on")) {
+    fishEngine.rafId = requestAnimationFrame(fishTick);
+    return;
+  }
+  const dt = Math.min((now - (fishEngine.state.lastTime || now)) / 1000, 0.05);
+  fishEngine.state.lastTime = now;
+  fishEngine.state.width = window.innerWidth;
+  fishEngine.state.height = window.innerHeight;
+
+  const bubbles = fishGetBubblePositions();
+  const sharks = fishEngine.state.fishes.filter((f) => f.type === "shark" && !f.removing);
+
+  fishEngine.state.fishes.forEach((f) => {
+    if (f.type === "prey") fishUpdatePrey(f, dt, bubbles, sharks);
+    else if (f.type === "shark") fishUpdateShark(f, dt);
+    fishRenderEntity(f);
+  });
+
+  fishEngine.rafId = requestAnimationFrame(fishTick);
+}
+
+function fishStartEngine() {
+  if (fishEngine.state.running || PREFERS_REDUCED_MOTION) return;
+  fishEngine.state.running = true;
+  fishEngine.state.lastTime = performance.now();
+  fishEngine.rafId = requestAnimationFrame(fishTick);
+}
+
+function fishStopEngine() {
+  fishEngine.state.running = false;
+  if (fishEngine.rafId) cancelAnimationFrame(fishEngine.rafId);
+  fishEngine.rafId = null;
+}
+
+function fishBindListeners() {
+  if (fishEngine.listenersBound) return;
+  fishEngine.listenersBound = true;
+  const trackMouse = (e) => {
+    fishEngine.state.mouse.x = e.clientX;
+    fishEngine.state.mouse.y = e.clientY;
+  };
+  document.addEventListener("pointermove", trackMouse, { passive: true });
+  document.addEventListener("mousemove", trackMouse, { passive: true });
+  window.addEventListener("resize", () => {
+    fishEngine.state.width = window.innerWidth;
+    fishEngine.state.height = window.innerHeight;
+  });
+}
+
+window.addShark = function addShark() {
+  if (!fishEngine.built) initFishField();
+  if (!getFishMode()) return null;
+  return fishSpawnShark();
+};
+
+window.removeShark = function removeShark() {
+  const sharks = fishEngine.state.fishes.filter((f) => f.type === "shark" && !f.removing);
+  if (!sharks.length) {
+    fishClearSharkThreats();
+    return null;
+  }
+  const oldest = sharks[0];
+  oldest.removing = true;
+  oldest.el.classList.add("shark-fade-out");
+  setTimeout(() => {
+    if (oldest.el && oldest.el.parentNode) oldest.el.parentNode.removeChild(oldest.el);
+    fishEngine.state.fishes = fishEngine.state.fishes.filter((f) => f.id !== oldest.id);
+    if (!fishEngine.state.fishes.some((f) => f.type === "shark")) fishClearSharkThreats();
+  }, 300);
+  return oldest;
+};
+
+function getFishMode() {
+  try {
+    const v = localStorage.getItem(FISH_MODE_STORAGE);
+    return v === null ? DEFAULT_FISH_MODE : v === "true";
+  } catch (err) {
+    return DEFAULT_FISH_MODE;
+  }
+}
+
+function setFishMode(on) {
+  try {
+    localStorage.setItem(FISH_MODE_STORAGE, String(!!on));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function getFishSpeciesPrefs() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FISH_SPECIES_STORAGE));
+    if (raw && typeof raw === "object") {
+      const merged = { ...DEFAULT_FISH_SPECIES_PREFS };
+      FISH_SPECIES_IDS.forEach((id) => {
+        if (typeof raw[id] === "boolean") merged[id] = raw[id];
+      });
+      return merged;
+    }
+  } catch (err) {
+    // fall through to defaults
+  }
+  return { ...DEFAULT_FISH_SPECIES_PREFS };
+}
+
+function setFishSpeciesEnabled(id, on) {
+  try {
+    const prefs = getFishSpeciesPrefs();
+    prefs[id] = !!on;
+    localStorage.setItem(FISH_SPECIES_STORAGE, JSON.stringify(prefs));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+// Mirrors applyGlassPrefs()'s pattern: sets body classes the CSS
+// consumes directly, and syncs the Display panel's own checkboxes so
+// they reflect saved state whenever the panel (re)opens.
+function applyFishPrefs() {
+  const on = getFishMode();
+  document.body.classList.toggle("fish-mode-on", on);
+  const prefs = getFishSpeciesPrefs();
+  FISH_SPECIES_IDS.forEach((id) => {
+    document.body.classList.toggle(`fish-hide-${id}`, !prefs[id]);
+  });
+
+  if (fishModeToggle) fishModeToggle.checked = on;
+  fishSpeciesCheckboxes.forEach((cb) => {
+    cb.checked = !!prefs[cb.dataset.species];
+  });
+  if (fishSpeciesControls) fishSpeciesControls.classList.toggle("disabled", !on);
+  const sharkControls = document.querySelector(".fish-shark-controls");
+  if (sharkControls) sharkControls.classList.toggle("disabled", !on);
+}
+
+const FISH_FIELD_COUNT = FISH_PREY_COUNT;
+let fishFieldBuilt = false;
+
+function initFishField() {
+  if (fishFieldBuilt || PREFERS_REDUCED_MOTION) return;
+  fishEngine.field = document.getElementById("fish-field");
+  if (!fishEngine.field) return;
+  fishFieldBuilt = true;
+  fishEngine.built = true;
+  fishEngine.state.width = window.innerWidth;
+  fishEngine.state.height = window.innerHeight;
+  fishBindListeners();
+
+  FISH_SPECIES_IDS.forEach((species, i) => {
+    const count = Math.ceil(FISH_PREY_COUNT / FISH_SPECIES_IDS.length);
+    for (let j = 0; j < count && fishEngine.state.fishes.filter((f) => f.type === "prey").length < FISH_PREY_COUNT; j++) {
+      if (!fishSpeciesHidden(species)) fishSpawnPrey(species);
+    }
+  });
+  while (fishEngine.state.fishes.filter((f) => f.type === "prey").length < FISH_PREY_COUNT) {
+    const species = FISH_SPECIES_IDS[Math.floor(Math.random() * FISH_SPECIES_IDS.length)];
+    fishSpawnPrey(species);
+  }
+  fishSpawnShark();
+  fishStartEngine();
 }
 
 // The three glass sliders — transparency, blur, and tint — only make
@@ -1882,6 +2802,7 @@ function applyDisplayPrefs() {
   root.setProperty("--img-thumb-size", `${getImgThumbSize()}px`);
   applyBubblyMode();
   applyGlassPrefs();
+  applyFishPrefs();
 }
 
 bubblyModeToggle.addEventListener("change", () => {
@@ -1889,6 +2810,32 @@ bubblyModeToggle.addEventListener("change", () => {
   applyBubblyMode();
   applyGlassPrefs();
 });
+
+if (fishModeToggle) {
+  fishModeToggle.addEventListener("change", () => {
+    setFishMode(fishModeToggle.checked);
+    if (fishModeToggle.checked) initFishField();
+    applyFishPrefs();
+  });
+}
+
+fishSpeciesCheckboxes.forEach((cb) => {
+  cb.addEventListener("change", () => {
+    setFishSpeciesEnabled(cb.dataset.species, cb.checked);
+    applyFishPrefs();
+  });
+});
+
+if (addSharkBtn) {
+  addSharkBtn.addEventListener("click", () => {
+    if (getFishMode()) window.addShark();
+  });
+}
+if (removeSharkBtn) {
+  removeSharkBtn.addEventListener("click", () => {
+    window.removeShark();
+  });
+}
 
 glassTransparencyInput.addEventListener("input", () => {
   glassTransparencyValue.textContent = `${glassTransparencyInput.value}%`;

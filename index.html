@@ -12,6 +12,18 @@
 </head>
 <body>
 
+<!-- 🫧 Liquid Interface: ambient bubbles that drift up and grow/blur toward
+     the viewer, reinforcing the "coming out of the screen" 3D read. Empty
+     until script.js lazily fills it the first time Liquid Interface is
+     turned on; invisible (opacity:0) whenever bubbly-mode is off. -->
+<div id="bubble-field" class="bubble-field" aria-hidden="true"></div>
+
+<!-- 🐠 Cute swimming fish, same idea as #bubble-field: empty until
+     script.js fills it, hidden unless Liquid Interface AND the fish
+     master toggle are both on. Species can be individually shown/hidden
+     via body classes toggled from the Display panel — see style.css. -->
+<div id="fish-field" class="fish-field" aria-hidden="true"></div>
+
 <header class="site-header" id="site-header-bar">
   <div class="header-inner">
     <h1>Literary Vocabulary Register</h1>
@@ -110,6 +122,47 @@
               <span id="glass-tint-value" class="slider-value">50%</span>
             </div>
             <input type="range" id="glass-tint-input" min="0" max="100" step="5">
+          </div>
+
+          <hr class="storage-divider">
+
+          <div class="bubbly-toggle-row">
+            <div class="bubbly-toggle-label">
+              <span class="bubbly-toggle-title">🐠 Swimming fish</span>
+              <span class="bubbly-toggle-hint">Interactive marine ecosystem with physics &amp; sharks</span>
+            </div>
+            <label class="switch" for="fish-mode-toggle">
+              <input type="checkbox" id="fish-mode-toggle">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+
+          <div id="fish-species-controls" class="fish-species-controls">
+            <label class="fish-species-check">
+              <input type="checkbox" id="fish-species-clownfish" data-species="clownfish">
+              <span>🟠 Clownfish</span>
+            </label>
+            <label class="fish-species-check">
+              <input type="checkbox" id="fish-species-betta" data-species="betta">
+              <span>🔵 Betta</span>
+            </label>
+            <label class="fish-species-check">
+              <input type="checkbox" id="fish-species-angelfish" data-species="angelfish">
+              <span>⚪ Angelfish</span>
+            </label>
+            <label class="fish-species-check">
+              <input type="checkbox" id="fish-species-guppy" data-species="guppy">
+              <span>🌈 Guppy</span>
+            </label>
+            <label class="fish-species-check">
+              <input type="checkbox" id="fish-species-pufferfish" data-species="pufferfish">
+              <span>🟡 Pufferfish</span>
+            </label>
+          </div>
+
+          <div class="fish-shark-controls">
+            <button type="button" id="add-shark-btn" class="btn btn-secondary btn-small">🦈 Add Shark</button>
+            <button type="button" id="remove-shark-btn" class="btn btn-secondary btn-small">Remove Shark</button>
           </div>
         </div>
 

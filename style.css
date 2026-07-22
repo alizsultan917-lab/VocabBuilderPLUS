@@ -191,6 +191,48 @@ h1, h2, h3 {
   margin: 0.7rem 0;
 }
 
+/* ---------- Fish tank species checkboxes (Display panel, nested under
+   Liquid Interface) ---------- */
+.fish-species-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.7rem;
+  margin: -0.15rem 0 0.7rem;
+  transition: opacity 0.2s ease;
+}
+
+.fish-species-controls.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.fish-species-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+  user-select: none;
+}
+
+.fish-species-check input {
+  cursor: pointer;
+  accent-color: var(--blue);
+}
+
+.fish-shark-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 0.7rem;
+}
+
+.fish-shark-controls.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 .origin-row {
   display: flex;
   align-items: center;
@@ -1620,8 +1662,11 @@ tbody tr:hover {
 body.bubbly-mode {
   --radius: 24px;
 
-  /* Highlight blooms + ring, derived from the sliders once, reused by
-     every control below so the whole theme moves together. */
+  /* Generic bubble tokens — used as-is by cards, panels, tags, and other
+     larger/flatter surfaces. The round & pill interactive controls (.btn,
+     .icon-btn, .storage-toggle-btn, .switch-track) get a stronger,
+     more volumetric override just below, sized for their own dimensions
+     — see "INTERACTIVE CONTROLS" further down. */
   --bubble-hl1: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.55 + 68%), transparent);
   --bubble-hl1-mid: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.3 + 26%), transparent);
   --bubble-hl2: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.4 + 46%), transparent);
@@ -1667,14 +1712,343 @@ body.bubbly-mode {
    full circles (icon buttons, the switch track) and pill buttons alike.
    z-index:-1 keeps it under each control's own label/icon but above its
    near-transparent core. */
+/* ---------- INTERACTIVE CONTROLS: buttons, icon buttons, the small
+   round toolbar buttons, and the switch track get a stronger, more
+   VOLUMETRIC override of --bubble-core/--bubble-shell than the generic
+   tokens above. Two round highlight dots (fixed circular radii, so they
+   stay genuinely round instead of stretching into flat ellipses on wide
+   pill buttons), a soft bright "cap" glow that traces the whole top
+   curve, a faint ambient glow at the base, and a gentle top-to-bottom
+   shade — together these read as an actual glass volume rather than a
+   thin outlined shape. The crisp ring (::before, below) still draws the
+   sharp top/bottom rim on top of this. */
 body.bubbly-mode .btn,
 body.bubbly-mode .icon-btn,
-body.bubbly-mode .storage-toggle-btn,
+body.bubbly-mode .storage-toggle-btn {
+  --bubble-hl1: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.5 + 75%), transparent);
+  --bubble-hl1-mid: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.3 + 32%), transparent);
+  --bubble-hl2: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.35 + 55%), transparent);
+  --bubble-cap: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.4 + 55%), transparent);
+  --bubble-ambient: color-mix(in srgb, var(--blue-soft) calc(var(--glass-tint) * 0.28), transparent);
+  --bubble-shade: color-mix(in srgb, var(--blue-deep) calc(var(--glass-tint) * 0.12 + 3%), transparent);
+  --bubble-base: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.22 + 4%), transparent);
+
+  --bubble-core:
+    radial-gradient(circle 15px at 24% 30%, var(--bubble-hl1) 0%, var(--bubble-hl1-mid) 55%, transparent 100%),
+    radial-gradient(circle 11px at 60% 24%, var(--bubble-hl2) 0%, transparent 100%),
+    linear-gradient(180deg, var(--bubble-cap) 0%, transparent 24%),
+    linear-gradient(0deg, var(--bubble-ambient) 0%, transparent 30%),
+    linear-gradient(180deg, transparent 60%, var(--bubble-shade) 100%),
+    var(--bubble-base);
+
+  --bubble-shell:
+    inset 0 -3px 6px -2px var(--bubble-rim),
+    inset 3px 0 6px -4px rgba(255, 255, 255, 0.5),
+    inset -3px 0 6px -4px rgba(255, 255, 255, 0.3),
+    0 1px 1px var(--bubble-rim),
+    0 3px 8px -4px rgba(22, 63, 99, 0.35),
+    0 14px 26px -12px rgba(22, 63, 99, 0.45);
+
+  /* ---------- "Pop out of the screen" 3D tilt ----------
+     --tilt-rx/--tilt-ry/--tilt-tz are set live by JS (see
+     initBubbleTilt() in script.js) from the pointer's position over
+     each control, in the range roughly ±10deg / 0–18px. Defaulting
+     them to 0 here means every rule below is a harmless no-op until
+     JS is actually tracking the pointer — the control just sits flat.
+     translateZ alone (with a short perspective()) is what actually
+     sells "toward the viewer": combined with the existing hover
+     scale/lift below, the bubble both rises off the page AND grows
+     toward the cursor, like a real glass sphere bulging out at you. */
+  --tilt-rx: 0deg;
+  --tilt-ry: 0deg;
+  --tilt-tz: 0px;
+
+  position: relative;
+  isolation: isolate;
+  transform: perspective(700px) rotateX(var(--tilt-rx)) rotateY(var(--tilt-ry)) translateZ(var(--tilt-tz));
+}
+
+/* =========================================================================
+   🫧 AMBIENT BUBBLE FIELD — the #bubble-field overlay in index.html.
+   Decorative only (aria-hidden, pointer-events:none), fixed over the
+   whole viewport. Off (opacity:0) unless body.bubbly-mode is active.
+   Each .bubble-particle inside it is generated by script.js
+   (initBubbleField) with randomized left position, size, duration and
+   delay, then just rises forever on a CSS animation.
+
+   The "coming out of the screen" read comes from three things moving
+   together as each bubble rises: it SCALES UP (nearer things look
+   bigger), its blur/opacity fall away (like passing the focal plane
+   right in front of you), and translateZ pushes it toward the viewer
+   inside the field's own perspective — so it isn't just floating up,
+   it's floating up and OUT. ========================================= */
+.bubble-field {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 5;
+  opacity: 0;
+  perspective: 900px;
+  transition: opacity 0.5s ease;
+}
+
+body.bubbly-mode .bubble-field {
+  opacity: 1;
+}
+
+.bubble-particle {
+  position: absolute;
+  bottom: -12vh;
+  left: var(--bx, 50%);
+  width: var(--bsize, 40px);
+  height: var(--bsize, 40px);
+  margin-left: var(--bdraft-x, 0);
+  margin-top: var(--bdraft-y, 0);
+  border-radius: 50%;
+  background: var(--bubble-core);
+  box-shadow: var(--bubble-shell);
+  opacity: 0;
+  transform-style: preserve-3d;
+  animation: bubble-rise-3d var(--bdur, 14s) linear var(--bdelay, 0s) infinite;
+}
+
+/* A crisp refraction rim on each particle too, same trick as the
+   interactive controls, so these read as real glass spheres rather
+   than flat blurred dots even up close at full size. */
+.bubble-particle::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  padding: 1.5px;
+  background: var(--bubble-ring);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+@keyframes bubble-rise-3d {
+  0% {
+    transform: translateY(0) translateZ(-260px) scale(0.35);
+    opacity: 0;
+  }
+  10% {
+    opacity: var(--bopacity, 0.55);
+  }
+  80% {
+    opacity: var(--bopacity, 0.55);
+  }
+  100% {
+    /* translateZ walks from deep behind the page (-260px) to well in
+       front of it (140px) while rising, inside the field's own
+       perspective(900px) — that Z travel is what makes the scale-up
+       feel like genuine depth motion rather than a plain CSS zoom. */
+    transform: translateY(-118vh) translateZ(140px) scale(1.6);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble-particle {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/* =========================================================================
+   🐠 LIQUID MARINE ECOSYSTEM — JS physics engine drives #fish-field.
+   Each .fish-particle is positioned via translate3d() from script.js;
+   tail wag frequency/amplitude come from --tail-hz / --tail-amp custom
+   properties updated every frame from fish velocity. ================== */
+.fish-field {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 6;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
+body.bubbly-mode.fish-mode-on .fish-field {
+  opacity: 1;
+}
+
+.fish-particle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--fsize, 60px);
+  height: calc(var(--fsize, 60px) * 0.6);
+  will-change: transform;
+  transform-origin: center center;
+  filter: drop-shadow(0 3px 5px rgba(22, 63, 99, 0.25));
+  transition: opacity 0.15s ease, transform 0.05s linear;
+}
+
+.fish-particle.shark-particle {
+  filter: drop-shadow(0 4px 8px rgba(10, 30, 60, 0.45));
+  z-index: 2;
+}
+
+.fish-particle.shark-fade-out {
+  opacity: 0 !important;
+  transition: opacity 0.3s ease;
+}
+
+.fish-particle.fish-being-eaten {
+  transition: transform 0.15s ease-in, opacity 0.15s ease-in !important;
+  transform: scale(0, 0.3) !important;
+  opacity: 0;
+}
+
+.fish-particle.fish-panic .fish-tail {
+  animation-duration: calc(0.45s / var(--tail-hz, 1));
+}
+
+.fish-orient {
+  width: 100%;
+  height: 100%;
+  transform-origin: center center;
+}
+
+.fish-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.fish-tail {
+  transform-box: fill-box;
+  transform-origin: 65% 50%;
+  animation: fish-tail-wag-dynamic calc(1s / var(--tail-hz, 0.7)) ease-in-out infinite;
+}
+
+@keyframes fish-tail-wag-dynamic {
+  0%, 100% { transform: rotate(calc(var(--tail-amp, 16deg) * -1)); }
+  50%      { transform: rotate(var(--tail-amp, 16deg)); }
+}
+
+/* Species tail baselines */
+.fish-particle.species-betta .fish-tail { --tail-hz: 0.55; }
+.fish-particle.species-pufferfish .fish-tail { --tail-hz: 0.9; }
+.fish-particle.species-angelfish .fish-tail { --tail-hz: 0.65; }
+.fish-particle.species-guppy .fish-tail { --tail-hz: 1.1; }
+.fish-particle.species-clownfish .fish-tail { --tail-hz: 0.85; }
+
+/* Betta flourish fin wave */
+.fish-particle.fish-trick-active.species-betta .fish-fin-wave {
+  animation: betta-fin-flourish 0.6s ease-in-out infinite;
+}
+@keyframes betta-fin-flourish {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.25); }
+}
+
+/* Puffer mechanical fin rotation */
+.fish-particle.species-pufferfish .fish-fin-rotate {
+  animation: puffer-fin-mechanical 0.8s linear infinite;
+}
+@keyframes puffer-fin-mechanical {
+  0%   { transform: rotate(-8deg); }
+  50%  { transform: rotate(8deg); }
+  100% { transform: rotate(-8deg); }
+}
+
+/* Shark segmented tail sway */
+.shark-particle .shark-tail-seg:nth-child(1) {
+  animation: shark-tail-sway calc(1s / var(--tail-hz, 0.5)) ease-in-out infinite;
+  transform-origin: 80% 50%;
+}
+.shark-particle .shark-tail-seg:nth-child(2) {
+  animation: shark-tail-sway calc(1.1s / var(--tail-hz, 0.5)) ease-in-out infinite reverse;
+  transform-origin: 70% 50%;
+}
+@keyframes shark-tail-sway {
+  0%, 100% { transform: rotate(-12deg); }
+  50%      { transform: rotate(14deg); }
+}
+
+/* Bubble draft offset applied via margin on .bubble-particle (see script.js) */
+
+/* Feast burst micro-bubbles */
+.feast-particle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.95), rgba(120,200,255,0.5) 60%, transparent 100%);
+  box-shadow: 0 0 6px rgba(100,180,255,0.6);
+  animation: feast-pop 0.65s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes feast-pop {
+  0%   { transform: translate(0,0) scale(0.3); opacity: 1; }
+  100% { transform: translate(var(--fbx,0), var(--fby,0)) scale(1.4); opacity: 0; }
+}
+
+/* Liquid "Chomp!" typography */
+.chomp-text {
+  position: absolute;
+  font-family: "Playfair Display", Georgia, serif;
+  font-weight: 700;
+  font-size: 1.35rem;
+  color: rgba(30, 77, 140, 0.9);
+  text-shadow:
+    0 0 12px rgba(120, 200, 255, 0.7),
+    0 2px 0 rgba(255,255,255,0.5);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  animation: chomp-liquid 0.85s ease-out forwards;
+}
+@keyframes chomp-liquid {
+  0%   { transform: translate(-50%,-50%) scale(0.4); opacity: 0; }
+  25%  { opacity: 1; }
+  100% { transform: translate(-50%,-80%) scale(1.3); opacity: 0; }
+}
+
+/* Per-species show/hide */
+body.fish-hide-clownfish .fish-particle.species-clownfish,
+body.fish-hide-betta .fish-particle.species-betta,
+body.fish-hide-angelfish .fish-particle.species-angelfish,
+body.fish-hide-guppy .fish-particle.species-guppy,
+body.fish-hide-pufferfish .fish-particle.species-pufferfish {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fish-particle,
+  .fish-tail,
+  .feast-particle,
+  .chomp-text {
+    animation: none !important;
+    opacity: 0;
+  }
+}
+
+/* The switch track is much smaller (44x26), so its highlight dots and
+   cap glow are scaled down to match — the same recipe would look like
+   one big smear at that size. */
 body.bubbly-mode .switch-track {
+  --bubble-core:
+    radial-gradient(circle 7px at 26% 32%, var(--bubble-hl1) 0%, var(--bubble-hl1-mid) 55%, transparent 100%),
+    radial-gradient(circle 5px at 62% 26%, var(--bubble-hl2) 0%, transparent 100%),
+    linear-gradient(180deg, var(--bubble-cap, var(--bubble-hl2)) 0%, transparent 30%),
+    var(--bubble-base);
+
   position: relative;
   isolation: isolate;
 }
 
+/* The crisp glass rim: a thin conic-gradient ring drawn only across the
+   border band via the padding+mask-composite "double background,
+   xor'd" trick, so the crescent is sharp the way a real glass edge is —
+   not a soft blurred glow. border-radius: inherit means this works on
+   full circles (icon buttons, the switch track) and pill buttons alike.
+   z-index:-1 keeps it under each control's own label/icon but above its
+   near-transparent core. */
 body.bubbly-mode .btn::before,
 body.bubbly-mode .icon-btn::before,
 body.bubbly-mode .storage-toggle-btn::before,
@@ -1771,11 +2145,13 @@ body.bubbly-mode .storage-toggle-btn {
 }
 
 body.bubbly-mode .storage-toggle-btn:hover {
-  transform: translateY(-1px) scale(1.06);
+  transform: perspective(700px) rotateX(var(--tilt-rx)) rotateY(var(--tilt-ry))
+    translateZ(var(--tilt-tz)) translateY(-1px) scale(1.06);
+  box-shadow: var(--bubble-shell), 0 calc(6px + var(--tilt-tz)) 18px -6px rgba(22, 63, 99, 0.35);
 }
 
 body.bubbly-mode .storage-toggle-btn:active {
-  transform: scale(0.92);
+  transform: perspective(700px) scale(0.92);
 }
 
 /* ---------- Buttons: full pill shape, genuinely see-through core, real
@@ -1793,12 +2169,14 @@ body.bubbly-mode .btn {
 }
 
 body.bubbly-mode .btn:hover {
-  transform: translateY(-2px) scale(1.02);
+  transform: perspective(700px) rotateX(var(--tilt-rx)) rotateY(var(--tilt-ry))
+    translateZ(var(--tilt-tz)) translateY(-2px) scale(1.02);
   filter: brightness(1.04);
+  box-shadow: var(--bubble-shell), 0 calc(8px + var(--tilt-tz)) 22px -8px rgba(22, 63, 99, 0.4);
 }
 
 body.bubbly-mode .btn:active {
-  transform: scale(0.94);
+  transform: perspective(700px) scale(0.94);
   filter: brightness(0.98);
 }
 
@@ -1853,11 +2231,13 @@ body.bubbly-mode .icon-btn {
 }
 
 body.bubbly-mode .icon-btn:hover {
-  transform: scale(1.08);
+  transform: perspective(700px) rotateX(var(--tilt-rx)) rotateY(var(--tilt-ry))
+    translateZ(var(--tilt-tz)) scale(1.08);
+  box-shadow: var(--bubble-shell), 0 calc(6px + var(--tilt-tz)) 16px -6px rgba(22, 63, 99, 0.35);
 }
 
 body.bubbly-mode .icon-btn:active {
-  transform: scale(0.9);
+  transform: perspective(700px) scale(0.9);
 }
 
 /* ---------- Inputs: soft rounded "pebble" fields — a transparent glass
