@@ -128,6 +128,19 @@
 
           <div class="bubbly-toggle-row">
             <div class="bubbly-toggle-label">
+              <span class="bubbly-toggle-title">🫧 Moving bubbles</span>
+              <span class="bubbly-toggle-hint">Ambient rising-bubble animation</span>
+            </div>
+            <label class="switch" for="bubble-mode-toggle">
+              <input type="checkbox" id="bubble-mode-toggle">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+
+          <hr class="storage-divider">
+
+          <div class="bubbly-toggle-row">
+            <div class="bubbly-toggle-label">
               <span class="bubbly-toggle-title">🐠 Swimming fish</span>
               <span class="bubbly-toggle-hint">Interactive marine ecosystem with physics &amp; sharks</span>
             </div>
@@ -163,6 +176,21 @@
           <div class="fish-shark-controls">
             <button type="button" id="add-shark-btn" class="btn btn-secondary btn-small">🦈 Add Shark</button>
             <button type="button" id="remove-shark-btn" class="btn btn-secondary btn-small">Remove Shark</button>
+          </div>
+
+          <div id="shark-variant-controls" class="fish-species-controls shark-variant-controls">
+            <label class="fish-species-check">
+              <input type="checkbox" id="shark-variant-reef" data-variant="reef">
+              <span>🔵 Reef shark</span>
+            </label>
+            <label class="fish-species-check">
+              <input type="checkbox" id="shark-variant-tiger" data-variant="tiger">
+              <span>🟤 Tiger shark</span>
+            </label>
+            <label class="fish-species-check">
+              <input type="checkbox" id="shark-variant-shadow" data-variant="shadow">
+              <span>⚫ Shadow shark</span>
+            </label>
           </div>
         </div>
 

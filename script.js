@@ -65,6 +65,7 @@ const SEARCH_WIDTH_STORAGE = "litVocabSearchWidth";
 const DEF_TEXT_SCALE_STORAGE = "litVocabDefTextScale";
 const IMG_THUMB_SIZE_STORAGE = "litVocabImgThumbSize";
 const BUBBLY_MODE_STORAGE = "litVocabBubblyMode";
+const BUBBLE_MODE_STORAGE = "litVocabBubbleMode";
 const GLASS_TRANSPARENCY_STORAGE = "litVocabGlassTransparency";
 const GLASS_BLUR_STORAGE = "litVocabGlassBlur";
 const GLASS_TINT_STORAGE = "litVocabGlassTint";
@@ -74,12 +75,22 @@ const DEFAULT_SEARCH_WIDTH = 220;   // px
 const DEFAULT_DEF_TEXT_SCALE = 100; // % (stored as whole percent, applied as a ratio)
 const DEFAULT_IMG_THUMB_SIZE = 150; // px
 const DEFAULT_BUBBLY_MODE = false;
+// Defaults true so existing users see no change until they actively turn
+// it off — mirrors DEFAULT_FISH_MODE's same "on unless you opt out" pattern.
+const DEFAULT_BUBBLE_MODE = true;
 const DEFAULT_GLASS_TRANSPARENCY = 30; // % — how see-through the glass is (0 = opaque, 100 = fully transparent)
 const DEFAULT_GLASS_BLUR = 20;         // px — backdrop blur radius
 const DEFAULT_GLASS_TINT = 50;         // % — strength of the color tint / glossy highlight
 const DEFAULT_FISH_MODE = true;
 const FISH_SPECIES_IDS = ["clownfish", "betta", "angelfish", "guppy", "pufferfish"];
 const DEFAULT_FISH_SPECIES_PREFS = { clownfish: true, betta: true, angelfish: true, guppy: true, pufferfish: true };
+// Shark COLOR VARIANTS (Part 4) — distinct palettes selectable/toggleable
+// independently of shark *count* (see fish-shark-controls). Each spawned
+// shark picks one variant at random from whichever are enabled; see
+// SHARK_VARIANTS below for the actual color + pattern configuration.
+const SHARK_VARIANT_STORAGE = "litVocabSharkVariantPrefs";
+const SHARK_VARIANT_IDS = ["reef", "tiger", "shadow"];
+const DEFAULT_SHARK_VARIANT_PREFS = { reef: true, tiger: true, shadow: true };
 const SEARCH_WIDTH_MIN = 140;
 const SEARCH_WIDTH_MAX = 640;
 const DEF_TEXT_SCALE_MIN = 75;
@@ -288,6 +299,7 @@ const manualImgLimitInput = document.getElementById("manual-img-limit-input");
 const displayToggleBtn = document.getElementById("display-toggle-btn");
 const displayPanel = document.getElementById("display-panel");
 const bubblyModeToggle = document.getElementById("bubbly-mode-toggle");
+const bubbleModeToggle = document.getElementById("bubble-mode-toggle");
 const searchWidthInput = document.getElementById("search-width-input");
 const searchWidthValue = document.getElementById("search-width-value");
 const defTextSizeInput = document.getElementById("def-text-size-input");
@@ -306,6 +318,10 @@ const fishModeToggle = document.getElementById("fish-mode-toggle");
 const fishSpeciesControls = document.getElementById("fish-species-controls");
 const fishSpeciesCheckboxes = Array.from(
   document.querySelectorAll("#fish-species-controls input[data-species]")
+);
+const sharkVariantControls = document.getElementById("shark-variant-controls");
+const sharkVariantCheckboxes = Array.from(
+  document.querySelectorAll("#shark-variant-controls input[data-variant]")
 );
 const addSharkBtn = document.getElementById("add-shark-btn");
 const removeSharkBtn = document.getElementById("remove-shark-btn");
@@ -1818,6 +1834,35 @@ function setBubblyMode(on) {
   }
 }
 
+// 🫧 Moving bubbles — independent of the Liquid Interface master switch
+// above, same relationship fish-mode has to it (see applyFishPrefs).
+// Turning Liquid Interface on/off still controls the glossy button/card
+// look; this only controls whether the ambient rising-bubble animation
+// itself is shown, for anyone who likes the glass look but finds the
+// drifting bubbles distracting (or wants the extra frame budget back).
+function getBubbleMode() {
+  try {
+    const v = localStorage.getItem(BUBBLE_MODE_STORAGE);
+    return v === null ? DEFAULT_BUBBLE_MODE : v === "true";
+  } catch (err) {
+    return DEFAULT_BUBBLE_MODE;
+  }
+}
+
+function setBubbleMode(on) {
+  try {
+    localStorage.setItem(BUBBLE_MODE_STORAGE, String(!!on));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function applyBubbleMode() {
+  const on = getBubbleMode();
+  document.body.classList.toggle("bubble-mode-on", on);
+  if (bubbleModeToggle) bubbleModeToggle.checked = on;
+}
+
 function applyBubblyMode() {
   const on = getBubblyMode();
   document.body.classList.toggle("bubbly-mode", on);
@@ -1828,6 +1873,7 @@ function applyBubblyMode() {
     initBubbleField();
     initFishField();
   }
+  applyBubbleMode();
 }
 
 // ---------- 3D pointer tilt ("pop out of the screen") ----------
@@ -1911,6 +1957,82 @@ function initBubbleTilt() {
 const BUBBLE_FIELD_COUNT = 16;
 let bubbleFieldBuilt = false;
 
+// ---------- Bubble pop-on-touch/hover ----------
+// Bubbles are decorative (pointer-events:none) EXCEPT while body.bubbly-mode
+// is active — see style.css — at which point each .bubble-particle accepts
+// pointer/touch so a hover or tap bursts it instantly with a liquid pop fx,
+// then a fresh bubble is queued to keep the field's density steady.
+function fishSpawnBubblePop(x, y, size) {
+  const field = document.getElementById("bubble-field");
+  if (!field) return;
+  const fx = document.createElement("div");
+  fx.className = "bubble-pop-fx";
+  fx.style.left = `${x.toFixed(1)}px`;
+  fx.style.top = `${y.toFixed(1)}px`;
+  fx.style.setProperty("--pop-size", `${Math.max(size, 18).toFixed(0)}px`);
+  const dropletCount = 6 + Math.floor(Math.random() * 3);
+  let inner = "";
+  for (let i = 0; i < dropletCount; i++) {
+    const ang = (Math.PI * 2 * i) / dropletCount + Math.random() * 0.5;
+    const dist = size * 0.3 + Math.random() * size * 0.35;
+    inner += `<span class="bubble-droplet" style="--ddx:${(Math.cos(ang) * dist).toFixed(1)}px;--ddy:${(Math.sin(ang) * dist).toFixed(1)}px;--ddelay:${(Math.random() * 0.06).toFixed(2)}s"></span>`;
+  }
+  fx.innerHTML = inner;
+  field.appendChild(fx);
+  setTimeout(() => fx.remove(), 650);
+}
+
+function burstBubbleParticle(el) {
+  if (!el || el.dataset.bursting === "1") return;
+  if (!document.body.classList.contains("bubbly-mode")) return;
+  el.dataset.bursting = "1";
+  const rect = el.getBoundingClientRect();
+  if (rect.width > 0) {
+    fishSpawnBubblePop(rect.left + rect.width / 2, rect.top + rect.height / 2, rect.width);
+  }
+  el.classList.add("bubble-popped");
+  setTimeout(() => {
+    el.remove();
+    spawnAmbientBubble();
+  }, 130);
+}
+
+function bindBubblePopListeners(particle) {
+  const trigger = () => burstBubbleParticle(particle);
+  // pointerenter covers real mouse hover AND a touch that lands directly
+  // on the bubble; touchstart is added on top since a fast finger swipe
+  // across the field doesn't always fire pointerenter on every particle
+  // it crosses.
+  particle.addEventListener("pointerenter", trigger);
+  particle.addEventListener("touchstart", trigger, { passive: true });
+}
+
+function createBubbleParticle(withNegativeDelay) {
+  const particle = document.createElement("div");
+  particle.className = "bubble-particle";
+  const size = 14 + Math.random() * 46; // 14–60px
+  const left = Math.random() * 100; // vw %
+  const duration = 10 + Math.random() * 10; // 10–20s to cross the screen
+  // Negative delay starts each bubble partway through its own rise
+  // so the field looks already-in-motion on the very first frame,
+  // instead of every bubble launching together from the bottom.
+  const delay = withNegativeDelay ? -Math.random() * duration : 0;
+  const opacity = 0.25 + Math.random() * 0.4;
+  particle.style.setProperty("--bsize", `${size.toFixed(0)}px`);
+  particle.style.setProperty("--bx", `${left.toFixed(1)}%`);
+  particle.style.setProperty("--bdur", `${duration.toFixed(1)}s`);
+  particle.style.setProperty("--bdelay", `${delay.toFixed(1)}s`);
+  particle.style.setProperty("--bopacity", opacity.toFixed(2));
+  bindBubblePopListeners(particle);
+  return particle;
+}
+
+function spawnAmbientBubble() {
+  const field = document.getElementById("bubble-field");
+  if (!field || !bubbleFieldBuilt) return;
+  field.appendChild(createBubbleParticle(false));
+}
+
 function initBubbleField() {
   if (bubbleFieldBuilt) return;
   const field = document.getElementById("bubble-field");
@@ -1919,22 +2041,7 @@ function initBubbleField() {
 
   const frag = document.createDocumentFragment();
   for (let i = 0; i < BUBBLE_FIELD_COUNT; i++) {
-    const particle = document.createElement("div");
-    particle.className = "bubble-particle";
-    const size = 14 + Math.random() * 46; // 14–60px
-    const left = Math.random() * 100; // vw %
-    const duration = 10 + Math.random() * 10; // 10–20s to cross the screen
-    // Negative delay starts each bubble partway through its own rise
-    // so the field looks already-in-motion on the very first frame,
-    // instead of every bubble launching together from the bottom.
-    const delay = -Math.random() * duration;
-    const opacity = 0.25 + Math.random() * 0.4;
-    particle.style.setProperty("--bsize", `${size.toFixed(0)}px`);
-    particle.style.setProperty("--bx", `${left.toFixed(1)}%`);
-    particle.style.setProperty("--bdur", `${duration.toFixed(1)}s`);
-    particle.style.setProperty("--bdelay", `${delay.toFixed(1)}s`);
-    particle.style.setProperty("--bopacity", opacity.toFixed(2));
-    frag.appendChild(particle);
+    frag.appendChild(createBubbleParticle(true));
   }
   field.appendChild(frag);
 }
@@ -1945,38 +2052,64 @@ function initBubbleField() {
 const FISH_SVG_VIEWBOX = "-10 -10 120 80";
 const FISH_SPECIES_MARKUP = {
   clownfish: `
-    <path class="fish-tail" d="M20,30 L2,14 L2,46 Z" fill="#ff7a30"/>
-    <ellipse class="fish-body" cx="56" cy="30" rx="30" ry="17" fill="#ff7a30"/>
-    <path d="M34,14 L40,3 L47,15 Z" fill="#ff7a30"/>
-    <path d="M32,15 Q41,30 32,45 L40,45 Q49,30 40,15 Z" fill="#fff" stroke="#2b2320" stroke-width="1.5"/>
-    <path d="M56,13 Q63,30 56,47 L63,47 Q71,30 63,13 Z" fill="#fff" stroke="#2b2320" stroke-width="1.5"/>
-    <circle class="fish-eye-white" cx="80" cy="25" r="6" fill="#fff"/>
-    <circle class="fish-pupil" cx="82" cy="25" r="3" fill="#241a14"/>
+    <defs>
+      <linearGradient id="clownfish-fin-sss" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="#ffb066" stop-opacity="0.35"/>
+        <stop offset="55%" stop-color="#ff7a30" stop-opacity="0.72"/>
+        <stop offset="100%" stop-color="#e85f1c" stop-opacity="0.92"/>
+      </linearGradient>
+      <radialGradient id="clownfish-body-shade" cx="42%" cy="32%" r="75%">
+        <stop offset="0%" stop-color="#ffa054"/>
+        <stop offset="60%" stop-color="#ff7a30"/>
+        <stop offset="100%" stop-color="#e2611c"/>
+      </radialGradient>
+    </defs>
+    <path class="fish-fin-ray" d="M67,44 C71,50 70,55 65,56 C61,54 60,47 63,43 Z" fill="url(#clownfish-fin-sss)" stroke="#c85a1c" stroke-width="0.5" opacity="0.85"/>
+    <path class="fish-fin-ray" d="M78,42 C81,47 80,51 76,52 C73,50 72,45 75,41 Z" fill="url(#clownfish-fin-sss)" stroke="#c85a1c" stroke-width="0.45" opacity="0.8"/>
+    <path class="fish-tail" d="M28,30 C19,17 6,12 3,17 C1,21 1,39 3,43 C6,48 19,43 28,30 Z" fill="url(#clownfish-fin-sss)" stroke="#c1531a" stroke-width="0.8"/>
+    <path class="fish-fin-ray" d="M22,30 Q10,22 5,19 M23,30 Q9,30 4,30 M22,30 Q10,38 5,41" fill="none" stroke="#a8441a" stroke-width="0.55" opacity="0.6"/>
+    <path d="M36,11 L41,-6 L46,9 L52,-8 L57,9 L62,-7 L67,9 Q75,-1 82,13 Q71,15 60,14 Q48,15 36,11 Z" fill="url(#clownfish-fin-sss)" stroke="#c1531a" stroke-width="0.6" opacity="0.92"/>
+    <path class="fish-fin-ray" d="M41,10 L41,-4 M46,9 L46,-6 M52,9 L52,-6 M57,9 L57,-5 M62,9 L62,-4 M67,10 Q73,4 79,11" fill="none" stroke="#a8441a" stroke-width="0.45" opacity="0.55"/>
+    <path class="fish-body" d="M28,32 C26,20 36,8 56,7 C74,6 89,13 91,23 C92,27 92,33 91,37 C88,46 73,53 55,52 C36,52 26,44 28,32 Z" fill="url(#clownfish-body-shade)" stroke="#d2560f" stroke-width="0.6"/>
+    <path d="M36,13 Q45,30 36,49 L45,49 Q54,30 45,13 Z" fill="#fff" stroke="#221b16" stroke-width="1.5"/>
+    <path d="M53,9 Q61,30 53,52 L61,52 Q69,30 61,9 Z" fill="#fff" stroke="#221b16" stroke-width="1.5"/>
+    <path d="M65,9 Q72,25 66,44 L74,44 Q80,25 72,9 Z" fill="#fff" stroke="#221b16" stroke-width="1.5"/>
+    <path d="M89,26 Q94,30 89,34 Q86,30 89,26 Z" fill="#ff7a30" stroke="#d2560f" stroke-width="0.5"/>
+    <path class="fish-gill-cover" d="M79,16 Q84,25 79,40" fill="none" stroke="#c1531a" stroke-width="1.1" opacity="0.5" stroke-linecap="round"/>
+    <circle class="fish-eye-white" cx="87" cy="23" r="5.2" fill="#fff"/>
+    <circle class="fish-pupil" cx="89" cy="23" r="2.6" fill="#241a14"/>
+    <circle class="fish-eye-glint" cx="86.5" cy="21.2" r="1" fill="#fff" opacity="0.85"/>
   `,
   betta: `
     <path class="fish-tail fish-fin-wave" d="M25,30 C8,8 -8,10 -8,30 C-8,50 8,52 25,30 Z" fill="#5b6cff" opacity="0.85"/>
+    <path class="fish-fin-ray" d="M18,30 Q2,20 -5,15 M18,30 Q0,30 -7,30 M18,30 Q2,40 -5,45" fill="none" stroke="#2b3aa8" stroke-width="0.5" opacity="0.5"/>
     <ellipse class="fish-body" cx="58" cy="30" rx="26" ry="14" fill="#3346c9"/>
     <path class="fish-fin-wave betta-fin-top" d="M40,16 C29,3 18,4 14,14 C25,20 35,20 40,16 Z" fill="#5b6cff" opacity="0.8"/>
     <path class="fish-fin-wave betta-fin-bot" d="M40,44 C29,57 18,56 14,46 C25,40 35,40 40,44 Z" fill="#5b6cff" opacity="0.8"/>
+    <path class="fish-gill-cover" d="M72,20 Q76,26 72,40" fill="none" stroke="#212e8f" stroke-width="1" opacity="0.55" stroke-linecap="round"/>
     <circle class="fish-eye-white" cx="78" cy="26" r="5" fill="#fff"/>
     <circle class="fish-pupil" cx="80" cy="26" r="2.4" fill="#151b3d"/>
+    <circle class="fish-eye-glint" cx="77.5" cy="24.3" r="1" fill="#fff" opacity="0.85"/>
   `,
   angelfish: `
     <path class="fish-tail" d="M22,30 L4,20 L4,40 Z" fill="#dfe6ee"/>
+    <path class="fish-fin-ray" d="M16,24 L5,22 M16,30 L4,30 M16,36 L5,38" fill="none" stroke="#94a3b8" stroke-width="0.5" opacity="0.6"/>
     <path class="fish-body" d="M55,6 C75,10 78,30 75,30 C78,30 75,50 55,54 C40,50 30,40 30,30 C30,20 40,10 55,6 Z" fill="#e7edf3" stroke="#94a3b8" stroke-width="1"/>
     <rect x="48" y="8" width="6" height="44" fill="#2b3444" opacity="0.85"/>
     <path d="M52,5 L58,-6 L60,7 Z" fill="#dfe6ee"/>
     <path d="M52,55 L58,66 L60,53 Z" fill="#dfe6ee"/>
+    <path class="fish-gill-cover" d="M62,14 Q66,30 62,46" fill="none" stroke="#94a3b8" stroke-width="1" opacity="0.55" stroke-linecap="round"/>
     <circle class="fish-eye-white" cx="72" cy="24" r="5" fill="#fff"/>
     <circle class="fish-pupil" cx="74" cy="24" r="2.4" fill="#1b2230"/>
+    <circle class="fish-eye-glint" cx="71.5" cy="22.3" r="1" fill="#fff" opacity="0.85"/>
   `,
-  guppy: `
-    <path class="fish-tail" d="M18,30 L2,20 L2,40 Z" fill="#ff5fa2"/>
-    <ellipse class="fish-body" cx="55" cy="30" rx="22" ry="10" fill="#7c5cff"/>
-    <ellipse cx="61" cy="28" rx="9" ry="4.5" fill="#ff5fa2" opacity="0.7"/>
-    <circle class="fish-eye-white" cx="72" cy="27" r="4" fill="#fff"/>
-    <circle class="fish-pupil" cx="73.5" cy="27" r="2" fill="#241a14"/>
-  `,
+  // Guppy markup is generated per-instance (sex, tail shape, chromatophore
+  // pattern, and colorway are all randomized at spawn — see fishSpawnPrey
+  // and fishBuildGuppyMarkup below) rather than a single fixed string like
+  // every other species here, so this is a function reference: fishCreateDOM
+  // detects that and calls it with the fish object instead of using it as
+  // a literal template.
+  guppy: fishBuildGuppyMarkup,
   pufferfish: `
     <path class="fish-tail fish-fin-rotate" d="M28,30 L12,20 L12,40 Z" fill="#ffd23f"/>
     <circle class="fish-body" cx="55" cy="30" r="26" fill="#ffd23f"/>
@@ -1986,39 +2119,669 @@ const FISH_SPECIES_MARKUP = {
     <circle cx="27" cy="42" r="2.2" fill="#f2b705"/>
     <circle cx="43" cy="54" r="2.2" fill="#f2b705"/>
     <circle cx="63" cy="56" r="2.2" fill="#f2b705"/>
+    <path class="fish-gill-cover" d="M70,18 Q74,24 70,30" fill="none" stroke="#d99b04" stroke-width="1" opacity="0.5" stroke-linecap="round"/>
     <circle class="fish-eye-white" cx="72" cy="24" r="6" fill="#fff"/>
     <circle class="fish-pupil" cx="74" cy="24" r="3" fill="#241a14"/>
-  `,
-  shark: `
-    <path class="fish-tail shark-tail-seg" d="M18,30 L0,18 L0,42 Z" fill="#1a3a6e"/>
-    <path class="fish-tail shark-tail-seg" d="M28,30 L12,16 L12,44 Z" fill="#234a82" opacity="0.9"/>
-    <ellipse class="fish-body shark-body" cx="62" cy="30" rx="34" ry="16" fill="#1e4d8c"/>
-    <path class="shark-dorsal" d="M48,14 L54,-2 L60,14 Z" fill="#163a6b"/>
-    <path class="shark-fin" d="M38,38 L32,52 L46,42 Z" fill="#234a82" opacity="0.85"/>
-    <path class="shark-gill" d="M52,22 Q54,30 52,38" fill="none" stroke="#0f2847" stroke-width="2"/>
-    <path class="shark-gill" d="M58,22 Q60,30 58,38" fill="none" stroke="#0f2847" stroke-width="2"/>
-    <circle class="fish-eye-white" cx="88" cy="26" r="5" fill="#e8f4ff"/>
-    <circle class="fish-pupil" cx="89" cy="26" r="2.5" fill="#0a1628"/>
+    <circle class="fish-eye-glint" cx="71.5" cy="21.7" r="1.2" fill="#fff" opacity="0.85"/>
   `,
 };
+
+/* =========================================================================
+   🌈 GUPPY ANATOMY & SOFT-BODY FIN SYSTEM
+   ---------------------------------------------------------------------
+   Everything below builds ONE guppy's markup at spawn time (never per
+   frame — this is pure string/geometry assembly, run once in
+   fishSpawnPrey -> fishCreateDOM). The per-frame motion this sets up for
+   is handled entirely by fishRenderGuppyExtras (see the swim-phase /
+   fishRenderEntity section below), which only ever writes plain
+   transform/filter strings onto the handful of elements cached here —
+   no DOM structure changes after creation, so it's exactly as cheap per
+   frame as every other species' tail-wag/body-flex.
+
+   Part 1 (anatomy): fishGuppyPickTraits assigns sex + tail shape + size
+   at spawn. Males get a small, slender body and one of three exaggerated
+   ornamental tail shapes (GUPPY_TAIL_GEOMETRY); females get a larger,
+   rounded, gravid body with a dark gravid spot and small clear fins.
+
+   Part 2 (color): GUPPY_COLORWAYS holds the neon blue/red/yellow-green
+   triads; GUPPY_PATTERN_DEFS builds the actual cobra/tuxedo/mosaic
+   texture per fish (as real SVG gradients/patterns, unique-ID'd per fish
+   instance the same way SHARK_VARIANT_SILHOUETTE already does with
+   `${id}`, so multiple guppies never collide). Fin edges use an
+   alpha-blended gradient (see GUPPY_FIN_SSS) for the light-permeating
+   membrane look.
+
+   Part 3 (soft-body tail): the male tail is NOT one rigid triangle. It's
+   built as a shared-pivot fan — one soft "membrane" backing (a normal
+   .fish-tail, so it gets the existing whole-fin wag for free) plus 4
+   independently-animatable .guppy-tail-panel wedges layered on top. Each
+   panel's own transform-origin is computed here (in %, against that
+   panel's own fill-box — same trick every other fin in this file already
+   relies on) so that, despite being 4 separate elements, they all rotate
+   around the *same* physical peduncle point. fishRenderGuppyExtras then
+   drives each panel with a phase-lagged, amplitude-growing sine (a cheap
+   stand-in for a spring-mass cloth solver: lag ~= inertia dragging behind
+   the body's beat, growing amplitude ~= a whip tip swinging wider than
+   its base) plus a faster secondary ripple — see that function for the
+   actual per-frame math.
+--------------------------------------------------------------------- */
+const GUPPY_TAIL_PIVOT = { x: 24, y: 30 };
+const GUPPY_TAIL_VARIANTS = ["delta", "veiltail", "lyretail"];
+// Five fin-ray angles/lengths per variant (degrees off the horizontal,
+// measured swinging away from the body; positive = downward) -> 4 panels
+// between consecutive rays. Delta flares wide and even; veiltail droops
+// long and asymmetric; lyretail forks hard with a short/thin middle.
+const GUPPY_TAIL_GEOMETRY = {
+  delta: { angles: [-40, -18, 0, 18, 40], lengths: [26, 32, 34, 32, 26], bulge: 7 },
+  veiltail: { angles: [-26, -9, 5, 19, 34], lengths: [30, 39, 44, 41, 33], bulge: 9 },
+  lyretail: { angles: [-47, -31, 0, 31, 47], lengths: [35, 22, 8, 22, 35], bulge: 5 },
+};
+// Neon triads (blue / fiery red / yellow-green) a male's chromatophores
+// are built from — GUPPY_PATTERN_DEFS below lays these into the actual
+// cobra/tuxedo/mosaic texture per fish.
+const GUPPY_COLORWAYS = [
+  { blue: "#2fd9ff", red: "#ff2f5e", yellowGreen: "#d4ff3a", deep: "#12183a" },
+  { blue: "#3d6bff", red: "#ff5a3d", yellowGreen: "#baff5e", deep: "#151033" },
+  { blue: "#22e0c8", red: "#ff3d8a", yellowGreen: "#eaff6e", deep: "#0f1a2e" },
+  { blue: "#4fa8ff", red: "#ff4d4d", yellowGreen: "#9dff3a", deep: "#181228" },
+];
+
+function fishGuppyFanPoints(pivot, angles, lengths) {
+  return angles.map((a, i) => {
+    const rad = (a * Math.PI) / 180;
+    const len = lengths[i];
+    return { x: pivot.x - Math.cos(rad) * len, y: pivot.y + Math.sin(rad) * len };
+  });
+}
+
+// Backing membrane: a single continuous shape threaded through every fin-
+// ray tip (Q-curved so the outer edge bows outward, away from the body).
+// This keeps class="fish-tail" so it inherits the ordinary whole-fin wag
+// every other species already gets for free — the panels above it (see
+// fishGuppyTailPanelsMarkup) carry the extra cloth-lag/ripple motion.
+function fishGuppyMembranePath(pivot, tips, bulge) {
+  let d = `M${pivot.x},${pivot.y} L${tips[0].x.toFixed(1)},${tips[0].y.toFixed(1)} `;
+  for (let i = 0; i < tips.length - 1; i++) {
+    const mx = (tips[i].x + tips[i + 1].x) / 2 - bulge;
+    const my = (tips[i].y + tips[i + 1].y) / 2;
+    d += `Q${mx.toFixed(1)},${my.toFixed(1)} ${tips[i + 1].x.toFixed(1)},${tips[i + 1].y.toFixed(1)} `;
+  }
+  d += "Z";
+  return d;
+}
+
+// The 4 independent cloth wedges. Each one computes its own fill-box
+// origin (in %) so that, even though every panel has a different bbox,
+// rotating each around "its own" origin still reads as rotation around
+// the single shared peduncle point at GUPPY_TAIL_PIVOT — same technique
+// .fish-tail/.shark-tail-seg already use, just computed per-panel instead
+// of hand-picked, since these shapes are procedurally generated.
+function fishGuppyTailPanelsMarkup(pivot, tips, bulge, fillUrl, strokeColor) {
+  let out = "";
+  for (let i = 0; i < tips.length - 1; i++) {
+    const a = tips[i];
+    const b = tips[i + 1];
+    const mx = (a.x + b.x) / 2 - bulge;
+    const my = (a.y + b.y) / 2;
+    const minX = Math.min(pivot.x, a.x, b.x, mx);
+    const maxX = Math.max(pivot.x, a.x, b.x, mx);
+    const minY = Math.min(pivot.y, a.y, b.y, my);
+    const maxY = Math.max(pivot.y, a.y, b.y, my);
+    const ox = ((pivot.x - minX) / Math.max(maxX - minX, 0.001)) * 100;
+    const oy = ((pivot.y - minY) / Math.max(maxY - minY, 0.001)) * 100;
+    const d = `M${pivot.x},${pivot.y} L${a.x.toFixed(1)},${a.y.toFixed(1)} Q${mx.toFixed(1)},${my.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)} Z`;
+    out += `<path class="guppy-tail-panel" data-panel="${i}" style="transform-origin:${ox.toFixed(1)}% ${oy.toFixed(1)}%" d="${d}" fill="${fillUrl}" stroke="${strokeColor}" stroke-width="0.4" stroke-opacity="0.35"/>`;
+  }
+  return out;
+}
+
+// Part 2: chromatophore/iridescent defs, unique-ID'd per fish instance
+// (uid = fish.id, same convention SHARK_VARIANT_SILHOUETTE uses) so many
+// guppies on screen at once never share (and fight over) a gradient/
+// pattern id.
+function fishGuppyDefs(uid, colorway, pattern, sex) {
+  const fade = sex === "female" ? 0.55 : 1; // females: same family, muted
+  let patternDef = "";
+  if (pattern === "cobra") {
+    patternDef = `
+      <pattern id="guppy-pat-${uid}" width="7" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(8)">
+        <rect width="7" height="5" fill="transparent"/>
+        <ellipse cx="2" cy="2.5" rx="1.6" ry="0.9" fill="${colorway.deep}" opacity="${0.7 * fade}"/>
+        <ellipse cx="5.5" cy="0.5" rx="1.3" ry="0.7" fill="${colorway.deep}" opacity="${0.55 * fade}"/>
+      </pattern>`;
+  } else if (pattern === "mosaic") {
+    patternDef = `
+      <pattern id="guppy-pat-${uid}" width="9" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(-6)">
+        <rect width="9" height="7" fill="transparent"/>
+        <circle cx="2" cy="2" r="1.7" fill="${colorway.red}" opacity="${0.6 * fade}"/>
+        <circle cx="6.5" cy="1.5" r="1.4" fill="${colorway.blue}" opacity="${0.6 * fade}"/>
+        <circle cx="4" cy="5" r="1.6" fill="${colorway.yellowGreen}" opacity="${0.55 * fade}"/>
+      </pattern>`;
+  }
+  // Tuxedo needs no <pattern> — it's a plain half-black gradient below.
+  return `
+    <defs>
+      <linearGradient id="guppy-body-${uid}" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="${colorway.blue}" stop-opacity="${0.95 * fade}"/>
+        <stop offset="45%" stop-color="${colorway.yellowGreen}" stop-opacity="${0.85 * fade}"/>
+        <stop offset="${pattern === "tuxedo" ? "62%" : "100%"}" stop-color="${colorway.red}" stop-opacity="${0.9 * fade}"/>
+        ${pattern === "tuxedo" ? `<stop offset="100%" stop-color="${colorway.deep}" stop-opacity="${0.97}"/>` : ""}
+      </linearGradient>
+      <radialGradient id="guppy-irid-${uid}" cx="35%" cy="30%" r="80%">
+        <stop offset="0%" stop-color="#ffffff" stop-opacity="0.55"/>
+        <stop offset="35%" stop-color="${colorway.blue}" stop-opacity="0.3"/>
+        <stop offset="100%" stop-color="${colorway.red}" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="guppy-fin-sss-${uid}" x1="1" y1="0" x2="0" y2="0">
+        <stop offset="0%" stop-color="${colorway.blue}" stop-opacity="${0.85 * fade}"/>
+        <stop offset="55%" stop-color="${colorway.red}" stop-opacity="${0.55 * fade}"/>
+        <stop offset="100%" stop-color="${colorway.yellowGreen}" stop-opacity="${0.12 * fade}"/>
+      </linearGradient>
+      ${patternDef}
+    </defs>`;
+}
+
+// Assigns the per-instance traits a spawned guppy needs before its DOM/
+// markup is built. Called once from fishSpawnPrey (Part 1: sexual
+// dimorphism — roughly even split; Part 2: pattern/colorway variety).
+function fishGuppyPickTraits(fish) {
+  fish.sex = Math.random() < 0.52 ? "male" : "female";
+  fish.tailVariant = GUPPY_TAIL_VARIANTS[Math.floor(Math.random() * GUPPY_TAIL_VARIANTS.length)];
+  fish.pattern = ["cobra", "tuxedo", "mosaic"][Math.floor(Math.random() * 3)];
+  fish.colorway = GUPPY_COLORWAYS[Math.floor(Math.random() * GUPPY_COLORWAYS.length)];
+  fish.hueSeed = fishRand(0, 360);
+  fish.pecPhase = fishRand(0, TWO_PI);
+  // Part 1: males stay small/slender (~3cm-scale read); females are
+  // noticeably larger and rounder (~5-6cm-scale read) — overrides the
+  // generic FISH_SIZE_RANGES roll already done in fishSpawnPrey.
+  fish.size = fish.sex === "male" ? fishRand(27, 35) : fishRand(40, 50);
+}
+
+function fishBuildGuppyMarkup(fish) {
+  const uid = fish.id;
+  const c = fish.colorway || GUPPY_COLORWAYS[0];
+  const defs = fishGuppyDefs(uid, c, fish.pattern, fish.sex);
+  const bodyFill = `url(#guppy-body-${uid})`;
+  const patternFill = fish.pattern === "tuxedo" ? null : `url(#guppy-pat-${uid})`;
+  const finFill = `url(#guppy-fin-sss-${uid})`;
+
+  if (fish.sex === "female") {
+    // Part 1: larger, robust, gravid body profile with the characteristic
+    // dark gravid spot near the anal fin; Part 2: same colorway family as
+    // males but muted (see `fade` in fishGuppyDefs), with much smaller,
+    // rounded, near-transparent dorsal/caudal fins — no ornamental tail
+    // rig, so it just uses the plain generic .fish-tail wag every other
+    // species gets.
+    return `
+      ${defs}
+      <path class="fish-tail" d="M20,30 C10,20 2,18 -2,24 C-4,30 -4,32 -2,37 C2,42 10,39 20,30 Z" fill="${finFill}" opacity="0.75"/>
+      <ellipse class="fish-body" cx="56" cy="30" rx="25" ry="14" fill="${bodyFill}" stroke="${c.deep}" stroke-width="0.5" stroke-opacity="0.3"/>
+      ${patternFill ? `<ellipse cx="56" cy="30" rx="25" ry="14" fill="${patternFill}"/>` : ""}
+      <ellipse cx="56" cy="30" rx="25" ry="14" fill="url(#guppy-irid-${uid})" class="guppy-shine"/>
+      <!-- gravid spot: darkened patch near the anal fin marking a pregnant female -->
+      <ellipse cx="46" cy="39" rx="6" ry="4.5" fill="${c.deep}" opacity="0.55"/>
+      <path class="guppy-dorsal" d="M46,17 C42,9 46,4 54,5 C58,9 56,15 50,18 Z" fill="${finFill}" opacity="0.55"/>
+      <path class="guppy-pectoral" style="transform-origin:80% 30%" d="M64,34 C68,38 68,42 63,42 C60,40 59,36 64,34 Z" fill="${finFill}" opacity="0.6"/>
+      <path class="fish-gill-cover" d="M70,22 Q74,30 70,38" fill="none" stroke="${c.deep}" stroke-width="0.9" opacity="0.4" stroke-linecap="round"/>
+      <circle class="fish-eye-white" cx="76" cy="27" r="4.6" fill="#fff"/>
+      <circle class="fish-pupil" cx="77.6" cy="27" r="2.3" fill="#241a14"/>
+      <circle class="fish-eye-glint" cx="75.3" cy="25.5" r="0.9" fill="#fff" opacity="0.85"/>
+    `;
+  }
+
+  // Male: small slender forward body, abrupt transition into the
+  // exaggerated peduncle/tail rig built above.
+  const geo = GUPPY_TAIL_GEOMETRY[fish.tailVariant] || GUPPY_TAIL_GEOMETRY.delta;
+  const tips = fishGuppyFanPoints(GUPPY_TAIL_PIVOT, geo.angles, geo.lengths);
+  const membrane = fishGuppyMembranePath(GUPPY_TAIL_PIVOT, tips, geo.bulge);
+  const panels = fishGuppyTailPanelsMarkup(GUPPY_TAIL_PIVOT, tips, geo.bulge, finFill, c.deep);
+
+  return `
+    ${defs}
+    <path class="fish-tail" d="${membrane}" fill="${finFill}" opacity="0.5" stroke="${c.deep}" stroke-width="0.4" stroke-opacity="0.3"/>
+    ${panels}
+    <path class="guppy-peduncle" d="M40,25 C33,26 27,28 24,30 C27,32 33,34 40,35 Z" fill="${bodyFill}"/>
+    <ellipse class="fish-body" cx="60" cy="30" rx="19" ry="7.5" fill="${bodyFill}" stroke="${c.deep}" stroke-width="0.5" stroke-opacity="0.35"/>
+    ${patternFill ? `<ellipse cx="60" cy="30" rx="19" ry="7.5" fill="${patternFill}"/>` : ""}
+    <ellipse cx="60" cy="30" rx="19" ry="7.5" fill="url(#guppy-irid-${uid})" class="guppy-shine"/>
+    <!-- elongated sweeping dorsal ribbon: trails/flutters independently, see fishRenderGuppyExtras -->
+    <path class="guppy-dorsal-ribbon" style="transform-origin:88% 100%" d="M55,20 C48,4 36,-6 26,-4 C34,4 42,14 50,22 Z" fill="${finFill}" opacity="0.7" stroke="${c.deep}" stroke-width="0.35" stroke-opacity="0.3"/>
+    <path class="guppy-pectoral" style="transform-origin:85% 25%" d="M70,33 C75,37 75,42 69,42 C65,40 64,35 70,33 Z" fill="${finFill}" opacity="0.65"/>
+    <path class="fish-gill-cover" d="M76,24 Q79,30 76,36" fill="none" stroke="${c.deep}" stroke-width="0.8" opacity="0.45" stroke-linecap="round"/>
+    <circle class="fish-eye-white" cx="80" cy="27" r="3.6" fill="#fff"/>
+    <circle class="fish-pupil" cx="81.3" cy="27" r="1.8" fill="#241a14"/>
+    <circle class="fish-eye-glint" cx="79.4" cy="25.9" r="0.7" fill="#fff" opacity="0.85"/>
+  `;
+}
+
+// NOTE: sharks are no longer a single fixed-color entry in
+// FISH_SPECIES_MARKUP (that object closed earlier, right after the guppy
+// builder above) — see "Shark color variants & species management" right
+// below for SHARK_VARIANTS / SHARK_VARIANT_MARKUP and how fishCreateDOM
+// picks the right markup per shark instance.
+
+/* ---------------------------------------------------------------------
+   🦈 SHARK COLOR VARIANTS & SPECIES-VARIANT MANAGEMENT (Part 4)
+   ---------------------------------------------------------------------
+   Each variant is a full color palette (+ optional body pattern) applied
+   to the same shark silhouette used previously. Adding a new variant is a
+   single new entry below — nothing else in the engine needs to change:
+   fishSpawnShark() already picks randomly among whichever variants are
+   enabled, fishCreateDOM() already renders whatever SHARK_VARIANT_MARKUP
+   resolves to, and the Display panel checkboxes are generated from
+   SHARK_VARIANT_IDS (see index.html + the shark-variant-controls wiring
+   below), so the UI never needs hand-written per-variant markup either.
+--------------------------------------------------------------------- */
+const SHARK_VARIANTS = {
+  reef: {
+    label: "Grey Reef",
+    swatch: "🔵",
+    // Realistic grey-reef-shark countershading: deep slate/charcoal dorsal
+    // tones diving smoothly into an off-white cream belly (Part 2). No
+    // fin pattern — a plain countershaded profile.
+    colors: {
+      tailBack: "#2E3944", tailFront: "#4B5A67", body: "#5E6E7C", belly: "#EDE8DC",
+      fin: "#3A4753", dorsal: "#333F4A", dorsal2: "#333F4A",
+      gillStroke: "#20272E", browStroke: "#232B32", mouthStroke: "#1B2126",
+      accent: "#1B2126", pupil: "#0A0C0E",
+    },
+    pattern: null,
+  },
+  tiger: {
+    label: "Tiger",
+    swatch: "🟤",
+    // Warm brownish-grey countershading with the vertical flank
+    // striping juvenile tiger sharks are known for (Part 2 imperfections).
+    colors: {
+      tailBack: "#4A4030", tailFront: "#6B5F49", body: "#8A7C61", belly: "#F1E9D4",
+      fin: "#5A4F3C", dorsal: "#453B2C", dorsal2: "#453B2C",
+      gillStroke: "#2E271C", browStroke: "#33291D", mouthStroke: "#241D14",
+      accent: "#241D14", pupil: "#120D08",
+    },
+    pattern: "stripes",
+  },
+  shadow: {
+    label: "Blacktip",
+    swatch: "⚫",
+    // Cool indigo-black countershading with the ink-dipped fin tips of a
+    // blacktip reef shark marking pectoral/dorsal/caudal edges.
+    colors: {
+      tailBack: "#1B2233", tailFront: "#333E52", body: "#404D63", belly: "#E7E9EE",
+      fin: "#2A3242", dorsal: "#1E2534", dorsal2: "#1E2534",
+      gillStroke: "#12161F", browStroke: "#171D28", mouthStroke: "#0E1117",
+      accent: "#090B0F", pupil: "#060708",
+    },
+    pattern: "blacktips",
+  },
+};
+// Per-variant gradient + sheen defs (Part 5: Dynamic Skin Texturing &
+// Countershading). Each variant gets its own ids so the pastel-top → pink/
+// cream-belly blend and the soft specular sheen use that variant's exact
+// palette rather than a one-size-fits-all gradient. Defs are inlined into
+// every spawned shark's own SVG markup (see buildSharkVariantMarkup) —
+// duplicate ids across simultaneously-visible sharks of the same variant
+// are harmless since each duplicate resolves to an identical definition.
+const SHARK_VARIANT_DEFS = (id, c) => `
+    <defs>
+      <linearGradient id="shark-body-grad-${id}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${c.tailBack}"/>
+        <stop offset="38%" stop-color="${c.body}"/>
+        <stop offset="80%" stop-color="${c.belly}"/>
+        <stop offset="100%" stop-color="${c.belly}"/>
+      </linearGradient>
+      <linearGradient id="shark-belly-grad-${id}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${c.belly}" stop-opacity="0.5"/>
+        <stop offset="100%" stop-color="${c.belly}" stop-opacity="0.98"/>
+      </linearGradient>
+      <!-- Softened from a glossy highlight down to a low, matte gleam — real
+           shark skin scatters light off dermal denticles rather than
+           reflecting it like a plastic toy, so the old wide/bright specular
+           blob is dimmer and tighter here. -->
+      <radialGradient id="shark-sheen-grad-${id}" cx="28%" cy="10%" r="55%">
+        <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+        <stop offset="60%" stop-color="#ffffff" stop-opacity="0.06"/>
+        <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+      </radialGradient>
+      <!-- Part 2: dermal-denticle texture. High-frequency feTurbulence
+           stands in for the microscopic placoid-scale normal map — too
+           fine to read as individual scales at this size, but it breaks
+           up the flat gradient fill into a matte, slightly granular
+           surface instead of a smooth plastic sheen. Composited back over
+           itself with feDiffuseLighting so the grain actually catches
+           light directionally rather than just being flat noise. -->
+      <!-- Combined into one filter (denticle grain + procedural scarring)
+           so it can be applied with a single filter="" reference on
+           .shark-body: fine high-frequency turbulence for the matte
+           scale texture, plus coarse low-octave turbulence thresholded
+           down to a handful of faint streaks for scattered scarring/
+           tone variation, both clipped to the body's own alpha so
+           neither ever spills outside the silhouette. -->
+      <filter id="shark-texture-${id}" x="-15%" y="-15%" width="130%" height="130%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9 1.4" numOctaves="2" seed="${(id.length * 7) % 97}" result="grain"/>
+        <feDiffuseLighting in="grain" lighting-color="#ffffff" surfaceScale="1.1" diffuseConstant="1" result="lit">
+          <feDistantLight azimuth="235" elevation="55"/>
+        </feDiffuseLighting>
+        <feColorMatrix in="lit" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0.28 0.28 0.28 0 0" result="grainAlpha"/>
+        <feComposite in="grainAlpha" in2="SourceAlpha" operator="in" result="grainClipped"/>
+        <feTurbulence type="turbulence" baseFrequency="0.015 0.12" numOctaves="2" seed="${(id.length * 13 + 3) % 97}" result="scarNoise"/>
+        <feColorMatrix in="scarNoise" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 9 -7.6" result="scarMask"/>
+        <feComposite in="scarMask" in2="SourceAlpha" operator="in" result="scarClipped"/>
+        <feFlood flood-color="${c.tailBack}" flood-opacity="0.45" result="scarColor"/>
+        <feComposite in="scarColor" in2="scarClipped" operator="in" result="scarFinal"/>
+        <feMerge>
+          <feMergeNode in="SourceGraphic"/>
+          <feMergeNode in="grainClipped"/>
+          <feMergeNode in="scarFinal"/>
+        </feMerge>
+      </filter>
+    </defs>
+`;
+// Realistic anatomical redesign (Part 1/2/3): a sleek, tapered fusiform
+// hull with an extended heterocercal caudal fin (big raked upper lobe,
+// small lower lobe), a rigid triangular pectoral, a tall raked dorsal,
+// matte denticle-textured countershading, and small dark predator eyes
+// with a nictitating membrane — replacing the earlier round, chubby
+// plush-toy proportions. Every class name below is unchanged on purpose:
+// SharkPhysicsEngine/CSS key off .shark-spine-tail, .shark-tail-seg (x2,
+// in order), .shark-pectoral, .shark-body/.shark-belly/.shark-sheen,
+// .shark-mouth-open/.shark-mouth-closed/.shark-teeth-closed and
+// .shark-brow-rest/.shark-brow-hunt for the hunting-state swap — so all
+// tail-wag, spine-bend, fin-flap and expression-swap animation keeps
+// working untouched even though the geometry underneath is all new.
+// Two new wrapper groups drive the added motion: .shark-torso-flex (a
+// gentle traveling flex just ahead of the neck joint, so the lateral
+// sine wave visibly starts near the head instead of only appearing at
+// the tail — see fishRenderEntity) and .shark-dorsal-flex (a soft
+// trailing-edge flutter on the dorsal fin tip, the caudal fin's own
+// trailing-edge motion already coming from .shark-tail-seg).
+const SHARK_VARIANT_SILHOUETTE = (c, id) => `
+    ${SHARK_VARIANT_DEFS(id, c)}
+    <g class="shark-spine-tail">
+      <!-- Heterocercal caudal fin: a long, raked, pointed upper lobe carrying
+           most of the thrust, and a much smaller lower lobe — the shape that
+           separates a shark's tail from prey fish's symmetric fin. Kept
+           within the app's fixed viewBox (-10 -10 120 80, see
+           FISH_SVG_VIEWBOX) — overflow:visible tolerates a little spill but
+           not a lobe reaching halfway across the canvas. -->
+      <path class="fish-tail shark-tail-seg" d="M14,25 C1,16 -13,6 -21,10 C-23,14 -18,20 -6,25 C2,27.5 9,27.8 14,25 Z" fill="${c.tailBack}" stroke="${c.tailBack}" stroke-width="0.6"/>
+      <path class="fish-tail shark-tail-seg" d="M14,27 C6,33 -6,36 -12,32 C-13,29 -3,27.5 14,27 Z" fill="${c.tailFront}" opacity="0.95"/>
+      <!-- trailing-edge notch hints on each lobe -->
+      <path class="shark-tail-notch" d="M-17,13 Q-7,18.5 6,24" fill="none" stroke="${c.tailFront}" stroke-width="0.7" opacity="0.45" stroke-linecap="round"/>
+      <path class="shark-tail-notch" d="M-11,30.5 Q-3,30 6,28" fill="none" stroke="${c.tailBack}" stroke-width="0.6" opacity="0.4" stroke-linecap="round"/>
+    </g>
+    <!-- Torso: everything forward of the tail assembly gets a gentle, phase-
+         lagged flex (see fishRenderEntity) so the lateral traveling wave
+         reads as starting near the head rather than only appearing at the
+         neck joint — an approximation of a continuous head-to-peduncle
+         wave riding on top of the discrete spine/tail-segment chain. -->
+    <g class="shark-torso-flex">
+      <!-- Body: sleek fusiform hull — tapers sharply from a rounded girth
+           amidships to a pointed conical snout, replacing the previous
+           blunt, round-foreheaded profile. -->
+      <path class="shark-body" d="M20,25 C19,14 32,3 50,0.5 C68,-2 88,1.5 101,10 C107,14 111,18.5 110,23 C109,27.5 102,32.5 90,37 C71,43.5 44,44.5 28,38 C20,34.5 16.5,29.5 20,25 Z" fill="url(#shark-body-grad-${id})" filter="url(#shark-texture-${id})" stroke="${c.tailBack}" stroke-width="0.5" stroke-opacity="0.35"/>
+      <path class="shark-belly" d="M24,31 C30,39 46,43.5 62,43.5 C78,43 92,38.5 100,32 C91,38 76,40.7 62,40.4 C47,40.1 30,35.8 24,31 Z" fill="url(#shark-belly-grad-${id})"/>
+      <!-- lateral line: the faint sensory-line stripe running head-to-tail -->
+      <path class="shark-lateral-line" d="M22,24 Q56,19 101,20" fill="none" stroke="${c.belly}" stroke-width="0.5" opacity="0.28" stroke-linecap="round"/>
+      <ellipse class="shark-sheen" cx="46" cy="9" rx="38" ry="8" fill="url(#shark-sheen-grad-${id})"/>
+    </g>
+    <!-- Pectoral fin: rigid, pointed, swept-back hydrofoil blade — held
+         fixed (no flap animation; see the torso-flex/dorsal-flex notes in
+         fishRenderEntity) since real pectoral fins are stiff lift
+         surfaces, not flexible paddles. -->
+    <path class="shark-fin shark-pectoral" d="M60,28 C71,29.3 79,33.6 74,42.5 C69,49.5 57,51 46,45.8 C42,43.8 42,41 45,39 C52,40.2 58,35 60,28 Z" fill="${c.fin}" stroke="${c.tailBack}" stroke-width="0.5" stroke-opacity="0.4"/>
+    <path class="shark-fin-ray" d="M56,36 Q49,44 42,47" fill="none" stroke="${c.tailBack}" stroke-width="0.5" opacity="0.35"/>
+    <!-- Dorsal fin: tall, raked sickle, wrapped so its trailing edge can
+         flutter softly (Part 1: soft-body vertex displacement simulating
+         water resistance) instead of the whole fin staying perfectly rigid
+         like the pectoral. Kept within the app's fixed viewBox — tall and
+         raked, but not reaching a third of the way up the canvas. -->
+    <g class="shark-dorsal-flex">
+      <path class="shark-dorsal" d="M48,3 C47,-4 52,-11 59,-13 C65,-15 69,-9 67,1 C64,4.5 57,5 48,3 Z" fill="${c.dorsal}" stroke="${c.tailBack}" stroke-width="0.5" stroke-opacity="0.4"/>
+      <path class="shark-fin-ray" d="M51,1 Q55,-6 60,-12" fill="none" stroke="${c.tailBack}" stroke-width="0.5" opacity="0.3"/>
+    </g>
+    <path class="shark-fin shark-dorsal-2" d="M20,20 C21,16 25,15.6 27,19.4 C25,21.2 22,21.2 20,20 Z" fill="${c.dorsal2}" opacity="0.9"/>
+    <!-- Gill slits: five, real shark count, curving down the flank behind
+         the eye — replaces the earlier three plush "cheek" strokes. -->
+    <g class="shark-gills">
+      <path class="shark-gill" d="M75,15 Q77.3,24 76,33" fill="none" stroke="${c.gillStroke}" stroke-width="1.4" stroke-linecap="round" opacity="0.75"/>
+      <path class="shark-gill" d="M79.5,14.3 Q81.8,24 80.5,34" fill="none" stroke="${c.gillStroke}" stroke-width="1.4" stroke-linecap="round" opacity="0.75"/>
+      <path class="shark-gill" d="M84,14 Q86.3,24.3 85,35" fill="none" stroke="${c.gillStroke}" stroke-width="1.4" stroke-linecap="round" opacity="0.75"/>
+      <path class="shark-gill" d="M88.5,14.3 Q90.8,24 89.5,34" fill="none" stroke="${c.gillStroke}" stroke-width="1.4" stroke-linecap="round" opacity="0.75"/>
+      <path class="shark-gill" d="M93,15 Q95.3,24 94,33" fill="none" stroke="${c.gillStroke}" stroke-width="1.4" stroke-linecap="round" opacity="0.75"/>
+    </g>
+    <!-- snout ridge: faint line hinting at the pointed rostrum above the jaw -->
+    <path class="shark-snout-ridge" d="M97,9 Q104,12.5 108,18" fill="none" stroke="${c.tailBack}" stroke-width="0.6" opacity="0.3" stroke-linecap="round"/>
+    <!-- resting brow (default) is near-invisible for a calm, gliding
+         expression; a bolder hunting brow swaps in by CSS off
+         shark-particle[data-behavior] -->
+    <path class="shark-brow shark-brow-rest" d="M84,13.5 Q88.5,11.5 93,13.5" fill="none" stroke="${c.browStroke}" stroke-width="1" opacity="0.3" stroke-linecap="round"/>
+    <path class="shark-brow shark-brow-hunt" d="M82,15 Q88.5,8.5 95,12.5" fill="none" stroke="${c.browStroke}" stroke-width="2" stroke-linecap="round"/>
+    <path class="shark-lower-lid" d="M86,22.5 Q90,24.6 94,23" fill="none" stroke="${c.browStroke}" stroke-width="0.8" opacity="0.4" stroke-linecap="round"/>
+    <path class="shark-nostril" d="M104,20 Q105.6,21 104.3,22.6" fill="none" stroke="${c.mouthStroke}" stroke-width="0.9" opacity="0.6" stroke-linecap="round"/>
+    <!-- closed, resting expression: a thin, faintly downturned predator line -->
+    <path class="shark-mouth shark-mouth-closed" d="M92,27.5 Q98,32.5 105,26.5" fill="none" stroke="${c.mouthStroke}" stroke-width="1.3" stroke-linecap="round"/>
+    <path class="shark-teeth shark-teeth-closed" d="M96.3,29 L97.4,31 L98.6,29.1 M99,28.4 L100.2,30.1 L101.4,28.2" fill="none" stroke="#fff" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+    <!-- wide-open hunting/eating expression: dark gape + tooth rows, hidden until data-behavior flips it on -->
+    <g class="shark-mouth-open">
+      <path d="M88,26 Q91,42 103,41 Q109,39 106,27 Q103,32 96,33 Q91,32 88,26 Z" fill="#3a0d0d"/>
+      <path d="M90.6,27.6 L92.3,33.6 L94,28.1 Z" fill="#f6f2ea"/>
+      <path d="M95.5,29 L97.2,35.9 L99,29.3 Z" fill="#f6f2ea"/>
+      <path d="M100.3,29.4 L102,36 L103.8,29.6 Z" fill="#f6f2ea"/>
+      <path d="M93,39.4 L94.6,34.4 L96.3,39.6 Z" fill="#f6f2ea"/>
+      <path d="M98.2,40.2 L99.8,35.2 L101.5,40.4 Z" fill="#f6f2ea"/>
+    </g>
+    <!-- Small, dark predator eye — mostly pupil/iris rather than a big
+         cartoon white, in line with real shark eyes. -->
+    <circle class="fish-eye-white" cx="89" cy="18" r="4.6" fill="#e7e2d4"/>
+    <circle class="fish-pupil" cx="89.8" cy="18.2" r="3.6" fill="${c.pupil}"/>
+    <!-- Nictitating membrane: a translucent grey lid that sweeps up over the
+         eye on the periodic blink (see shark-nictitate keyframes) — the
+         "protective gleam" catching ambient light as it closes. -->
+    <path class="shark-nictitating" d="M84.4,18 A4.6,4.6 0 0 1 93.6,18 L93.6,18 A4.6,4.6 0 0 1 84.4,18 Z" fill="#c9d3d8"/>
+    <circle class="shark-eye-glint" cx="87.8" cy="16" r="1.1" fill="#fff"/>
+    <circle class="shark-eye-glint shark-eye-glint-sm" cx="91.4" cy="19.8" r="0.6" fill="#fff" opacity="0.7"/>
+`;
+// Optional body-pattern overlays, keyed by SHARK_VARIANTS[id].pattern.
+// Rendered *before* the fins/face markup above so teeth/eyes/gills still
+// sit visually on top, matching how the reference art layers spots under
+// the fin line.
+const SHARK_PATTERN_OVERLAYS = {
+  // Ink-dipped fin tips — the blacktip reef shark's signature marking.
+  // Drawn after the fins above so the tips paint cleanly over the
+  // pectoral, dorsal and upper-caudal-lobe edges.
+  blacktips: (c) => `
+    <g class="shark-pattern shark-pattern-blacktips" fill="${c.mouthStroke}" opacity="0.88">
+      <path d="M70,42.5 C69,49.5 60,51.3 51,48.5 C56,46.5 62,43 65,37.5 C67.3,39 69,40.6 70,42.5 Z"/>
+      <path d="M69,-7 C68,1 63,4 55,3.2 C59,-1 62,-8 63,-15 C66,-13 68,-10.3 69,-7 Z"/>
+      <path d="M-13,7.3 C-19,9.5 -22,13.3 -21,17.3 C-18,15.3 -14,12.3 -8,11.3 C-10,9.8 -11.5,8.3 -13,7.3 Z"/>
+    </g>
+  `,
+  stripes: (c) => `
+    <g class="shark-pattern shark-pattern-stripes" fill="none" stroke="${c.tailBack}" stroke-width="2.6" stroke-linecap="round" opacity="0.65">
+      <path d="M30,14.2 Q32,22.3 27,31"/>
+      <path d="M46,11.7 Q49,22.3 43,33.4"/>
+      <path d="M62,10.8 Q65,22.3 59,35.3"/>
+      <path d="M78,11.7 Q81,22.3 76,35.9"/>
+      <path d="M94,14.2 Q96,22.3 92,33.4"/>
+    </g>
+  `,
+};
+function buildSharkVariantMarkup(variantId) {
+  const variant = SHARK_VARIANTS[variantId] || SHARK_VARIANTS.reef;
+  const overlay = variant.pattern && SHARK_PATTERN_OVERLAYS[variant.pattern]
+    ? SHARK_PATTERN_OVERLAYS[variant.pattern](variant.colors)
+    : "";
+  return overlay + SHARK_VARIANT_SILHOUETTE(variant.colors, variantId);
+}
+// Built once at load — one full SVG markup string per variant id — so
+// per-frame/per-spawn rendering is just a lookup, not a rebuild.
+const SHARK_VARIANT_MARKUP = SHARK_VARIANT_IDS.reduce((acc, id) => {
+  acc[id] = buildSharkVariantMarkup(id);
+  return acc;
+}, {});
+
+function getSharkVariantPrefs() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SHARK_VARIANT_STORAGE));
+    if (raw && typeof raw === "object") {
+      const merged = { ...DEFAULT_SHARK_VARIANT_PREFS };
+      SHARK_VARIANT_IDS.forEach((id) => {
+        if (typeof raw[id] === "boolean") merged[id] = raw[id];
+      });
+      return merged;
+    }
+  } catch (err) {
+    // fall through to defaults
+  }
+  return { ...DEFAULT_SHARK_VARIANT_PREFS };
+}
+
+function setSharkVariantEnabled(id, on) {
+  try {
+    const prefs = getSharkVariantPrefs();
+    prefs[id] = !!on;
+    // Never allow the last enabled variant to be switched off — sharks
+    // still need somewhere to draw from whenever fish mode is on.
+    if (!prefs[id] && !SHARK_VARIANT_IDS.some((v) => v !== id && prefs[v])) return;
+    localStorage.setItem(SHARK_VARIANT_STORAGE, JSON.stringify(prefs));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+// Picks a random *enabled* variant for a freshly spawned shark. Falls
+// back to "reef" if (somehow) nothing is enabled, so a shark can never
+// fail to spawn just because of variant prefs.
+function pickRandomSharkVariant() {
+  const prefs = getSharkVariantPrefs();
+  const enabled = SHARK_VARIANT_IDS.filter((id) => prefs[id]);
+  if (!enabled.length) return "reef";
+  return enabled[Math.floor(Math.random() * enabled.length)];
+}
 const FISH_SIZE_RANGES = {
   clownfish: [46, 62],
   betta: [50, 68],
   angelfish: [50, 70],
-  guppy: [30, 42],
+  guppy: [30, 42], // fallback only — fishGuppyPickTraits overrides per-sex (males 27-35, females 40-50)
   pufferfish: [38, 52],
   shark: [72, 96],
 };
 
 const FISH_PREY_COUNT = 12;
-const FISH_MOUSE_RADIUS = 100;
+const FISH_MOUSE_RADIUS = 130;
 const FISH_BUBBLE_RADIUS = 60;
 const FISH_SHARK_PANIC_RADIUS = 200;
 const SHARK_STRIKE_RADIUS = 150;
 const SHARK_CATCH_RADIUS = 20;
 const SHARK_CONFUSE_TIMEOUT = 5;
 const SHARK_EAT_PAUSE = 1.5;
+
+// ---- Part 7: organic spine flexibility -----------------------------------
+// Rather than the shark's whole silhouette pivoting as one rigid slab
+// through a turn, the rear of the body (the .shark-spine-tail group — see
+// SHARK_VARIANT_SILHOUETTE) is allowed to lag/lead the heading change by a
+// bounded amount, driven by how fast the heading itself is turning. That
+// reads as a fluid C-curve through sharp turns, hunts, and strike bursts,
+// instead of a flat, geometric spin. See SharkPhysicsEngine.integrate for
+// where this is computed, and --spine-bend in style.css for how it's
+// rendered on top of the existing tail wag.
+const SHARK_SPINE_BEND_MAX = 24; // deg — hard cap so a fast direction snap can't fold the body in half
+const SHARK_SPINE_BEND_GAIN = 6.5; // turn-rate (rad/s) -> degrees of spine curvature
+const SHARK_SPINE_BEND_SMOOTH_MIN = 3.5; // lerp-per-second floor (mid state-transition, ai.alpha ~0)
+const SHARK_SPINE_BEND_SMOOTH_MAX = 9; // lerp-per-second ceiling (settled, ai.alpha ~1)
+
+// ---- Part 8: fish body flexibility ---------------------------------------
+// Prey fish are a single-piece .fish-body shape (no segmented spine like the
+// shark), so instead of a discrete joint, the torso gets a continuous
+// sine-wave shear+scale written directly onto .fish-body's transform each
+// frame in fishRenderEntity, driven by the fish's own swimPhase accumulator
+// (see the swim-phase notes above). --body-flex-amp is a skewY() angle (the
+// S-curve lean along the body's length) and --body-flex-scale is a small
+// scaleX() pulse layered under it (the "ripple" — torso compressing/
+// lengthening as the wave passes through), both eased by speed the same way
+// tailHz/tailAmp are below so gliding reads as a gentle sway and a
+// full-speed dart reads as a sharp undulation instead of a flat rigid
+// ellipse gliding around. The ripple runs at the fish's own swim frequency
+// with a constant phase lag behind the tail wag, so it reads as a wave
+// traveling head-to-tail rather than the whole body flexing in lockstep
+// with the fin. This is a single extra transform write per fish per frame
+// (fish.bodyEl.style.transform) — still transform-only, so it never
+// touches layout and stays cheap even with a full tank on screen.
+const FISH_BODY_FLEX_IDLE_DEG = 1.6; // skew at rest — never fully static, even wandering slowly
+const FISH_BODY_FLEX_CRUISE_DEG = 5.5; // skew at cfg.maxSpeed
+const FISH_BODY_FLEX_PANIC_DEG = 9; // skew while fleeing/evading (fish.panic)
+const FISH_BODY_FLEX_SCALE_IDLE = 0.008;
+const FISH_BODY_FLEX_SCALE_CRUISE = 0.03;
+const FISH_BODY_FLEX_SCALE_PANIC = 0.045;
+
+// ---- Swim-phase accumulator (replaces CSS @keyframes for tail/body/fin
+// motion) ---------------------------------------------------------------
+// PREVIOUSLY the tail wag, body ripple, shark tail-seg sway, and pectoral
+// flap were driven by CSS @keyframes whose `animation-duration` read
+// `calc(1s / var(--tail-hz))` — and --tail-hz was rewritten by JS every
+// single rAF frame as speed fluctuates. Changing animation-duration
+// mid-flight doesn't restart the animation; the browser reinterprets the
+// elapsed time against the new duration, so the cycle's progress fraction
+// jumps discontinuously *every frame* tail-hz so much as ticks. At 60fps
+// with continuously-varying speed that's a constant stream of tiny pops —
+// exactly the "vibrating"/"wired" motion being reported. --spine-bend
+// never had this problem because it drives a plain, non-keyframed
+// `transform: rotate(var(--spine-bend))` — a normal style recalc, not an
+// animation-timeline recalculation.
+// Fix: every oscillating body part now uses the same static-transform
+// pattern as spine-bend. Each fish/shark accumulates its own swimPhase by
+// integrating tailHz over real dt (proper phase integration, not a
+// wall-clock trig call), and fishRenderEntity writes the resulting
+// sin/cos values straight into `element.style.transform` once per frame.
+// Still a single transform-only write per part (no layout thrashing,
+// still fully inside the rAF loop) — just no more CSS animation-duration
+// churn underneath it.
+const TWO_PI = Math.PI * 2;
+// Constant *fraction of a cycle* the body ripple lags the tail beat (was
+// the old `animation-delay: calc(-0.14s / var(--tail-hz))` — 0.14 of one
+// period, a fixed phase fraction regardless of frequency).
+const FISH_BODY_FLEX_PHASE_OFFSET = 0.14 * TWO_PI;
+// Shark tail-seg-2 and the pectoral fin previously ran at slower fixed
+// multiples of the tail period (1.1x and 1.5x). Since phase is the time
+// integral of angular rate, and integration is linear, scaling the
+// primary swimPhase by 1/ratio gives the exact same result as a separate
+// accumulator running at rate/ratio — no extra state needed.
+const SHARK_TAIL_SEG2_RATE = 1 / 1.1;
+// Part 1/3: torso flex (traveling wave origin near the head) and dorsal
+// trailing-edge flutter (soft-body vertex displacement) — see
+// fishRenderEntity. Kept small/subtle relative to the tail-segment
+// amplitudes above so the torso still visibly leads the much bigger tail
+// beat rather than competing with it.
+const SHARK_TORSO_FLEX_DEG = 2.2;
+const SHARK_DORSAL_FLUTTER_RATE = 1 / 1.3;
+const SHARK_DORSAL_FLUTTER_DEG = 3;
+
+// ---- Shark AI state machine ---------------------------------------------
+// States the shark AI controller tracks. Kept separate from
+// `shark.currentBehavior` (which only ever distinguishes wandering /
+// hunting / eating for rendering and other systems) so the controller can
+// track a finer-grained state — e.g. "confused" — purely for blending,
+// without touching any external code that reads currentBehavior.
+const SHARK_STATES = {
+  WANDERING: "wandering",
+  HUNTING: "hunting",
+  CONFUSED: "confused",
+  EATING: "eating",
+};
+// How long (seconds) a state transition takes to fully blend in. Applies
+// to both the per-state cruise-speed multiplier and the strike-mode burst,
+// so switching states eases the shark's target speed in over this window
+// instead of snapping straight to the new value in one frame.
+const SHARK_STATE_TRANSITION_DURATION = 0.45;
 const PREY_RESPAWN_DELAY = 5;
+// Boids-style separation: keeps prey from visually overlapping/clumping.
+// Deliberately gentle relative to flee/panic forces (see FISH_SEPARATION_WEIGHT
+// below) so it never dominates a real escape — it's a background steering
+// term, summed into `force` like every other behavior, so it rides through
+// the same fishApplyForce(dt) integration and fishLimitVelocityChange safety
+// net as everything else. No separate velocity-mutation path to keep in sync.
+const FISH_SEPARATION_RADIUS = 46;
+const FISH_SEPARATION_WEIGHT = 0.8;
 
 const fishEngine = {
   state: {
@@ -2029,23 +2792,32 @@ const fishEngine = {
     running: false,
     lastTime: 0,
     nextId: 1,
-    respawnTimers: [],
   },
   field: null,
   rafId: null,
   built: false,
   listenersBound: false,
+  resizeTimer: null,
 };
 
+// flexMul scales Part 8's body-ripple amplitude per species — a long
+// slender swimmer (guppy) undulates its torso far more visibly than a
+// stiff, already-round one (pufferfish, mid-puff) at the same speed, so
+// this is a separate knob from maxSpeed/maxForce/mass rather than trying
+// to derive it from those.
 const SPECIES_PHYSICS = {
-  clownfish: { maxSpeed: 140, maxForce: 320, mass: 1, burst: true },
-  betta: { maxSpeed: 95, maxForce: 180, mass: 1.1, glide: true },
-  angelfish: { maxSpeed: 80, maxForce: 150, mass: 1.3, vertical: true },
-  guppy: { maxSpeed: 180, maxForce: 400, mass: 0.7, zigzag: true },
-  pufferfish: { maxSpeed: 65, maxForce: 120, mass: 1.8, heavy: true },
-  shark: { maxSpeed: 200, maxForce: 280, mass: 2.5 },
+  clownfish: { maxSpeed: 140, maxForce: 320, mass: 1, burst: true, flexMul: 1 },
+  betta: { maxSpeed: 95, maxForce: 180, mass: 1.1, glide: true, flexMul: 1.15 },
+  angelfish: { maxSpeed: 80, maxForce: 150, mass: 1.3, vertical: true, flexMul: 0.75 },
+  guppy: { maxSpeed: 180, maxForce: 400, mass: 0.7, zigzag: true, flexMul: 1.3 },
+  pufferfish: { maxSpeed: 65, maxForce: 120, mass: 1.8, heavy: true, flexMul: 0.4 },
+  // minSpeed: Part 3 — sharks have no swim bladder and must keep moving
+  // forward or they sink, so velocity is never allowed to drift toward
+  // zero outside the deliberate eating pause (see fishUpdateShark).
+  shark: { maxSpeed: 200, maxForce: 280, mass: 2.5, minSpeed: 32 },
 };
 
+// ---- Vector math --------------------------------------------------------
 function fishVec(x = 0, y = 0) { return { x, y }; }
 function fishLen(v) { return Math.hypot(v.x, v.y); }
 function fishNorm(v) {
@@ -2058,13 +2830,25 @@ function fishScale(v, s) { return { x: v.x * s, y: v.y * s }; }
 function fishDist(a, b) { return fishLen(fishSub(a, b)); }
 function fishLimit(v, max) {
   const l = fishLen(v);
-  if (l > max) return fishScale(fishNorm(v), max);
-  return v;
+  if (l > max && l > 0.0001) return fishScale(v, max / l);
+  return { x: v.x, y: v.y };
 }
 function fishClamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
 function fishLerp(a, b, t) { return a + (b - a) * t; }
 function fishRand(min, max) { return min + Math.random() * (max - min); }
+// Frame-rate independent exponential decay: `retainPerSecond` is the
+// fraction of the vector left after a full second, regardless of how
+// often this runs. Replaces the old `v *= 0.95` per-frame damping, which
+// decayed slower in real time on higher refresh-rate displays.
+function fishDamp(v, retainPerSecond, dt) {
+  return fishScale(v, Math.pow(fishClamp(retainPerSecond, 0.0001, 0.999), dt));
+}
 
+// ---- Reynolds steering ---------------------------------------------------
+// Both helpers return a STEERING FORCE (desired velocity minus current
+// velocity, clamped to maxForce) — never touch position/velocity. Callers
+// sum several of these, then integrate once per frame via fishApplyForce
+// with the *real* frame dt so behavior stays frame-rate independent.
 function fishSteerSeek(pos, vel, target, maxSpeed, maxForce) {
   const desired = fishScale(fishNorm(fishSub(target, pos)), maxSpeed);
   const steer = fishSub(desired, vel);
@@ -2073,24 +2857,76 @@ function fishSteerSeek(pos, vel, target, maxSpeed, maxForce) {
 
 function fishSteerFlee(pos, vel, threat, fleeRadius, maxSpeed, maxForce) {
   const d = fishDist(pos, threat);
-  if (d > fleeRadius || d < 0.001) return fishVec();
+  if (d > fleeRadius || d < 0.0001) return fishVec();
   const strength = (fleeRadius - d) / fleeRadius;
   const desired = fishScale(fishNorm(fishSub(pos, threat)), maxSpeed * strength);
   const steer = fishSub(desired, vel);
   return fishLimit(steer, maxForce * (1 + strength));
 }
 
+// Classic boids separation: average, distance-weighted push-away from every
+// same-type neighbor inside `radius`. Like seek/flee above, this returns a
+// STEERING FORCE already clamped to maxForce — callers sum it into their
+// force accumulator and let fishApplyForce(dt) do the actual integration,
+// so it inherits frame-rate independence and the velocity-change ceiling
+// for free instead of needing its own.
+function fishSteerSeparation(fish, neighbors, radius, maxForce) {
+  let push = fishVec();
+  let count = 0;
+  for (let i = 0; i < neighbors.length; i++) {
+    const other = neighbors[i];
+    if (other === fish || other.removing || other.frozen) continue;
+    const d = fishDist(fish.position, other.position);
+    if (d < 0.0001 || d >= radius) continue;
+    push = fishAdd(push, fishScale(fishNorm(fishSub(fish.position, other.position)), (radius - d) / radius));
+    count++;
+  }
+  if (count === 0) return fishVec();
+  return fishLimit(fishScale(push, 1 / count), maxForce);
+}
+
+// F = ma, integrated over exactly `dt` seconds. Every call site MUST pass
+// the frame's real dt — hardcoding a value here is what caused shark
+// strikes to feel erratic (a stray `1` snuck in downstream previously).
 function fishApplyForce(fish, force, dt) {
   const accel = fishScale(force, 1 / (fish.mass || 1));
-  fish.vx += accel.x * dt;
-  fish.vy += accel.y * dt;
+  fish.velocity.x += accel.x * dt;
+  fish.velocity.y += accel.y * dt;
+}
+
+// ---- Velocity-change safety net -----------------------------------------
+// Normal Reynolds steering (fishSteerSeek/Flee -> fishApplyForce) is
+// already frame-rate independent and self-limiting via maxForce. But a
+// few things intentionally step outside that system in a single frame —
+// the guppy's twirl-exit dash, the pufferfish's puff-up hop, a bubble
+// dodge that re-scales the steering force *after* it's already been
+// clamped to maxForce, or a shark's speed cap instantly doubling/halving
+// when strike mode toggles. Each of those used to be able to change a
+// fish's velocity outright in one frame, which reads as a "flash"/teleport
+// rather than a dash. This clamps the *change* in velocity for the frame,
+// regardless of what caused it, to a species-appropriate maximum, so every
+// dash, turn, or direction change gets eased in over a handful of frames
+// instead of snapping instantly. Normal steering is comfortably inside
+// this ceiling, so it's invisible during ordinary swimming.
+const FISH_BURST_ACCEL_MULTIPLIER = 4;
+function fishLimitVelocityChange(fish, prevVelocity, dt, cfg) {
+  const maxAccel = (cfg.maxForce / (fish.mass || 1)) * FISH_BURST_ACCEL_MULTIPLIER;
+  const maxDelta = maxAccel * dt;
+  const dv = fishSub(fish.velocity, prevVelocity);
+  const dvLen = fishLen(dv);
+  if (dvLen > maxDelta && dvLen > 0.0001) {
+    const capped = fishScale(dv, maxDelta / dvLen);
+    fish.velocity.x = prevVelocity.x + capped.x;
+    fish.velocity.y = prevVelocity.y + capped.y;
+  }
 }
 
 function fishWrapBounds(fish, w, h, pad) {
-  if (fish.x < -pad) fish.x = w + pad;
-  if (fish.x > w + pad) fish.x = -pad;
-  if (fish.y < -pad) fish.y = h + pad;
-  if (fish.y > h + pad) fish.y = -pad;
+  const p = fish.position;
+  if (p.x < -pad) p.x = w + pad;
+  else if (p.x > w + pad) p.x = -pad;
+  if (p.y < -pad) p.y = h + pad;
+  else if (p.y > h + pad) p.y = -pad;
 }
 
 function fishPerimeterSpawn(w, h) {
@@ -2114,17 +2950,51 @@ function fishCreateDOM(fish) {
   el.style.height = `${fish.size * 0.6}px`;
   const orient = document.createElement("div");
   orient.className = "fish-orient";
-  orient.innerHTML = `<svg class="fish-svg" viewBox="${FISH_SVG_VIEWBOX}">${FISH_SPECIES_MARKUP[fish.species]}</svg>`;
+  const speciesMarkup = FISH_SPECIES_MARKUP[fish.species];
+  const svgMarkup = fish.type === "shark"
+    ? (SHARK_VARIANT_MARKUP[fish.variant] || SHARK_VARIANT_MARKUP.reef)
+    // Guppy is the one species whose markup is a builder function (sex,
+    // tail shape, pattern, colorway all vary per instance) rather than a
+    // fixed template string — see fishBuildGuppyMarkup.
+    : (typeof speciesMarkup === "function" ? speciesMarkup(fish) : speciesMarkup);
+  // Part 6: explicit preserveAspectRatio + geometricPrecision keep the vector
+  // paths crisp and undistorted at any render size — from the smallest prey
+  // fish up through a fully "Add Shark"-ed tank — and as the window/liquid
+  // interface is resized or the page is browser-zoomed. Nothing here is
+  // rasterized, so there's no fixed-resolution source to run out of.
+  orient.innerHTML = `<svg class="fish-svg" viewBox="${FISH_SVG_VIEWBOX}" preserveAspectRatio="xMidYMid meet" shape-rendering="geometricPrecision">${svgMarkup}</svg>`;
   el.appendChild(orient);
   fish.el = el;
   fish.orientEl = orient;
   fish.pupilEl = orient.querySelector(".fish-pupil");
   fish.tailEl = orient.querySelector(".fish-tail");
+  fish.bodyEl = orient.querySelector(".fish-body");
+  if (fish.type === "shark") {
+    // Sharks have two segmented tail parts (both also carry .fish-tail,
+    // used for prey's single-piece tail — querySelectorAll here to drive
+    // each segment independently). Pectoral fins are rigid lift surfaces
+    // now (no flap — see fishRenderEntity), so no element is cached for
+    // them; .shark-torso-flex and .shark-dorsal-flex are the two soft-
+    // body joints that are animated instead (Part 1/3).
+    fish.tailSegEls = Array.from(orient.querySelectorAll(".shark-tail-seg"));
+    fish.torsoFlexEl = orient.querySelector(".shark-torso-flex");
+    fish.dorsalFlexEl = orient.querySelector(".shark-dorsal-flex");
+  }
   if (fish.pupilEl) {
     fish.pupilBase = {
       cx: parseFloat(fish.pupilEl.getAttribute("cx") || "0"),
       cy: parseFloat(fish.pupilEl.getAttribute("cy") || "0"),
     };
+  }
+  // Part 3: soft-body tail cloth panels, trailing dorsal ribbon, and
+  // shimmering pectorals only exist on male guppies (fishBuildGuppyMarkup
+  // renders none of these for females/other species) — cache whatever is
+  // there so fishRenderGuppyExtras never has to re-query the DOM per frame.
+  if (fish.species === "guppy") {
+    fish.tailPanelEls = Array.from(orient.querySelectorAll(".guppy-tail-panel"));
+    fish.dorsalRibbonEl = orient.querySelector(".guppy-dorsal-ribbon");
+    fish.pectoralEls = Array.from(orient.querySelectorAll(".guppy-pectoral"));
+    fish.shineEl = orient.querySelector(".guppy-shine");
   }
   return el;
 }
@@ -2139,10 +3009,8 @@ function fishSpawnPrey(species, pos) {
     id: fishEngine.state.nextId++,
     type: "prey",
     species,
-    x: spawn.x,
-    y: spawn.y,
-    vx: fishRand(-40, 40),
-    vy: fishRand(-20, 20),
+    position: fishVec(spawn.x, spawn.y),
+    velocity: fishVec(fishRand(-40, 40), fishRand(-20, 20)),
     targetVelocity: fishVec(),
     size: fishRand(minS, maxS),
     angle: 0,
@@ -2163,28 +3031,34 @@ function fishSpawnPrey(species, pos) {
     pupilOffset: { x: 0, y: 0 },
     tailHz: 0.7,
     tailAmp: 16,
+    // Random start offset so a whole school doesn't swim in lockstep —
+    // see the swim-phase accumulator notes above Part 8's constants.
+    swimPhase: fishRand(0, TWO_PI),
     removing: false,
     frozen: false,
   };
+  // Part 1/2: sexual dimorphism + chromatophore pattern/colorway/tail-shape
+  // roll, before fishCreateDOM builds the actual markup from these.
+  if (species === "guppy") fishGuppyPickTraits(fish);
   fishCreateDOM(fish);
   fishEngine.field.appendChild(fish.el);
   fishEngine.state.fishes.push(fish);
   return fish;
 }
 
-function fishSpawnShark(pos) {
+function fishSpawnShark(pos, variant) {
   const w = fishEngine.state.width || window.innerWidth;
   const h = fishEngine.state.height || window.innerHeight;
   const spawn = pos || fishPerimeterSpawn(w, h);
   const cfg = SPECIES_PHYSICS.shark;
+  const chosenVariant = variant || pickRandomSharkVariant();
   const fish = {
     id: fishEngine.state.nextId++,
     type: "shark",
     species: "shark",
-    x: spawn.x,
-    y: spawn.y,
-    vx: fishRand(-30, 30),
-    vy: fishRand(-30, 30),
+    variant: chosenVariant,
+    position: fishVec(spawn.x, spawn.y),
+    velocity: fishVec(fishRand(-30, 30), fishRand(-30, 30)),
     targetVelocity: fishVec(),
     size: fishRand(FISH_SIZE_RANGES.shark[0], FISH_SIZE_RANGES.shark[1]),
     angle: 0,
@@ -2198,25 +3072,47 @@ function fishSpawnShark(pos) {
     strikeMode: false,
     confuseSpin: 0,
     chewTimer: 0,
+    ai: new SharkAIController(),
+    physics: new SharkPhysicsEngine(),
     mass: cfg.mass,
     maxSpeed: cfg.maxSpeed,
     maxForce: cfg.maxForce,
     wanderAngle: Math.random() * Math.PI * 2,
     pupilOffset: { x: 0, y: 0 },
     tailHz: 0.5,
+    swimPhase: fishRand(0, TWO_PI),
+    // Part 7: organic spine flex — degrees of extra curvature applied to
+    // the tail end of the body during sharp turns/strikes, computed each
+    // frame by SharkPhysicsEngine.integrate() from heading turn-rate. See
+    // --spine-bend in fishRenderEntity + .shark-spine-tail in style.css.
+    spineBend: 0,
     removing: false,
     frozen: false,
   };
   fishCreateDOM(fish);
-  fish.el.classList.add("shark-particle");
+  fish.el.classList.add("shark-particle", `shark-variant-${chosenVariant}`);
   fishEngine.field.appendChild(fish.el);
   fishEngine.state.fishes.push(fish);
   return fish;
 }
 
 function fishGetBubblePositions() {
+  // Bubbles turned off (independently of Liquid Interface itself, or the
+  // whole Liquid Interface theme off) — there's nothing on screen for fish
+  // to dodge, so skip the layout-read walk below entirely.
+  if (!document.body.classList.contains("bubble-mode-on")) return [];
+  // While the page is actively scrolling, reuse last frame's positions
+  // instead of forcing a fresh getBoundingClientRect layout read on every
+  // bubble every frame — that forced read is one more thing competing
+  // with the browser's scroll compositing work, on top of the glass-card
+  // backdrop-filter cost (see the "is-scrolling" handling in style.css).
+  // Bubbles drift slowly, so a couple hundred ms of stale avoidance data
+  // is imperceptible.
+  if (document.body.classList.contains("is-scrolling") && fishEngine.state.lastBubbles) {
+    return fishEngine.state.lastBubbles;
+  }
   const field = document.getElementById("bubble-field");
-  if (!field) return [];
+  if (!field) return fishEngine.state.lastBubbles || [];
   const bubbles = [];
   field.querySelectorAll(".bubble-particle").forEach((el) => {
     const r = el.getBoundingClientRect();
@@ -2230,6 +3126,7 @@ function fishGetBubblePositions() {
       r: r.width / 2,
     });
   });
+  fishEngine.state.lastBubbles = bubbles;
   return bubbles;
 }
 
@@ -2245,23 +3142,266 @@ function fishPushBubbleDraft(bubble, fishVx, fishVy) {
   bubble.el.style.setProperty("--bdraft-y", `${dy}px`);
 }
 
+// SharkAIController: owns the shark's high-level state machine (wandering /
+// hunting / confused / eating) and produces a single blended speed
+// multiplier so switching between states — and ramping in/out of a strike —
+// eases in over SHARK_STATE_TRANSITION_DURATION rather than snapping in a
+// single frame. Steering itself (fishSteerSeek/fishApplyForce) is
+// untouched; this only decides *how fast* the shark is allowed to want to
+// go on any given frame, and callers plug that into the existing force /
+// integration pipeline like any other value.
+class SharkAIController {
+  constructor() {
+    this.state = SHARK_STATES.WANDERING;
+    this.previousState = SHARK_STATES.WANDERING;
+    // Starts "settled" (alpha === 1) so a freshly spawned shark doesn't
+    // ease in from a phantom previous state.
+    this.transitionElapsed = SHARK_STATE_TRANSITION_DURATION;
+    // Strike is a burst layered on top of the hunting cruise speed and
+    // eased independently, since a shark can enter/exit strike range
+    // several times while remaining in the "hunting" state overall.
+    this.strikeIntensity = 0;
+    this.targetStrikeIntensity = 0;
+  }
+
+  // Switches the active state and restarts the blend clock so behavior
+  // parameters ease from wherever they currently sit into the new target.
+  // Re-entering the same state is a no-op so an in-progress blend never
+  // gets reset just because targeting logic re-confirms "still hunting"
+  // on a later frame.
+  setState(next) {
+    if (next === this.state) return;
+    this.previousState = this.state;
+    this.state = next;
+    this.transitionElapsed = 0;
+  }
+
+  setStrike(on) {
+    this.targetStrikeIntensity = on ? 1 : 0;
+  }
+
+  // 0 right at the instant of a state change, 1 once fully blended in.
+  get alpha() {
+    return fishClamp(this.transitionElapsed / SHARK_STATE_TRANSITION_DURATION, 0, 1);
+  }
+
+  // Advances the transition clock and eases strikeIntensity toward its
+  // target. Must be called once per frame with the real frame dt so the
+  // blend takes the same wall-clock time regardless of frame rate — same
+  // convention as fishApplyForce/fishDamp elsewhere in the sim.
+  update(dt) {
+    this.transitionElapsed += dt;
+    const step = dt / SHARK_STATE_TRANSITION_DURATION;
+    if (this.strikeIntensity < this.targetStrikeIntensity) {
+      this.strikeIntensity = Math.min(this.targetStrikeIntensity, this.strikeIntensity + step);
+    } else if (this.strikeIntensity > this.targetStrikeIntensity) {
+      this.strikeIntensity = Math.max(this.targetStrikeIntensity, this.strikeIntensity - step);
+    }
+  }
+
+  // Baseline cruise-speed multiplier (fraction of maxSpeed) for a state,
+  // before the strike burst is layered on top.
+  static baseSpeedMul(state) {
+    switch (state) {
+      case SHARK_STATES.HUNTING: return 1;
+      case SHARK_STATES.CONFUSED: return 0.25;
+      case SHARK_STATES.EATING: return 0;
+      case SHARK_STATES.WANDERING:
+      default: return 0.6;
+    }
+  }
+
+  // The multiplier callers should scale maxSpeed by this frame: lerps
+  // between the previous and current state's baseline using `alpha` (so a
+  // WANDERING -> HUNTING switch ramps up over the transition window instead
+  // of jumping straight to full hunting speed), then layers the eased
+  // strike burst (1x -> 2x) on top so entering/exiting strike range is
+  // also a ramp rather than the speed cap instantly doubling/halving.
+  blendedSpeedMul() {
+    const fromMul = SharkAIController.baseSpeedMul(this.previousState);
+    const toMul = SharkAIController.baseSpeedMul(this.state);
+    const cruiseMul = fishLerp(fromMul, toMul, this.alpha);
+    return cruiseMul * fishLerp(1, 2, this.strikeIntensity);
+  }
+}
+
+// ---- Vector2 --------------------------------------------------------------
+// Thin, self-descriptive wrapper over the fishVec/fishAdd/fishScale/fishLerp
+// primitives above. The rest of the sim composes those directly, but
+// SharkPhysicsEngine below leans on named vector ops — `Vector2.lerp` in
+// particular — since it's blending whole velocity/heading vectors (not
+// summing steering forces the way fishSteerSeek/fishApplyForce do), so a
+// vector-level lerp reads clearer at each call site than reimplementing it
+// inline. Same math as fishLerp per-axis; this is not a second vector
+// system, just a named entry point onto the existing one.
+const Vector2 = {
+  lerp(a, b, t) {
+    const ct = fishClamp(t, 0, 1);
+    return { x: fishLerp(a.x, b.x, ct), y: fishLerp(a.y, b.y, ct) };
+  },
+  length(v) { return fishLen(v); },
+  normalize(v) { return fishNorm(v); },
+  sub(a, b) { return fishSub(a, b); },
+  add(a, b) { return fishAdd(a, b); },
+  scale(v, s) { return fishScale(v, s); },
+};
+
+// Confusion used to be rendered as a continuous full-body spin (up to
+// 1080deg/sec, unbounded — several full barrel-rolls over the 1.2s timeout).
+// Real sharks don't tumble like that when they lose a target; they break
+// off with a sharp turn. This is now a small bounded head/body shake
+// layered on top of the normal heading-based turn-away, decaying to 0
+// instead of accumulating rotation. Amplitude in degrees, rate in Hz.
+const SHARK_CONFUSE_SHAKE_AMPLITUDE = 9;
+const SHARK_CONFUSE_SHAKE_HZ = 2.2;
+// Per-second exponential decay rate applied to velocity while eating.
+// Higher = the shark coasts to a stop faster after a catch.
+const SHARK_EAT_DECEL_RATE = 5;
+// How quickly (per second, scaled by ai.alpha below) the rendered heading
+// vector chases the shark's actual velocity direction. Kept state-transition
+// aware: slower right as a new state comes in (low alpha) so the heading
+// doesn't pop instantly when targetVelocity jumps to a new direction, and
+// fast once the shark has settled into the new state (alpha -> 1).
+const SHARK_HEADING_EASE_MIN = 2.5;
+const SHARK_HEADING_EASE_MAX = 9;
+
+// SharkPhysicsEngine: owns per-frame application of the blended velocity
+// that SharkAIController (Part 1) computes onto the shark's actual
+// movement and heading. fishSteerSeek/fishApplyForce already turn steering
+// intent into a physically reasonable velocity; what this adds is the
+// smoothing pass *around* that — easing the confusion spin's rotation in
+// and out instead of a flat per-frame increment, gliding to a stop while
+// eating instead of an instant velocity snap, and blending the rendered
+// heading toward the new velocity direction with Vector2.lerp so a state
+// switch (e.g. snapping into/out of strike mode, or exiting a spin) can't
+// pop the shark's orientation in a single frame. One instance lives on
+// each shark (shark.physics) so its internal spin/heading state is
+// per-shark, exactly like shark.ai.
+class SharkPhysicsEngine {
+  constructor() {
+    // How long the shark has been in the current confusion shake, used to
+    // drive the bounded oscillation in applyConfusionDamping() — reset to 0
+    // whenever confuseSpin isn't active.
+    this.confuseElapsed = 0;
+    // Smoothed heading direction (unit-ish vector), blended toward the
+    // shark's real velocity direction every frame via Vector2.lerp. Angle
+    // and left/right facing are both derived from this instead of reading
+    // shark.velocity directly, so they inherit the same easing.
+    this.heading = fishVec(1, 0);
+    // Smoothed spine-bend angle (deg), eased toward a turn-rate-derived
+    // target each frame in integrate() — see Part 7 constants above.
+    this.spineBend = 0;
+  }
+
+  // Confusion shake: while shark.confuseSpin is active this drives a small
+  // bounded oscillation (a head-shake) instead of the old unbounded
+  // `extraRot +=` accumulation, which added up to several full 360°
+  // rotations over the timeout and read as the shark barrel-rolling in
+  // place. The shark's actual body-turn away from the lost target already
+  // comes from the normal heading/steering (it re-enters "wandering"
+  // behavior the moment confuseSpin is set), so this is purely a small
+  // cosmetic shake layered on top, and it decays to 0 as confuseSpin counts
+  // down rather than cutting off dead the instant the timer ends.
+  applyConfusionDamping(shark, dt) {
+    if (shark.confuseSpin > 0) {
+      this.confuseElapsed += dt;
+      const decay = fishClamp(shark.confuseSpin / 1.2, 0, 1);
+      shark.extraRot = Math.sin(this.confuseElapsed * SHARK_CONFUSE_SHAKE_HZ * Math.PI * 2)
+        * SHARK_CONFUSE_SHAKE_AMPLITUDE * decay;
+    } else {
+      this.confuseElapsed = 0;
+      shark.extraRot = fishLerp(shark.extraRot || 0, 0, fishClamp(dt * 6, 0, 1));
+    }
+  }
+
+  // Eating deceleration: glides shark.velocity down to rest over the eat
+  // pause using Vector2.lerp toward zero, frame-rate independent via the
+  // same exponential-decay-as-lerp-factor pattern as fishDamp above.
+  // Replaces the old one-shot `velocity *= 0.1` snap that fired once at
+  // the instant of the catch and then left the (now-tiny) residual
+  // velocity untouched for the rest of the chew.
+  applyEatingDeceleration(shark, dt) {
+    const t = fishClamp(dt * SHARK_EAT_DECEL_RATE, 0, 1);
+    shark.velocity = Vector2.lerp(shark.velocity, fishVec(0, 0), t);
+  }
+
+  // Integrates the current velocity into position, and eases the visual
+  // heading/rotation toward that velocity's direction rather than
+  // recomputing angle straight off shark.velocity every frame. `ai.alpha`
+  // (0 right at a state switch, 1 once settled) slows the heading blend
+  // during an active transition so orientation doesn't pop the instant a
+  // new target velocity appears, then speeds back up once settled.
+  integrate(shark, ai, dt) {
+    shark.position.x += shark.velocity.x * dt;
+    shark.position.y += shark.velocity.y * dt;
+
+    // Snapshot before this frame's heading blend — used below to measure
+    // how fast the heading itself is turning, for the spine-bend curve.
+    const prevHeading = this.heading;
+    const speed = fishLen(shark.velocity);
+    if (speed > 2) {
+      const dir = fishScale(shark.velocity, 1 / speed);
+      const headingT = fishClamp(dt * fishLerp(SHARK_HEADING_EASE_MIN, SHARK_HEADING_EASE_MAX, ai.alpha), 0, 1);
+      this.heading = Vector2.lerp(this.heading, dir, headingT);
+    }
+    shark.angle = Math.atan2(this.heading.y, Math.abs(this.heading.x) + 0.001) * (180 / Math.PI) * 0.25;
+    if (Math.abs(this.heading.x) > 0.05) {
+      shark.orientEl.style.transform = this.heading.x < 0 ? "scaleX(-1)" : "scaleX(1)";
+    }
+
+    // ---- Part 7: organic spine flexibility -------------------------------
+    // Signed angle between last frame's heading and this frame's, via
+    // cross/dot rather than differencing two atan2() outputs directly, so
+    // the ±180° wrap never shows up as a one-frame snap in the bend.
+    const cross = prevHeading.x * this.heading.y - prevHeading.y * this.heading.x;
+    const dot = prevHeading.x * this.heading.x + prevHeading.y * this.heading.y;
+    const turnRate = dt > 0 ? Math.atan2(cross, dot) / dt : 0;
+    // Strikes and hunting bursts whip the tail through a turn harder than
+    // an ordinary wandering course-correction — lean into that instead of
+    // smoothing it away like everything else here.
+    const burstMul = fishLerp(1, 1.6, ai.strikeIntensity || 0);
+    // The tail-group rotation lives in local (pre-mirror) SVG space, so
+    // when the sprite is flipped via scaleX(-1) for leftward swimming the
+    // sign has to flip too, or the curve would visually reverse on a turn.
+    const mirrorSign = this.heading.x < 0 ? -1 : 1;
+    const bendTarget = fishClamp(
+      turnRate * SHARK_SPINE_BEND_GAIN * burstMul * mirrorSign,
+      -SHARK_SPINE_BEND_MAX, SHARK_SPINE_BEND_MAX,
+    );
+    const bendT = fishClamp(dt * fishLerp(SHARK_SPINE_BEND_SMOOTH_MIN, SHARK_SPINE_BEND_SMOOTH_MAX, ai.alpha), 0, 1);
+    this.spineBend = fishLerp(this.spineBend || 0, bendTarget, bendT);
+    shark.spineBend = this.spineBend;
+  }
+}
+
 function fishNearestPrey(shark) {
   let best = null;
   let bestD = Infinity;
   fishEngine.state.fishes.forEach((f) => {
     if (f.type !== "prey" || f.removing || f.frozen || fishSpeciesHidden(f.species)) return;
-    const d = fishDist(shark, f);
+    const d = fishDist(shark.position, f.position);
     if (d < bestD) { bestD = d; best = f; }
   });
   return best;
 }
 
 function fishSharkTargeting(shark, dt) {
+  const ai = shark.ai;
   if (shark.currentBehavior === "eating") return;
   if (shark.confuseSpin > 0) {
     shark.confuseSpin -= dt;
-    shark.extraRot += 18 * dt * 60;
+    // Rotation itself now eases in/out via SharkPhysicsEngine's damped
+    // spin velocity instead of a flat `+= 18 * dt * 60` every frame — see
+    // applyConfusionDamping(), called each frame from fishUpdateShark so
+    // the decay keeps running for a moment even after confuseSpin hits 0.
     shark.currentBehavior = "wandering";
+    shark.strikeMode = false;
+    // Tracked as its own AI state (distinct from "wandering") purely so
+    // blendedSpeedMul() eases the confused shark down to its slow spin
+    // speed and back up again afterward, without changing anything the
+    // rest of the sim reads off shark.currentBehavior.
+    ai.setState(SHARK_STATES.CONFUSED);
+    ai.setStrike(false);
     return;
   }
   let target = fishEngine.state.fishes.find((f) => f.id === shark.targetPreyId && !f.removing && !f.frozen);
@@ -2274,54 +3414,74 @@ function fishSharkTargeting(shark, dt) {
   if (!target) {
     shark.currentBehavior = "wandering";
     shark.strikeMode = false;
+    ai.setState(SHARK_STATES.WANDERING);
+    ai.setStrike(false);
     return;
   }
-  const d = fishDist(shark, target);
+  const d = fishDist(shark.position, target.position);
   shark.huntTimer += dt;
   if (shark.huntTimer > SHARK_CONFUSE_TIMEOUT && d > SHARK_STRIKE_RADIUS) {
     shark.confuseSpin = 1.2;
     shark.targetPreyId = null;
     shark.huntTimer = 0;
     shark.strikeMode = false;
+    ai.setState(SHARK_STATES.CONFUSED);
+    ai.setStrike(false);
     return;
   }
-  if (d < SHARK_STRIKE_RADIUS) {
-    shark.strikeMode = true;
-    shark.currentBehavior = "hunting";
-  } else {
-    shark.strikeMode = false;
-    shark.currentBehavior = "hunting";
-  }
+  const inStrikeRange = d < SHARK_STRIKE_RADIUS;
+  shark.strikeMode = inStrikeRange;
+  shark.currentBehavior = "hunting";
+  ai.setState(SHARK_STATES.HUNTING);
+  // Eased toward 0/1 by ai.update(), not snapped — see blendedSpeedMul().
+  ai.setStrike(inStrikeRange);
   const cfg = SPECIES_PHYSICS.shark;
-  const speedMul = shark.strikeMode ? 2 : 1;
-  const toPrey = fishSub(target, shark);
+  const speedMul = ai.blendedSpeedMul();
+  const toPrey = fishSub(target.position, shark.position);
   const perp = fishNorm({ x: -toPrey.y, y: toPrey.x });
-  const ambushOffset = fishScale(perp, shark.strikeMode ? 0 : 80 * Math.sin(Date.now() * 0.001 + shark.id));
-  const aim = fishAdd(target, ambushOffset);
-  const force = fishSteerSeek(shark, fishVec(shark.vx, shark.vy), aim, cfg.maxSpeed * speedMul, cfg.maxForce);
-  fishApplyForce(shark, force, 1);
-  if (shark.strikeMode && d < SHARK_CATCH_RADIUS) fishConsumePrey(shark, target);
+  // Ambush weave fades out smoothly as strike intensity ramps up (scaled
+  // by 1 - strikeIntensity) instead of snapping off the instant the shark
+  // crosses into strike range, so the approach line straightens gradually
+  // into the final strike run.
+  const ambushOffset = fishScale(perp, 80 * Math.sin(Date.now() * 0.001 + shark.id) * (1 - ai.strikeIntensity));
+  const aim = fishAdd(target.position, ambushOffset);
+  const desired = fishScale(fishNorm(fishSub(aim, shark.position)), cfg.maxSpeed * speedMul);
+  shark.targetVelocity = desired;
+  const force = fishSteerSeek(shark.position, shark.velocity, aim, cfg.maxSpeed * speedMul, cfg.maxForce);
+  // BUG FIX: this used to hardcode `1` instead of `dt`, applying up to a
+  // full second's worth of acceleration every single frame — the shark
+  // would nearly teleport to max steering force at 60fps. Real dt keeps
+  // this consistent with every other force application in the sim.
+  fishApplyForce(shark, force, dt);
+  // Gate the catch on strikeIntensity having mostly ramped in, so the bite
+  // itself also reads as the payoff of an eased-in strike rather than
+  // landing on the very first frame the shark crosses SHARK_STRIKE_RADIUS.
+  if (inStrikeRange && ai.strikeIntensity > 0.6 && d < SHARK_CATCH_RADIUS) fishConsumePrey(shark, target);
 }
 
 function fishConsumePrey(shark, prey) {
   if (prey.removing) return;
   prey.removing = true;
   prey.frozen = true;
-  prey.vx = 0;
-  prey.vy = 0;
+  prey.velocity.x = 0;
+  prey.velocity.y = 0;
   prey.el.classList.add("fish-being-eaten");
   setTimeout(() => {
     if (prey.el && prey.el.parentNode) prey.el.parentNode.removeChild(prey.el);
     fishEngine.state.fishes = fishEngine.state.fishes.filter((f) => f.id !== prey.id);
   }, 150);
-  fishSpawnFeastBurst(prey.x, prey.y);
-  fishSpawnChompText(prey.x, prey.y);
+  fishSpawnFeastBurst(prey.position.x, prey.position.y);
+  fishSpawnChompText(prey.position.x, prey.position.y);
   shark.currentBehavior = "eating";
   shark.chewTimer = SHARK_EAT_PAUSE;
   shark.strikeMode = false;
   shark.targetPreyId = null;
-  shark.vx *= 0.1;
-  shark.vy *= 0.1;
+  shark.ai.setState(SHARK_STATES.EATING);
+  shark.ai.setStrike(false);
+  // Velocity is no longer snapped here — SharkPhysicsEngine.
+  // applyEatingDeceleration() glides it to rest over the chew, called
+  // every frame from the "eating" branch of fishUpdateShark, so the
+  // shark visibly coasts to a stop rather than freezing mid-lunge.
   setTimeout(() => {
     const species = FISH_SPECIES_IDS[Math.floor(Math.random() * FISH_SPECIES_IDS.length)];
     if (!fishSpeciesHidden(species)) fishSpawnPrey(species, fishPerimeterSpawn(fishEngine.state.width, fishEngine.state.height));
@@ -2358,12 +3518,21 @@ function fishUpdatePreyTrick(fish, dt) {
   if (fish.trickActive) {
     fish.trickTimer -= dt;
     if (fish.trickTimer <= 0) {
+      const wasTwirl = fish.trickActive === "happy-twirl";
       fish.trickActive = null;
       fish.extraRot = 0;
       fish.scaleX = 1;
       fish.scaleY = 1;
       fish.el.classList.remove("fish-trick-active");
       fish.behaviorTimer = fishRand(8, 15);
+      if (wasTwirl) {
+        // "...before zooming off in a new direction" — exit the loop-de-loop
+        // with a burst of speed along whichever way it was spinning toward,
+        // rather than just quietly resuming the normal wander seek.
+        const boostSpeed = SPECIES_PHYSICS.guppy.maxSpeed * 1.4;
+        fish.velocity.x = Math.cos(fish.wanderAngle) * boostSpeed;
+        fish.velocity.y = Math.sin(fish.wanderAngle) * boostSpeed;
+      }
     }
     return;
   }
@@ -2393,7 +3562,7 @@ function fishUpdatePreyTrick(fish, dt) {
       fish.trickActive = "puff-balloon";
       fish.trickTimer = 2;
       fish.scaleX = fish.scaleY = 2.5;
-      fish.vy -= 25;
+      fish.velocity.y -= 25;
       break;
     default:
       fish.behaviorTimer = fishRand(8, 15);
@@ -2402,7 +3571,7 @@ function fishUpdatePreyTrick(fish, dt) {
 }
 
 function fishBubbleDodgeForce(fish, bubble, cfg) {
-  const away = fishSteerFlee(fish, fishVec(fish.vx, fish.vy), bubble, FISH_BUBBLE_RADIUS, cfg.maxSpeed * 1.2, cfg.maxForce);
+  const away = fishSteerFlee(fish.position, fish.velocity, bubble, FISH_BUBBLE_RADIUS, cfg.maxSpeed * 1.2, cfg.maxForce);
   if (fish.species === "angelfish" || fish.species === "betta") {
     const tangent = fishNorm({ x: -away.y, y: away.x });
     return fishAdd(away, fishScale(tangent, cfg.maxForce * 0.6));
@@ -2417,95 +3586,179 @@ function fishBubbleDodgeForce(fish, bubble, cfg) {
   return away;
 }
 
-function fishUpdatePrey(fish, dt, bubbles, sharks) {
+function fishUpdatePrey(fish, dt, bubbles, sharks, preyNeighbors) {
   if (fish.frozen || fish.removing || fishSpeciesHidden(fish.species)) return;
   const cfg = SPECIES_PHYSICS[fish.species] || SPECIES_PHYSICS.clownfish;
+  // Snapshot before anything this frame (steering, tricks, dodges, panic
+  // caps) touches velocity — see fishLimitVelocityChange below.
+  const prevVelocity = { x: fish.velocity.x, y: fish.velocity.y };
   let force = fishVec();
   let behavior = "wandering";
   fish.panic = false;
 
-  const mouseD = fishDist(fish, fishEngine.state.mouse);
+  const mouseD = fishDist(fish.position, fishEngine.state.mouse);
   if (mouseD < FISH_MOUSE_RADIUS) {
     behavior = "fleeing_mouse";
-    force = fishAdd(force, fishSteerFlee(fish, fishVec(fish.vx, fish.vy), fishEngine.state.mouse, FISH_MOUSE_RADIUS, cfg.maxSpeed * 1.6, cfg.maxForce * 2));
+    fish.panic = true;
+    // Each fish locks in a fixed lateral bias for the duration of a flee
+    // episode so a whole group scatters apart in different directions
+    // instead of bolting away from the pointer as one solid block.
+    if (fish.scatterSeed === undefined || fish.currentBehavior !== "fleeing_mouse") {
+      fish.scatterSeed = fishRand(-1, 1);
+    }
+    const fleeForce = fishSteerFlee(fish.position, fish.velocity, fishEngine.state.mouse, FISH_MOUSE_RADIUS, cfg.maxSpeed * 1.8, cfg.maxForce * 2.2);
+    const lateral = fishNorm({ x: -fleeForce.y, y: fleeForce.x });
+    force = fishAdd(force, fishAdd(fleeForce, fishScale(lateral, cfg.maxForce * 0.8 * fish.scatterSeed)));
+  } else {
+    fish.scatterSeed = undefined;
   }
 
   let nearestShark = null;
   let sharkD = Infinity;
   sharks.forEach((s) => {
     if (s.currentBehavior === "eating" || s.removing) return;
-    const d = fishDist(fish, s);
+    const d = fishDist(fish.position, s.position);
     if (d < sharkD) { sharkD = d; nearestShark = s; }
     if (s.targetPreyId === fish.id && d < FISH_SHARK_PANIC_RADIUS) {
       behavior = "evading_shark";
       fish.panic = true;
-      force = fishAdd(force, fishSteerFlee(fish, fishVec(fish.vx, fish.vy), s, FISH_SHARK_PANIC_RADIUS, cfg.maxSpeed * 2.5, cfg.maxForce * 2.5));
+      force = fishAdd(force, fishSteerFlee(fish.position, fish.velocity, s.position, FISH_SHARK_PANIC_RADIUS, cfg.maxSpeed * 2.5, cfg.maxForce * 2.5));
     }
   });
 
   bubbles.forEach((b) => {
-    const d = fishDist(fish, b);
+    const d = fishDist(fish.position, b);
     if (d < FISH_BUBBLE_RADIUS + b.r) {
       if (behavior === "wandering") behavior = "evading_bubble";
       force = fishAdd(force, fishBubbleDodgeForce(fish, b, cfg));
     }
-    if (d < 90 && fishLen(fishVec(fish.vx, fish.vy)) > 60) fishPushBubbleDraft(b, fish.vx, fish.vy);
+    if (d < 90 && fishLen(fish.velocity) > 60) fishPushBubbleDraft(b, fish.velocity.x, fish.velocity.y);
   });
 
+  // Background separation runs every frame regardless of the dominant
+  // behavior above (wandering, fleeing, evading) — a real flock keeps its
+  // spacing even mid-panic. Weighted down so it never overrides an actual
+  // flee/evade force, only nudges neighbors apart.
+  if (preyNeighbors && preyNeighbors.length > 1) {
+    force = fishAdd(force, fishScale(fishSteerSeparation(fish, preyNeighbors, FISH_SEPARATION_RADIUS, cfg.maxForce), FISH_SEPARATION_WEIGHT));
+  }
+
+  let wanderDesired = null;
   if (behavior === "wandering") {
     fishUpdatePreyTrick(fish, dt);
-    if (fish.trickActive === "wobbly-roll") fish.extraRot += 360 * dt;
+
+    // Flourish-flare and curious-peek are meant to be the fish holding
+    // still to show off — pausedForTrick skips the wander-seek force
+    // below so they actually stop instead of drifting through the pose.
+    const pausedForTrick = fish.trickActive === "flourish-flare" || fish.trickActive === "curious-peek";
+
+    if (fish.trickActive === "wobbly-roll") {
+      fish.extraRot += 360 * dt; // one full barrel roll over the ~1.1s trick
+      // Rapid tail vibration during the roll, overriding the usual
+      // speed-based tail values for the duration of the trick.
+      fish.tailHz = 3.4;
+      fish.tailAmp = 26;
+    }
+    if (fish.trickActive === "flourish-flare") {
+      // Fins "flare" via a sine-wave pulse layered on top of the 20%
+      // base inflation, instead of holding one static scale.
+      const pulse = Math.sin(Date.now() * 0.012) * 0.08;
+      fish.scaleX = fish.scaleY = 1.2 + pulse;
+    }
+    if (fish.trickActive === "curious-peek") {
+      // Side-to-side head wiggle, plus a subtle horizontal squash/stretch
+      // to sell the "leaning toward the screen" 3D illusion.
+      fish.extraRot = Math.sin(Date.now() * 0.008) * 8;
+      fish.scaleX = 1 + Math.sin(Date.now() * 0.006) * 0.06;
+    }
     if (fish.trickActive === "happy-twirl") {
       fish.wanderAngle += 12 * dt;
       force = fishAdd(force, fishScale(fishNorm({ x: Math.cos(fish.wanderAngle), y: Math.sin(fish.wanderAngle) }), cfg.maxForce));
     }
-    if (fish.trickActive === "curious-peek") {
-      fish.extraRot = Math.sin(Date.now() * 0.008) * 8;
-    }
-    const wanderTarget = {
-      x: fish.x + Math.cos(fish.wanderAngle) * 120,
-      y: fish.y + Math.sin(fish.wanderAngle) * 80,
-    };
-    fish.wanderAngle += fishRand(-0.4, 0.4) * dt;
-    if (cfg.burst && fish.species === "clownfish") {
-      fish.burstPhase += dt;
-      if (fish.burstPhase > 1.2) { fish.burstPhase = 0; force = fishAdd(force, fishSteerSeek(fish, fishVec(fish.vx, fish.vy), wanderTarget, cfg.maxSpeed, cfg.maxForce * 1.4)); }
-      else if (fish.burstPhase > 0.9) { fish.vx *= 0.95; fish.vy *= 0.95; }
-    } else if (cfg.zigzag) {
-      fish.zigzagPhase += dt * 8;
-      wanderTarget.x += Math.sin(fish.zigzagPhase) * 60;
-      force = fishAdd(force, fishSteerSeek(fish, fishVec(fish.vx, fish.vy), wanderTarget, cfg.maxSpeed, cfg.maxForce));
-    } else if (cfg.vertical && fish.species === "angelfish") {
-      wanderTarget.y += Math.sin(Date.now() * 0.001 + fish.id) * 40;
-      force = fishAdd(force, fishSteerSeek(fish, fishVec(fish.vx, fish.vy), wanderTarget, cfg.maxSpeed * 0.85, cfg.maxForce));
+
+    if (pausedForTrick) {
+      // Hold position: bleed off velocity instead of seeking a wander
+      // target, so the flare/peek reads as an actual pause, not a glide.
+      fish.velocity = fishDamp(fish.velocity, 0.02, dt);
     } else {
-      force = fishAdd(force, fishSteerSeek(fish, fishVec(fish.vx, fish.vy), wanderTarget, cfg.maxSpeed, cfg.maxForce * 0.7));
+      const wanderTarget = {
+        x: fish.position.x + Math.cos(fish.wanderAngle) * 120,
+        y: fish.position.y + Math.sin(fish.wanderAngle) * 80,
+      };
+      fish.wanderAngle += fishRand(-0.4, 0.4) * dt;
+      if (cfg.burst && fish.species === "clownfish") {
+        fish.burstPhase += dt;
+        if (fish.burstPhase > 1.2) {
+          fish.burstPhase = 0;
+          wanderDesired = fishScale(fishNorm(fishSub(wanderTarget, fish.position)), cfg.maxSpeed);
+          force = fishAdd(force, fishSteerSeek(fish.position, fish.velocity, wanderTarget, cfg.maxSpeed, cfg.maxForce * 1.4));
+        } else if (fish.burstPhase > 0.9) {
+          // Coast-and-decay between bursts. Uses real elapsed time so the
+          // glide feels the same regardless of display refresh rate.
+          fish.velocity = fishDamp(fish.velocity, 0.05, dt);
+        }
+      } else if (cfg.zigzag) {
+        fish.zigzagPhase += dt * 8;
+        wanderTarget.x += Math.sin(fish.zigzagPhase) * 60;
+        wanderDesired = fishScale(fishNorm(fishSub(wanderTarget, fish.position)), cfg.maxSpeed);
+        force = fishAdd(force, fishSteerSeek(fish.position, fish.velocity, wanderTarget, cfg.maxSpeed, cfg.maxForce));
+      } else if (cfg.vertical && fish.species === "angelfish") {
+        wanderTarget.y += Math.sin(Date.now() * 0.001 + fish.id) * 40;
+        wanderDesired = fishScale(fishNorm(fishSub(wanderTarget, fish.position)), cfg.maxSpeed * 0.85);
+        force = fishAdd(force, fishSteerSeek(fish.position, fish.velocity, wanderTarget, cfg.maxSpeed * 0.85, cfg.maxForce));
+      } else {
+        wanderDesired = fishScale(fishNorm(fishSub(wanderTarget, fish.position)), cfg.maxSpeed);
+        force = fishAdd(force, fishSteerSeek(fish.position, fish.velocity, wanderTarget, cfg.maxSpeed, cfg.maxForce * 0.7));
+      }
     }
   }
+  // targetVelocity tracks the fish's current steering intent (whichever
+  // behavior is dominant this frame) — read by rendering for gaze/tail cues.
+  fish.targetVelocity = wanderDesired || fishScale(fishNorm(force), cfg.maxSpeed);
 
   fish.currentBehavior = behavior;
   fishApplyForce(fish, force, dt);
   const speedCap = fish.panic ? cfg.maxSpeed * 2.5 : cfg.maxSpeed;
-  const vel = fishLimit(fishVec(fish.vx, fish.vy), speedCap);
-  fish.vx = vel.x;
-  fish.vy = vel.y;
-  fish.x += fish.vx * dt;
-  fish.y += fish.vy * dt;
-  fishWrapBounds(fish, fishEngine.state.width, fishEngine.state.height, 60);
+  fish.velocity = fishLimit(fish.velocity, speedCap);
+  fishLimitVelocityChange(fish, prevVelocity, dt, cfg);
+  fish.position.x += fish.velocity.x * dt;
+  fish.position.y += fish.velocity.y * dt;
+  fishWrapBounds(fish, fishEngine.state.width, fishEngine.state.height, fish.size * 0.9);
   if (!fish.trickActive && behavior !== "evading_bubble") {
     fish.scaleX = fish.scaleY = 1;
   }
 
-  const spd = fishLen(vel);
-  fish.tailHz = fishLerp(0.35, fish.panic ? 2.2 : 1.4, Math.min(spd / cfg.maxSpeed, 1));
-  fish.tailAmp = fish.panic ? 22 : fishLerp(8, 16, Math.min(spd / cfg.maxSpeed, 1));
-  if (Math.abs(fish.vx) > 2) fish.orientEl.style.transform = fish.vx < 0 ? "scaleX(-1)" : "scaleX(1)";
-  fish.angle = Math.atan2(fish.vy, Math.abs(fish.vx) + 0.001) * (180 / Math.PI) * 0.35;
+  const spd = fishLen(fish.velocity);
+  if (fish.trickActive !== "wobbly-roll") {
+    fish.tailHz = fishLerp(0.35, fish.panic ? 2.2 : 1.4, Math.min(spd / cfg.maxSpeed, 1));
+    fish.tailAmp = fish.panic ? 22 : fishLerp(8, 16, Math.min(spd / cfg.maxSpeed, 1));
+  }
+  // Integrate tailHz -> swimPhase over the real frame dt (proper phase
+  // accumulation, not a Date.now()-driven trig call), consumed directly by
+  // fishRenderEntity to write the tail-wag/body-ripple transforms — see
+  // the swim-phase accumulator notes above Part 8's constants.
+  fish.swimPhase = (fish.swimPhase || 0) + fish.tailHz * dt * TWO_PI;
+  // Part 8: torso ripple amplitude/scale, keyed off the same speed ratio
+  // (and swim frequency, via --tail-hz driving the CSS keyframe timing —
+  // see fish-body-ripple-dynamic in style.css) so a fish gliding slowly
+  // barely flexes while a full-speed dart or a panicked flee whips the
+  // whole body through a visible S-curve. flexMul lets round/stiff-bodied
+  // species (pufferfish) ripple far less than slender ones (guppy) at the
+  // same speed.
+  const speedRatio = Math.min(spd / cfg.maxSpeed, 1);
+  const flexMul = cfg.flexMul !== undefined ? cfg.flexMul : 1;
+  fish.bodyFlexAmp = flexMul * (fish.panic
+    ? FISH_BODY_FLEX_PANIC_DEG
+    : fishLerp(FISH_BODY_FLEX_IDLE_DEG, FISH_BODY_FLEX_CRUISE_DEG, speedRatio));
+  fish.bodyFlexScale = flexMul * (fish.panic
+    ? FISH_BODY_FLEX_SCALE_PANIC
+    : fishLerp(FISH_BODY_FLEX_SCALE_IDLE, FISH_BODY_FLEX_SCALE_CRUISE, speedRatio));
+  if (Math.abs(fish.velocity.x) > 2) fish.orientEl.style.transform = fish.velocity.x < 0 ? "scaleX(-1)" : "scaleX(1)";
+  fish.angle = Math.atan2(fish.velocity.y, Math.abs(fish.velocity.x) + 0.001) * (180 / Math.PI) * 0.35;
 
-  let look = fishNorm(vel);
+  let look = fishNorm(fish.velocity);
   if (nearestShark && sharkD < FISH_SHARK_PANIC_RADIUS) {
-    const flee = fishNorm(fishSub(fish, nearestShark));
-    look = flee;
+    look = fishNorm(fishSub(fish.position, nearestShark.position));
   }
   if (fish.pupilEl && fish.pupilBase) {
     fish.pupilOffset.x = fishLerp(fish.pupilOffset.x, look.x * 1.8, 0.08);
@@ -2517,44 +3770,254 @@ function fishUpdatePrey(fish, dt, bubbles, sharks) {
 
 function fishUpdateShark(shark, dt) {
   if (shark.removing) return;
+  const ai = shark.ai;
+  const physics = shark.physics;
+  // Advance the state-blend clock and ease strikeIntensity toward its
+  // target every frame, regardless of which behavior branch runs below —
+  // this is what turns setState()/setStrike() calls (which just record an
+  // intent) into an actual gradual ramp over SHARK_STATE_TRANSITION_DURATION.
+  ai.update(dt);
+  // Called unconditionally, every frame, regardless of branch: this is what
+  // lets the confusion spin's rotation wind down smoothly for a moment
+  // after shark.confuseSpin hits 0, instead of the rotation just cutting
+  // off the instant the timer runs out.
+  physics.applyConfusionDamping(shark, dt);
+
   if (shark.currentBehavior === "eating") {
     shark.chewTimer -= dt;
-    shark.extraRot = Math.sin(Date.now() * 0.02) * 6;
+    // A single decaying "chomp" snap, not a continuous wobble: the old
+    // `Math.sin(Date.now() * 0.02)` ran off wall-clock time for the whole
+    // SHARK_EAT_PAUSE (1.5s), swinging back and forth ~5 times. Since the
+    // shark's heading is frozen while it decelerates to a stop here (see
+    // SharkPhysicsEngine.integrate, gated on speed > 2), that repeated
+    // swing was the only visible motion — reading as the shark spinning
+    // in place rather than biting. chewProgress instead runs 0 -> 1 once
+    // over the eat pause, and the amplitude decays to 0 alongside it, so
+    // it reads as one bite snap that settles rather than a sustained spin.
+    const chewProgress = fishClamp(1 - shark.chewTimer / SHARK_EAT_PAUSE, 0, 1);
+    shark.extraRot = Math.sin(chewProgress * Math.PI * 2.2) * 5 * (1 - chewProgress);
+    // Glide velocity to rest and keep integrating position/heading through
+    // the chew (rather than freezing shark.position outright) so the
+    // deceleration itself is visible as a coast-to-a-stop.
+    physics.applyEatingDeceleration(shark, dt);
+    physics.integrate(shark, ai, dt);
+    fishWrapBounds(shark, fishEngine.state.width, fishEngine.state.height, shark.size * 0.9);
+    // Keep swimPhase advancing, but decaying toward stillness with the
+    // same deceleration curve as velocity, so the tail settles rather than
+    // freezing mid-wag on whatever phase it happened to be at.
+    shark.tailHz = fishLerp(shark.tailHz || 0.4, 0, fishClamp(dt * SHARK_EAT_DECEL_RATE, 0, 1));
+    shark.swimPhase = (shark.swimPhase || 0) + shark.tailHz * dt * TWO_PI;
     if (shark.chewTimer <= 0) {
       shark.currentBehavior = "wandering";
+      ai.setState(SHARK_STATES.WANDERING);
       shark.extraRot = 0;
     }
     return;
   }
+  // Snapshot before targeting/steering/strike-mode logic touches velocity
+  // — see fishLimitVelocityChange. Combined with ai.blendedSpeedMul()
+  // below (which eases the speed cap instead of doubling/halving it
+  // outright on a strike-mode toggle), this is what keeps state switches
+  // from snapping the shark's speed in one frame instead of easing into it.
+  const prevVelocity = { x: shark.velocity.x, y: shark.velocity.y };
   fishSharkTargeting(shark, dt);
   const cfg = SPECIES_PHYSICS.shark;
   if (shark.currentBehavior === "wandering") {
     const wanderTarget = {
-      x: shark.x + Math.cos(shark.wanderAngle) * 160,
-      y: shark.y + Math.sin(shark.wanderAngle) * 100,
+      x: shark.position.x + Math.cos(shark.wanderAngle) * 160,
+      y: shark.position.y + Math.sin(shark.wanderAngle) * 100,
     };
     shark.wanderAngle += fishRand(-0.3, 0.3) * dt;
-    fishApplyForce(shark, fishSteerSeek(shark, fishVec(shark.vx, shark.vy), wanderTarget, cfg.maxSpeed * 0.6, cfg.maxForce * 0.5), dt);
+    // Uses the same blended multiplier as hunting/confused so coming out
+    // of a confused spin (0.25x) or a strike (up to 2x) into ordinary
+    // wandering (0.6x) ramps smoothly too, rather than only the
+    // hunting <-> strike transition being eased.
+    const speedMul = ai.blendedSpeedMul();
+    shark.targetVelocity = fishScale(fishNorm(fishSub(wanderTarget, shark.position)), cfg.maxSpeed * speedMul);
+    fishApplyForce(shark, fishSteerSeek(shark.position, shark.velocity, wanderTarget, cfg.maxSpeed * speedMul, cfg.maxForce * 0.5), dt);
   }
-  const vel = fishLimit(fishVec(shark.vx, shark.vy), cfg.maxSpeed * (shark.strikeMode ? 2 : 1));
-  shark.vx = vel.x;
-  shark.vy = vel.y;
-  shark.x += shark.vx * dt;
-  shark.y += shark.vy * dt;
-  fishWrapBounds(shark, fishEngine.state.width, fishEngine.state.height, 80);
-  shark.tailHz = fishLerp(0.4, 1.1, Math.min(fishLen(vel) / cfg.maxSpeed, 1));
-  if (Math.abs(shark.vx) > 2) shark.orientEl.style.transform = shark.vx < 0 ? "scaleX(-1)" : "scaleX(1)";
-  shark.angle = Math.atan2(shark.vy, Math.abs(shark.vx) + 0.001) * (180 / Math.PI) * 0.25;
+  shark.velocity = fishLimit(shark.velocity, cfg.maxSpeed * fishLerp(1, 2, ai.strikeIntensity));
+  // Part 3: sharks have no swim bladder, so — outside the deliberate
+  // eating-pause coast-to-a-stop handled above — velocity is never
+  // allowed to sink toward zero the way a resting bony fish's could.
+  // Confusion's 0.25x multiplier is the slowest sanctioned state, so the
+  // floor sits just under that rather than under ordinary wandering speed.
+  const currentSpeed = fishLen(shark.velocity);
+  if (currentSpeed < cfg.minSpeed) {
+    // Almost-zero velocity has no meaningful direction to normalize, so
+    // fall back to the shark's smoothed heading (physics.heading) rather
+    // than snapping to an arbitrary axis.
+    const dir = currentSpeed > 0.01 ? fishScale(shark.velocity, 1 / currentSpeed) : physics.heading;
+    shark.velocity = fishScale(dir, cfg.minSpeed);
+  }
+  fishLimitVelocityChange(shark, prevVelocity, dt, cfg);
+  // Applies the (now blended/limited) velocity to position, and eases the
+  // rendered heading toward it via Vector2.lerp rather than reading angle
+  // straight off shark.velocity — see SharkPhysicsEngine.integrate.
+  physics.integrate(shark, ai, dt);
+  fishWrapBounds(shark, fishEngine.state.width, fishEngine.state.height, shark.size * 0.9);
+  shark.tailHz = fishLerp(0.4, 1.1, Math.min(fishLen(shark.velocity) / cfg.maxSpeed, 1));
+  shark.swimPhase = (shark.swimPhase || 0) + shark.tailHz * dt * TWO_PI;
 }
 
 function fishRenderEntity(fish) {
   if (!fish.el || fish.removing) return;
   const rot = fish.angle + (fish.extraRot || 0);
-  fish.el.style.transform = `translate3d(${fish.x.toFixed(1)}px,${fish.y.toFixed(1)}px,0) rotate(${rot.toFixed(2)}deg) scale(${fish.scaleX || 1},${fish.scaleY || 1})`;
-  fish.el.style.setProperty("--tail-hz", `${(fish.tailHz || 0.7).toFixed(2)}`);
-  fish.el.style.setProperty("--tail-amp", `${(fish.tailAmp || 16).toFixed(0)}deg`);
+  fish.el.style.transform = `translate3d(${fish.position.x.toFixed(1)}px,${fish.position.y.toFixed(1)}px,0) rotate(${rot.toFixed(2)}deg) scale(${fish.scaleX || 1},${fish.scaleY || 1})`;
+
+  const phase = fish.swimPhase || 0;
+
+  // Part 7: organic spine flex, sharks only — see SharkPhysicsEngine.integrate.
+  // --spine-bend still drives the primary neck-joint rotation via a plain
+  // (non-keyframed) CSS transform, which is why it was never the source of
+  // the jitter — kept as-is.
+  if (fish.type === "shark") {
+    fish.el.style.setProperty("--spine-bend", `${(fish.spineBend || 0).toFixed(2)}deg`);
+
+    // Segmented tail sway (secondary joint) + pectoral flap: previously
+    // CSS @keyframes with animation-duration bound to the ever-changing
+    // --tail-hz, which caused the reported vibration (see the swim-phase
+    // accumulator notes above Part 8's constants). Now computed directly
+    // from swimPhase and written as a static rotate() — same visual shape
+    // as the old keyframes (a symmetric arch: base 1deg, amplitude 13deg,
+    // -12deg/+14deg range), just driven by a continuous phase instead of a
+    // restarting CSS timeline. Segment 1 carries more of spine-bend
+    // (heaviest at the tail tip), segment 2 less (closer to the body) —
+    // matches the original weighting.
+    const spineBend = fish.spineBend || 0;
+    if (fish.tailSegEls && fish.tailSegEls.length) {
+      const seg1 = 1 - 13 * Math.cos(phase) + spineBend * 0.5;
+      fish.tailSegEls[0].style.transform = `rotate(${seg1.toFixed(2)}deg)`;
+      if (fish.tailSegEls[1]) {
+        const seg2 = 1 - 13 * Math.cos(phase * SHARK_TAIL_SEG2_RATE) + spineBend * 0.3;
+        fish.tailSegEls[1].style.transform = `rotate(${seg2.toFixed(2)}deg)`;
+      }
+    }
+    // Part 1/3: traveling sine-wave propulsion. The tail assembly above
+    // already carries the bulk of the visible beat; this adds a much
+    // smaller-amplitude flex on the torso itself, at the *same* frequency
+    // but with no phase lag, so the wave reads as originating near the
+    // head and traveling back into the (larger-amplitude, lagged) tail
+    // beat rather than the body staying rigid while only the tail moves.
+    // Pectoral fins are deliberately NOT driven here — real pectorals are
+    // stiff lift surfaces, not flexible paddles, so they stay static.
+    if (fish.torsoFlexEl) {
+      const torsoSkew = Math.sin(phase) * SHARK_TORSO_FLEX_DEG;
+      fish.torsoFlexEl.style.transform = `skewY(${torsoSkew.toFixed(2)}deg)`;
+    }
+    // Part 1: soft-body vertex displacement on the dorsal fin's trailing
+    // edge — a light, higher-frequency flutter layered on top of the
+    // fin's own fixed rake, standing in for water resistance flexing the
+    // fin's rear membrane as the shark swims. The caudal fin's equivalent
+    // trailing-edge give is already carried by the tail-segment sway above.
+    if (fish.dorsalFlexEl) {
+      const dorsalFlutter = Math.sin(phase * SHARK_DORSAL_FLUTTER_RATE) * SHARK_DORSAL_FLUTTER_DEG;
+      fish.dorsalFlexEl.style.transform = `skewX(${dorsalFlutter.toFixed(2)}deg)`;
+    }
+  } else {
+    // Tail wag, prey only: same sine shape the old fish-tail-wag-dynamic
+    // keyframe produced (amplitude = tailAmp, symmetric about 0), now a
+    // static rotate() driven by swimPhase instead of a restarting
+    // CSS-timed animation.
+    if (fish.tailEl) {
+      const tailAngle = Math.sin(phase) * (fish.tailAmp || 16);
+      fish.tailEl.style.transform = `rotate(${tailAngle.toFixed(2)}deg)`;
+    }
+    // Part 8: organic torso ripple, prey fish only — see the body-flex
+    // computation in fishUpdatePrey. Skipped for sharks, whose single
+    // .shark-body silhouette is already carried by the segmented
+    // spine-bend/tail-sway system above. bodyPhase keeps the old ripple's
+    // constant-fraction-of-cycle lag behind the tail beat so the wave
+    // still reads as traveling head-to-tail into the fin.
+    if (fish.bodyEl) {
+      const bodyPhase = phase - FISH_BODY_FLEX_PHASE_OFFSET;
+      const wave = Math.sin(bodyPhase);
+      const amp = fish.bodyFlexAmp || FISH_BODY_FLEX_IDLE_DEG;
+      const scaleAmt = fish.bodyFlexScale || FISH_BODY_FLEX_SCALE_IDLE;
+      const skew = wave * amp;
+      const scaleX = 1 + wave * scaleAmt;
+      fish.bodyEl.style.transform = `skewY(${skew.toFixed(2)}deg) scaleX(${scaleX.toFixed(4)})`;
+    }
+  }
+  if (fish.species === "guppy") fishRenderGuppyExtras(fish, phase);
+
   fish.el.classList.toggle("fish-panic", !!fish.panic);
   fish.el.dataset.behavior = fish.currentBehavior;
+}
+
+// ---- Part 3: guppy soft-body tail cloth + trailing fins ------------------
+// Driven every frame off the SAME swimPhase accumulator as the ordinary
+// tail wag (fed by real dt via fish.tailHz — see fishUpdatePrey), so this
+// stays frame-rate independent and never touches @keyframes/animation-
+// duration (the exact bug the swim-phase system above was built to avoid).
+// GUPPY_PANEL_LAG/AMP_GROWTH turn a single sine into a cheap stand-in for
+// a spring-mass cloth chain: each panel out toward the tail tip lags
+// further behind the body's beat (inertia dragging the fin membrane) and
+// swings a little wider (a whip tip overshooting its base), and a faster,
+// smaller secondary sine riding on top reads as the fin fabric's own
+// higher-frequency ripple rather than one rigid flap.
+const GUPPY_PANEL_LAG = 0.55; // rad phase lag added per panel index
+const GUPPY_PANEL_AMP_GROWTH = 0.22; // fractional amplitude growth per panel
+const GUPPY_RIPPLE_FREQ = 2.6; // secondary ripple frequency, x the tail beat
+const GUPPY_RIPPLE_AMP = 5; // deg, scaled by panel index / panel count
+const GUPPY_DORSAL_LAG = 0.9;
+const GUPPY_DORSAL_AMP = 11;
+const GUPPY_PEC_HZ = 0.016; // deg/ms-scale shimmer rate (Date.now()-driven, like the other trick pulses in this file)
+function fishRenderGuppyExtras(fish, phase) {
+  const cfg = SPECIES_PHYSICS.guppy;
+  const speedRatio = Math.min(fishLen(fish.velocity) / cfg.maxSpeed, 1);
+  const baseAmp = fish.tailAmp || 16;
+
+  // Part 3: cloth-panel wave propagation down the male ornamental tail.
+  if (fish.tailPanelEls && fish.tailPanelEls.length) {
+    const n = fish.tailPanelEls.length;
+    fish.tailPanelEls.forEach((el, i) => {
+      const lag = i * GUPPY_PANEL_LAG;
+      const amp = baseAmp * (1 + i * GUPPY_PANEL_AMP_GROWTH);
+      const primary = Math.sin(phase - lag) * amp;
+      const ripple = Math.sin(phase * GUPPY_RIPPLE_FREQ - lag * 1.4) * (GUPPY_RIPPLE_AMP * (i / n));
+      el.style.transform = `rotate(${(primary + ripple).toFixed(2)}deg)`;
+    });
+  }
+
+  // Part 1: dorsal ribbon trailing/catching fluid drag — same lagged-sine
+  // idea as the tail panels, just one element, and scaled up a bit with
+  // speed so it visibly streams out behind a fast dart.
+  if (fish.dorsalRibbonEl) {
+    const drift = Math.sin(phase - GUPPY_DORSAL_LAG) * GUPPY_DORSAL_AMP * (0.45 + speedRatio * 0.65);
+    fish.dorsalRibbonEl.style.transform = `rotate(${drift.toFixed(2)}deg)`;
+  }
+
+  // Part 3: high-frequency pectoral shimmer for stability during hovers —
+  // stays lively at low speed (hoverBoost near 1) and settles down during
+  // a hard dash so it doesn't compete visually with the tail beat/dash.
+  if (fish.pectoralEls && fish.pectoralEls.length) {
+    const hoverBoost = 1 - speedRatio * 0.7;
+    const t = (fish.pecPhase || 0) + Date.now() * GUPPY_PEC_HZ;
+    fish.pectoralEls.forEach((el, i) => {
+      const flick = Math.sin(t + i * 1.7) * 6 * hoverBoost;
+      el.style.transform = `rotate(${flick.toFixed(2)}deg) scaleY(${(1 - Math.abs(flick) * 0.01).toFixed(3)})`;
+    });
+  }
+
+  // Part 2: iridescent glint — a slow hue drift plus a contribution from
+  // the fish's own current heading, so the shine visibly shifts as the
+  // fish turns relative to the (implied) light source, not just over time.
+  // Throttled to every 3rd frame: unlike the transform writes above (which
+  // the compositor handles for free), a `filter` change forces an actual
+  // repaint of the element. Doing that for every fish on every animation
+  // frame is real, avoidable main-thread cost that's easy to not notice in
+  // isolation but adds up with everything else fighting for frame budget
+  // during a scroll. The drift is slow enough that 20 updates/sec reads
+  // identically to 60.
+  if (fish.shineEl) {
+    fish._shineSkip = (fish._shineSkip || 0) + 1;
+    if (fish._shineSkip >= 3) {
+      fish._shineSkip = 0;
+      const irid = Math.sin(phase * 0.35 + (fish.hueSeed || 0) * 0.02) * 24 + (fish.angle || 0) * 0.3;
+      fish.shineEl.style.filter = `hue-rotate(${irid.toFixed(1)}deg)`;
+    }
+  }
 }
 
 function fishClearSharkThreats() {
@@ -2571,16 +4034,36 @@ function fishTick(now) {
     fishEngine.rafId = requestAnimationFrame(fishTick);
     return;
   }
+  // NOTE: fishTick used to fully skip the update+render pass while
+  // "is-scrolling" was set, on the theory that a brief pause mid-swim would
+  // be imperceptible. In practice the class stays on body for the entire
+  // scroll gesture (it's re-armed on every scroll event, not just once), so
+  // that "brief pause" was actually the whole scroll duration — which is
+  // exactly the visible fish-freeze bug this was meant to prevent, not fix.
+  // The real per-frame cost during scroll was backdrop-filter re-blurring
+  // every glass card, and that's already handled cheaply in CSS (see the
+  // body.is-scrolling.bubbly-mode rules in style.css, which drop blur to a
+  // flat fill for the duration). Combined with fishGetBubblePositions()
+  // reusing last frame's bubble positions instead of a fresh layout read
+  // during scroll, that's enough — fish keep swimming normally here.
   const dt = Math.min((now - (fishEngine.state.lastTime || now)) / 1000, 0.05);
   fishEngine.state.lastTime = now;
-  fishEngine.state.width = window.innerWidth;
-  fishEngine.state.height = window.innerHeight;
+  // width/height are kept current by fishHandleResize (debounced on the
+  // "resize" event) rather than re-read every frame — re-reading here on
+  // top of that just meant a fish could still be using stale bounds for
+  // one frame right after a resize while also doing needless layout reads.
 
   const bubbles = fishGetBubblePositions();
   const sharks = fishEngine.state.fishes.filter((f) => f.type === "shark" && !f.removing);
+  // Computed once per tick (not once per fish) — fishSteerSeparation is
+  // O(n) per fish, so building this list per-entity would make the whole
+  // pass O(n^2) filters on top of the O(n^2) distance checks it already
+  // needs. frozen/removing prey are excluded up front so eaten fish don't
+  // participate as either pusher or pushee mid-despawn.
+  const preyNeighbors = fishEngine.state.fishes.filter((f) => f.type === "prey" && !f.removing && !f.frozen);
 
   fishEngine.state.fishes.forEach((f) => {
-    if (f.type === "prey") fishUpdatePrey(f, dt, bubbles, sharks);
+    if (f.type === "prey") fishUpdatePrey(f, dt, bubbles, sharks, preyNeighbors);
     else if (f.type === "shark") fishUpdateShark(f, dt);
     fishRenderEntity(f);
   });
@@ -2601,19 +4084,98 @@ function fishStopEngine() {
   fishEngine.rafId = null;
 }
 
+// Dynamically manages screen boundaries on resize: rescales every fish's
+// position proportionally to the new viewport (not just wrap-on-next-cross)
+// so a fish sitting mid-screen doesn't end up stranded far outside the
+// visible area after a large or sudden viewport change (e.g. rotating a
+// device, or a browser window being resized a lot), and clamps to the new
+// bounds so nothing is left waiting off-canvas indefinitely.
+function fishHandleResize() {
+  const newW = window.innerWidth;
+  const newH = window.innerHeight;
+  const oldW = fishEngine.state.width || newW;
+  const oldH = fishEngine.state.height || newH;
+  const scaleX = oldW > 0 ? newW / oldW : 1;
+  const scaleY = oldH > 0 ? newH / oldH : 1;
+  fishEngine.state.fishes.forEach((f) => {
+    const pad = (f.size || 40) * 0.9;
+    f.position.x = fishClamp(f.position.x * scaleX, -pad, newW + pad);
+    f.position.y = fishClamp(f.position.y * scaleY, -pad, newH + pad);
+  });
+  fishEngine.state.width = newW;
+  fishEngine.state.height = newH;
+}
+
+// Backgrounded/minimized tabs still get rAF callbacks throttled but not
+// stopped in every browser, and — more importantly — a tab that's merely
+// covered by another window or scrolled to a background browser tab keeps
+// paying the full per-frame fish-physics + repaint cost for zero visible
+// benefit. Pausing on hidden and resuming on visible frees that budget up,
+// and resetting lastTime on resume stops the huge dt a long hidden period
+// would otherwise produce from being treated as one giant physics step.
+function fishBindVisibilityPause() {
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      fishStopEngine();
+    } else if (
+      document.body.classList.contains("bubbly-mode") &&
+      document.body.classList.contains("fish-mode-on")
+    ) {
+      fishEngine.state.lastTime = performance.now();
+      fishStartEngine();
+    }
+  });
+}
+
 function fishBindListeners() {
   if (fishEngine.listenersBound) return;
   fishEngine.listenersBound = true;
+  fishBindVisibilityPause();
   const trackMouse = (e) => {
     fishEngine.state.mouse.x = e.clientX;
     fishEngine.state.mouse.y = e.clientY;
   };
   document.addEventListener("pointermove", trackMouse, { passive: true });
   document.addEventListener("mousemove", trackMouse, { passive: true });
+  const trackTouch = (e) => {
+    const t = e.touches && e.touches[0];
+    if (!t) return;
+    fishEngine.state.mouse.x = t.clientX;
+    fishEngine.state.mouse.y = t.clientY;
+  };
+  document.addEventListener("touchstart", trackTouch, { passive: true });
+  document.addEventListener("touchmove", trackTouch, { passive: true });
+  // A lifted finger stops threatening the fish — reset off-screen instead
+  // of leaving the last touch point as a permanent scare zone.
+  document.addEventListener("touchend", () => {
+    fishEngine.state.mouse.x = -9999;
+    fishEngine.state.mouse.y = -9999;
+  }, { passive: true });
   window.addEventListener("resize", () => {
-    fishEngine.state.width = window.innerWidth;
-    fishEngine.state.height = window.innerHeight;
-  });
+    // Debounced: resize fires continuously while dragging a window edge,
+    // and rescaling every fish on every one of those events is wasted
+    // work — settle on the final size instead.
+    clearTimeout(fishEngine.resizeTimer);
+    fishEngine.resizeTimer = setTimeout(fishHandleResize, 120);
+  }, { passive: true });
+
+  // ---- Scroll performance: shed glass-blur cost while scrolling --------
+  // In Liquid Interface every .card (plus each .definition-card/.image-card
+  // nested inside it) carries its own backdrop-filter blur, sitting above
+  // the constantly-animating #bubble-field/#fish-field. Every one of those
+  // blur regions has to be recomposited by the browser on every scroll
+  // frame, which competes with fishTick's own rAF work for the same frame
+  // budget — that's what makes the fish visibly stutter/hang while
+  // scrolling. Toggling "is-scrolling" (see style.css) drops backdrop-filter
+  // to a flat, nearly-free fill for the duration of the scroll and restores
+  // the real glass look a moment after it settles.
+  window.addEventListener("scroll", () => {
+    document.body.classList.add("is-scrolling");
+    clearTimeout(fishEngine.scrollEndTimer);
+    fishEngine.scrollEndTimer = setTimeout(() => {
+      document.body.classList.remove("is-scrolling");
+    }, 200);
+  }, { passive: true });
 }
 
 window.addShark = function addShark() {
@@ -2700,6 +4262,12 @@ function applyFishPrefs() {
   if (fishSpeciesControls) fishSpeciesControls.classList.toggle("disabled", !on);
   const sharkControls = document.querySelector(".fish-shark-controls");
   if (sharkControls) sharkControls.classList.toggle("disabled", !on);
+
+  const sharkVariantPrefs = getSharkVariantPrefs();
+  sharkVariantCheckboxes.forEach((cb) => {
+    cb.checked = !!sharkVariantPrefs[cb.dataset.variant];
+  });
+  if (sharkVariantControls) sharkVariantControls.classList.toggle("disabled", !on);
 }
 
 const FISH_FIELD_COUNT = FISH_PREY_COUNT;
@@ -2811,6 +4379,13 @@ bubblyModeToggle.addEventListener("change", () => {
   applyGlassPrefs();
 });
 
+if (bubbleModeToggle) {
+  bubbleModeToggle.addEventListener("change", () => {
+    setBubbleMode(bubbleModeToggle.checked);
+    applyBubbleMode();
+  });
+}
+
 if (fishModeToggle) {
   fishModeToggle.addEventListener("change", () => {
     setFishMode(fishModeToggle.checked);
@@ -2822,6 +4397,16 @@ if (fishModeToggle) {
 fishSpeciesCheckboxes.forEach((cb) => {
   cb.addEventListener("change", () => {
     setFishSpeciesEnabled(cb.dataset.species, cb.checked);
+    applyFishPrefs();
+  });
+});
+
+sharkVariantCheckboxes.forEach((cb) => {
+  cb.addEventListener("change", () => {
+    setSharkVariantEnabled(cb.dataset.variant, cb.checked);
+    // A checkbox may get vetoed by setSharkVariantEnabled's "keep at
+    // least one enabled" guard — re-sync from the actual saved prefs
+    // rather than trusting the checkbox's own new state.
     applyFishPrefs();
   });
 });
@@ -3468,7 +5053,7 @@ function renderImages(list, containerEl, onRemove, onToggle) {
         <label class="image-select-checkbox">
           <input type="checkbox" class="image-checkbox" data-id="${img.id}" ${isSelected ? "checked" : ""} title="Include this image in the entry">
         </label>
-        <img src="${img.url}" alt="Related visual" loading="lazy">
+        <img src="${img.url}" alt="Related visual" loading="lazy" decoding="async">
         <button type="button" class="image-remove-btn" data-id="${img.id}" title="Remove this image">✕</button>
       </div>`;
     })
@@ -5190,7 +6775,7 @@ function renderImageCell(entry) {
   const imgs = all
     .map(
       (img) =>
-        `<img class="row-thumb" data-img-id="${img.id}" data-bucket="${img.bucket}" src="${img.url}" alt="${escapeHtml(entry.word)}" title="${bucketTitle[img.bucket]}" loading="lazy">`
+        `<img class="row-thumb" data-img-id="${img.id}" data-bucket="${img.bucket}" src="${img.url}" alt="${escapeHtml(entry.word)}" title="${bucketTitle[img.bucket]}" loading="lazy" decoding="async">`
     )
     .join("");
   return `<td data-label="Images"><div class="row-images-gallery">${imgs}</div></td>`;

@@ -233,6 +233,98 @@ h1, h2, h3 {
   pointer-events: none;
 }
 
+.shark-variant-controls {
+  margin: -0.1rem 0 0.7rem;
+}
+
+/* Spot/stripe overlays sit purely decoratively under the fin & face
+   markup (see SHARK_PATTERN_OVERLAYS in script.js) — never intercept
+   pointer events meant for the shark body itself. */
+.shark-pattern {
+  pointer-events: none;
+}
+
+.fish-gill-cover,
+.fish-fin-ray,
+.fish-eye-glint {
+  pointer-events: none;
+}
+
+/* Part 5: Dynamic Skin Texturing & Countershading.
+   .shark-body / .shark-belly now fill from per-variant SVG gradients
+   (see SHARK_VARIANT_DEFS in script.js) instead of flat color, so the
+   dark dorsal tone blends smoothly down into the white/cream underside.
+   .shark-sheen is a soft radial highlight screened on top for a subtle
+   glossy, lit-from-above read instead of flat cartoon shading. */
+.shark-body {
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.12));
+}
+
+.shark-sheen {
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+/* Realism pass: gills, fin rays, lateral line and eye detail are all
+   pointer-events: none decoration layered on top of/inside the body —
+   never meant to intercept clicks meant for the shark itself. */
+.shark-gills,
+.shark-lateral-line,
+.shark-fin-ray,
+.shark-tail-notch,
+.shark-lower-lid,
+.shark-nostril,
+.shark-eye-glint,
+.shark-snout-ridge {
+  pointer-events: none;
+}
+
+.shark-gill {
+  /* A faint highlight edge keeps each tapered gill slit reading as an
+     open cleft in the skin rather than a flat painted mark. */
+  filter: drop-shadow(0 0.3px 0 rgba(255, 255, 255, 0.15));
+}
+
+/* Facial expression: sharks rest with a closed, slightly upturned mouth
+   and a relaxed brow. The moment SharkAIController flips the fish into
+   "hunting" or "eating" (already written to fish.el.dataset.behavior
+   every frame in fishRenderEntity — no new JS needed here), the closed
+   mouth/teeth fade out and the open gape + both tooth rows fade in, with
+   the brow dropping into a sharper, more predatory line at the same
+   time. Opacity-only transitions are safe here (see the .fish-particle
+   comment above on why transform is never animated this way). */
+.shark-particle .shark-mouth-open {
+  opacity: 0;
+  transition: opacity 0.16s ease-out;
+}
+.shark-particle .shark-mouth-closed,
+.shark-particle .shark-teeth-closed {
+  opacity: 1;
+  transition: opacity 0.16s ease-out;
+}
+.shark-particle .shark-brow-hunt {
+  opacity: 0;
+  transition: opacity 0.16s ease-out;
+}
+.shark-particle .shark-brow-rest {
+  opacity: 1;
+  transition: opacity 0.16s ease-out;
+}
+.shark-particle[data-behavior="hunting"] .shark-mouth-open,
+.shark-particle[data-behavior="eating"] .shark-mouth-open,
+.shark-particle[data-behavior="hunting"] .shark-brow-hunt,
+.shark-particle[data-behavior="eating"] .shark-brow-hunt {
+  opacity: 1;
+}
+.shark-particle[data-behavior="hunting"] .shark-mouth-closed,
+.shark-particle[data-behavior="eating"] .shark-mouth-closed,
+.shark-particle[data-behavior="hunting"] .shark-teeth-closed,
+.shark-particle[data-behavior="eating"] .shark-teeth-closed,
+.shark-particle[data-behavior="hunting"] .shark-brow-rest,
+.shark-particle[data-behavior="eating"] .shark-brow-rest {
+  opacity: 0;
+}
+
 .origin-row {
   display: flex;
   align-items: center;
@@ -736,6 +828,12 @@ body.customize-mode .customizable .resize-handle {
   max-height: 230px;
   overflow-y: auto;
   padding-right: 4px;
+  /* Native momentum scrolling on iOS instead of the janky default, and
+     stop an internal scroll-panel from also dragging the whole page once
+     it hits its own top/bottom edge (the "double scroll" hand-off that
+     reads as a stutter/hang on trackpads and touch). */
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .scroll-panel::-webkit-scrollbar {
@@ -1791,9 +1889,18 @@ body.bubbly-mode .storage-toggle-btn {
   opacity: 0;
   perspective: 900px;
   transition: opacity 0.5s ease;
+  /* Full layout+paint+size containment: this box's dimensions come purely
+     from `inset:0` (never from its children), and it already clips
+     overflow, so telling the browser its internals can never affect
+     anything outside its border box costs nothing visually. What it buys
+     is real: during a scroll, the browser no longer has to ask "could
+     this constantly-animating fixed layer need to repaint or resize
+     because of what's happening around it?" — one less thing competing
+     with scroll compositing for the frame budget. */
+  contain: strict;
 }
 
-body.bubbly-mode .bubble-field {
+body.bubbly-mode.bubble-mode-on .bubble-field {
   opacity: 1;
 }
 
@@ -1811,6 +1918,87 @@ body.bubbly-mode .bubble-field {
   opacity: 0;
   transform-style: preserve-3d;
   animation: bubble-rise-3d var(--bdur, 14s) linear var(--bdelay, 0s) infinite;
+  /* Bubbles stay non-interactive (inherit pointer-events:none from the
+     .bubble-field container) until Liquid Interface is actually on —
+     see body.bubbly-mode override below — so they never swallow clicks
+     meant for the UI underneath while the field is invisible/off. */
+  pointer-events: none;
+}
+
+/* Bubbles switched off (either the whole Liquid Interface theme, or just
+   the ambient-bubbles toggle within it) — actually pause the animation
+   rather than relying on opacity:0 alone, so the browser stops doing
+   per-frame work for 16 particles nobody can see. */
+body:not(.bubbly-mode) .bubble-particle,
+body.bubbly-mode:not(.bubble-mode-on) .bubble-particle {
+  animation-play-state: paused;
+}
+
+body.bubbly-mode.bubble-mode-on .bubble-particle {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* Instant liquid pop: kill the rise animation, snap-fade the bubble
+   itself while the droplet burst fx (below) carries the visual weight. */
+.bubble-particle.bubble-popped {
+  animation: none !important;
+  transition: transform 0.15s ease-out, opacity 0.12s ease-out;
+  transform: scale(1.2);
+  opacity: 0 !important;
+  pointer-events: none;
+}
+
+/* One-off burst fx spawned at the instant a bubble is touched/hovered —
+   an expanding refraction ring plus scattering liquid droplets, echoing
+   the same droplet look as .feast-particle so pops read as "liquid"
+   rather than a generic disappearing dot. */
+.bubble-pop-fx {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 7;
+}
+
+.bubble-pop-fx::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--pop-size, 40px);
+  height: var(--pop-size, 40px);
+  margin: calc(var(--pop-size, 40px) / -2) 0 0 calc(var(--pop-size, 40px) / -2);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.6) 0%, rgba(140, 205, 255, 0.28) 55%, transparent 76%);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.55);
+  animation: bubble-pop-ring 0.4s ease-out forwards;
+}
+
+.bubble-droplet {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #fff, rgba(140, 205, 255, 0.7) 60%, transparent 100%);
+  box-shadow: 0 0 5px rgba(120, 195, 255, 0.6);
+  opacity: 0;
+  animation: bubble-droplet-scatter 0.6s ease-out var(--ddelay, 0s) forwards;
+}
+
+@keyframes bubble-pop-ring {
+  0% { transform: scale(0.3); opacity: 0.9; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+
+@keyframes bubble-droplet-scatter {
+  0% { transform: translate(0, 0) scale(0.4); opacity: 1; }
+  100% { transform: translate(var(--ddx, 0), var(--ddy, 0)) scale(1); opacity: 0; }
 }
 
 /* A crisp refraction rim on each particle too, same trick as the
@@ -1854,13 +2042,27 @@ body.bubbly-mode .bubble-field {
     animation: none;
     opacity: 0;
   }
+
+  .bubble-pop-fx,
+  .bubble-pop-fx::before,
+  .bubble-droplet {
+    animation: none !important;
+    display: none;
+  }
 }
 
 /* =========================================================================
    🐠 LIQUID MARINE ECOSYSTEM — JS physics engine drives #fish-field.
-   Each .fish-particle is positioned via translate3d() from script.js;
-   tail wag frequency/amplitude come from --tail-hz / --tail-amp custom
-   properties updated every frame from fish velocity. ================== */
+   Each .fish-particle is positioned via translate3d() from script.js.
+   Tail wag, body ripple, shark tail-seg sway, and the pectoral flap are
+   all plain (non-@keyframes) transforms that script.js writes directly
+   onto the relevant child element every frame, computed from a per-fish
+   swimPhase it integrates from tailHz*dt — see fishRenderEntity. Only
+   --spine-bend (the shark's neck-joint curvature) is still passed as a
+   custom property, since it's consumed by a static transform too, not an
+   animation. Nothing here uses CSS @keyframes tied to a per-frame-varying
+   duration — that pairing is what caused the vibrating/"wired" motion
+   this file used to have. ================================================ */
 .fish-field {
   position: fixed;
   inset: 0;
@@ -1869,6 +2071,8 @@ body.bubbly-mode .bubble-field {
   z-index: 6;
   opacity: 0;
   transition: opacity 0.5s ease;
+  /* Same reasoning as .bubble-field above — see that comment. */
+  contain: strict;
 }
 
 body.bubbly-mode.fish-mode-on .fish-field {
@@ -1883,8 +2087,23 @@ body.bubbly-mode.fish-mode-on .fish-field {
   height: calc(var(--fsize, 60px) * 0.6);
   will-change: transform;
   transform-origin: center center;
+  /* Part 6: isolate each particle's own paint/layout so resizing the
+     window or the liquid-glass zoom sliders doesn't force a reflow across
+     every other fish/shark on screen, and hint the compositor to keep each
+     one on its own crisp GPU layer instead of re-rasterizing on scale. */
+  contain: layout style;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
   filter: drop-shadow(0 3px 5px rgba(22, 63, 99, 0.25));
-  transition: opacity 0.15s ease, transform 0.05s linear;
+  /* No transition on transform: script.js sets translate3d/rotate/scale
+     every animation frame (~60fps) with its own physics-driven easing.
+     A CSS transition here fights that, adding a second layer of lag on
+     top of the JS motion (causing stutter on fast turns) and — worse —
+     animating the instant edge-to-edge wrap teleport in fishWrapBounds()
+     into a visible high-speed slide across the whole screen instead of
+     an invisible off-screen jump. Opacity can still transition safely
+     since script.js never touches it every frame. */
+  transition: opacity 0.15s ease;
 }
 
 .fish-particle.shark-particle {
@@ -1903,10 +2122,6 @@ body.bubbly-mode.fish-mode-on .fish-field {
   opacity: 0;
 }
 
-.fish-particle.fish-panic .fish-tail {
-  animation-duration: calc(0.45s / var(--tail-hz, 1));
-}
-
 .fish-orient {
   width: 100%;
   height: 100%;
@@ -1917,25 +2132,53 @@ body.bubbly-mode.fish-mode-on .fish-field {
   width: 100%;
   height: 100%;
   overflow: visible;
+  /* Part 6: geometricPrecision (over the browser-default "auto") keeps
+     the shark's gill lines, fin/tail segmentation, and gradient edges
+     sharp at every size and zoom level instead of snapping to a coarse
+     "optimizeSpeed" pixel grid on small or heavily-scaled instances. */
+  shape-rendering: geometricPrecision;
 }
 
+.shark-particle .shark-gill,
+.shark-particle .shark-brow,
+.shark-particle .shark-mouth,
+.shark-particle .shark-teeth {
+  /* Keep gill/brow/mouth/teeth linework at a consistent, crisp screen
+     width instead of thinning to a sub-pixel hairline on small sharks
+     or over-thickening (and softening) on large ones. */
+  vector-effect: non-scaling-stroke;
+}
+
+/* Tail wag: previously a CSS @keyframes animation whose animation-duration
+   read `calc(1s / var(--tail-hz))`. --tail-hz was rewritten by script.js
+   every rAF frame as speed fluctuates, and changing animation-duration
+   mid-flight makes the browser reinterpret the cycle's progress fraction
+   discontinuously — a constant stream of tiny pops at 60fps, which is what
+   read as "vibrating"/"wired" motion. Fixed by dropping the @keyframes
+   entirely: script.js now integrates a swimPhase each frame and writes
+   `rotate()` straight into this element's inline transform (see
+   fishRenderEntity), the same static-transform pattern --spine-bend
+   already used successfully below. transform-origin stays here since it's
+   layout-independent and never needs to change per frame. */
 .fish-tail {
   transform-box: fill-box;
   transform-origin: 65% 50%;
-  animation: fish-tail-wag-dynamic calc(1s / var(--tail-hz, 0.7)) ease-in-out infinite;
 }
 
-@keyframes fish-tail-wag-dynamic {
-  0%, 100% { transform: rotate(calc(var(--tail-amp, 16deg) * -1)); }
-  50%      { transform: rotate(var(--tail-amp, 16deg)); }
+/* Part 8: organic torso ripple — a continuous sine-wave shear+scale on the
+   single-piece .fish-body shape (ellipse/path/circle depending on
+   species). Same fix as .fish-tail above: no more @keyframes tied to a
+   per-frame-changing animation-duration. script.js writes skewY()+scaleX()
+   directly from its swimPhase accumulator (with a constant 0.14-cycle
+   phase lag behind the tail beat, replacing the old negative
+   animation-delay) — see fishRenderEntity. transform-origin sits toward
+   the head (30%) so the shear still reads as the tail-ward two-thirds of
+   the torso carrying the motion while the head stays comparatively
+   steady. */
+.fish-body {
+  transform-box: fill-box;
+  transform-origin: 30% 50%;
 }
-
-/* Species tail baselines */
-.fish-particle.species-betta .fish-tail { --tail-hz: 0.55; }
-.fish-particle.species-pufferfish .fish-tail { --tail-hz: 0.9; }
-.fish-particle.species-angelfish .fish-tail { --tail-hz: 0.65; }
-.fish-particle.species-guppy .fish-tail { --tail-hz: 1.1; }
-.fish-particle.species-clownfish .fish-tail { --tail-hz: 0.85; }
 
 /* Betta flourish fin wave */
 .fish-particle.fish-trick-active.species-betta .fish-fin-wave {
@@ -1956,19 +2199,116 @@ body.bubbly-mode.fish-mode-on .fish-field {
   100% { transform: rotate(-8deg); }
 }
 
-/* Shark segmented tail sway */
+/* Rigid pectoral fin (Part 1): real pectoral fins are stiff lift
+   surfaces rather than flexible paddles, so unlike every other fin here
+   this one gets no per-frame transform from script.js at all — no
+   transform-origin needed since nothing ever rotates/skews it. */
+
+/* Part 1/3: torso traveling-wave flex — a small skewY driven by the same
+   swimPhase as the tail beat but with no lag, so the lateral sine wave
+   visibly starts near the head (see SHARK_TORSO_FLEX_DEG in script.js)
+   and travels back into the larger, lagged tail-segment sway above. */
+.shark-particle .shark-torso-flex {
+  transform-box: fill-box;
+  transform-origin: 75% 50%;
+}
+
+/* Part 1: dorsal fin trailing-edge flutter — soft-body vertex
+   displacement standing in for water resistance flexing the fin's rear
+   membrane, layered on top of the fin's own fixed rake/rigging. */
+.shark-particle .shark-dorsal-flex {
+  transform-box: fill-box;
+  transform-origin: 15% 100%;
+}
+
+/* Part 2: nictitating membrane blink. Fixed animation-duration (not bound
+   to the ever-changing --tail-hz), so this doesn't hit the vibration bug
+   documented above .fish-tail — it's the same safe pattern as
+   betta-fin-flourish/puffer-fin-mechanical below. Long, irregular-feeling
+   pause between blinks via a mostly-flat keyframe curve. */
+.shark-particle .shark-nictitating {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  opacity: 0;
+  animation: shark-blink 6.5s ease-in-out infinite;
+}
+@keyframes shark-blink {
+  0%, 92%, 100% { opacity: 0; transform: scaleY(0.05); }
+  95%           { opacity: 0.85; transform: scaleY(1); }
+  97%           { opacity: 0.85; transform: scaleY(1); }
+}
+
+/* Part 7: organic spine flexibility — .shark-spine-tail wraps both tail
+   segments (see SHARK_VARIANT_SILHOUETTE in script.js) and rotates around
+   the neck joint by --spine-bend, a value script.js recomputes every frame
+   from the shark's heading turn-rate (SharkPhysicsEngine.integrate). This
+   is the primary spine joint: it's what curves the rear of the body into
+   a C-shape through a sharp turn, hunting lunge, or acceleration burst,
+   rather than the whole silhouette pivoting like one rigid slab. */
+.shark-particle .shark-spine-tail {
+  transform-box: fill-box;
+  transform-origin: 100% 65%;
+  transform: rotate(var(--spine-bend, 0deg));
+}
+
+/* Shark segmented tail sway — the secondary joint. Each segment keeps its
+   own wag phase/origin as before, and its swing still carries a share of
+   spine-bend (heaviest on the tail tip, lighter on the segment closer to
+   the body) so a hard turn reads as the whole rear third of the shark
+   whipping through the curve together instead of the tail wagging in
+   isolation on top of a rigid bend. This used to be two @keyframes
+   animations with animation-duration bound to the constantly-changing
+   --tail-hz — see .fish-tail above for why that caused vibrating motion.
+   script.js now computes both segments' rotate() (already combined with
+   spine-bend) directly from its swimPhase accumulator each frame. */
 .shark-particle .shark-tail-seg:nth-child(1) {
-  animation: shark-tail-sway calc(1s / var(--tail-hz, 0.5)) ease-in-out infinite;
   transform-origin: 80% 50%;
 }
 .shark-particle .shark-tail-seg:nth-child(2) {
-  animation: shark-tail-sway calc(1.1s / var(--tail-hz, 0.5)) ease-in-out infinite reverse;
   transform-origin: 70% 50%;
 }
-@keyframes shark-tail-sway {
-  0%, 100% { transform: rotate(-12deg); }
-  50%      { transform: rotate(14deg); }
+
+/* =========================================================================
+   🌈 GUPPY SOFT-BODY FIN SYSTEM — see fishBuildGuppyMarkup/
+   fishRenderGuppyExtras in script.js. transform-box:fill-box is required
+   here: every inline transform-origin (%) these elements carry was
+   computed in script.js against that specific element's OWN bounding box
+   (each cloth panel has a different shape/bbox, but its origin % was
+   picked so they all still visually pivot around the same shared
+   peduncle point) — same fill-box convention .fish-tail/.fish-body/the
+   shark joints above already rely on. No transform is set here in CSS;
+   script.js writes rotate()/scaleY() straight onto these every frame. */
+.guppy-tail-panel,
+.guppy-dorsal-ribbon,
+.guppy-pectoral {
+  transform-box: fill-box;
 }
+
+/* Alpha-blended, light-permeating fin membrane: soft drop-shadow blur on
+   the translucent tail/dorsal/pectoral pieces stands in for subsurface
+   scattering at the fin's outer edge (background caustics/light showing
+   faintly through the tissue) without the cost of an actual SVG filter
+   per fish. */
+.fish-particle.species-guppy .guppy-tail-panel,
+.fish-particle.species-guppy .guppy-dorsal-ribbon,
+.fish-particle.species-guppy .guppy-dorsal,
+.fish-particle.species-guppy .guppy-pectoral {
+  filter: drop-shadow(0 0 1.4px rgba(255, 255, 255, 0.35));
+}
+
+/* Iridescent shine overlay: script.js drives hue-rotate() on this every
+   frame (see fishRenderGuppyExtras/.guppy-shine) so the highlight visibly
+   shifts hue as the fish turns relative to the light. screen/color-dodge
+   blending keeps it additive (a glint) instead of muddying the base
+   chromatophore colors underneath. */
+.fish-particle.species-guppy .guppy-shine {
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+/* Gravid spot (female) sits under the fin layers but above the body
+   pattern — no motion, just a static darkened patch, so nothing extra to
+   drive per frame here. */
 
 /* Bubble draft offset applied via margin on .bubble-particle (see script.js) */
 
@@ -2020,11 +2360,27 @@ body.fish-hide-pufferfish .fish-particle.species-pufferfish {
 
 @media (prefers-reduced-motion: reduce) {
   .fish-particle,
-  .fish-tail,
   .feast-particle,
   .chomp-text {
     animation: none !important;
     opacity: 0;
+  }
+  /* fishStartEngine() already refuses to run at all under reduced motion,
+     so script.js never writes inline transforms to these — this is just a
+     defensive pin in case the field is ever shown without the engine
+     running. Tail wag/body ripple/tail-seg sway/pectoral flap are plain
+     static transforms now (no @keyframes left to disable). */
+  .fish-tail,
+  .fish-body,
+  .shark-particle .shark-spine-tail,
+  .shark-particle .shark-tail-seg,
+  .shark-particle .shark-torso-flex,
+  .shark-particle .shark-dorsal-flex {
+    transform: none !important;
+  }
+  .shark-particle .shark-nictitating {
+    animation: none !important;
+    opacity: 0 !important;
   }
 }
 
@@ -2138,8 +2494,6 @@ body.bubbly-mode .storage-toggle-btn {
   overflow: hidden;
   isolation: isolate;
   background: var(--bubble-core);
-  backdrop-filter: blur(calc(var(--glass-blur) * 0.5)) saturate(150%);
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.5)) saturate(150%);
   box-shadow: var(--bubble-shell);
   transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s ease, box-shadow 0.15s ease;
 }
@@ -2162,8 +2516,6 @@ body.bubbly-mode .btn {
   position: relative;
   overflow: hidden;
   isolation: isolate;
-  backdrop-filter: blur(calc(var(--glass-blur) * 0.45)) saturate(150%);
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.45)) saturate(150%);
   box-shadow: var(--bubble-shell);
   transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, background 0.15s ease, filter 0.15s ease;
 }
@@ -2224,8 +2576,6 @@ body.bubbly-mode .icon-btn {
   isolation: isolate;
   border-radius: 50%;
   background: var(--bubble-core);
-  backdrop-filter: blur(calc(var(--glass-blur) * 0.45)) saturate(150%);
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.45)) saturate(150%);
   box-shadow: var(--bubble-shell);
   transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -2531,4 +2881,57 @@ body.bubbly-mode .switch-thumb {
   .settings-sidebar-backdrop {
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ---------------------------------------------------------------------
+   Scroll performance: shed glass-blur cost while actively scrolling
+   ---------------------------------------------------------------------
+   .btn/.icon-btn/.storage-toggle-btn no longer carry backdrop-filter at
+   all (see the INTERACTIVE CONTROLS rules above) — profiling showed those
+   were the dominant cost site-wide, not just while scrolling: a single
+   word-table row renders four .icon-btns (two pronunciation buttons, edit,
+   delete), so any real list of entries adds up to hundreds of separately-
+   blurred regions sitting above the constantly-animating #bubble-field/
+   #fish-field, all needing re-sampling on every frame whether or not the
+   page is moving. Their existing gradient "core" + shell shadow (the same
+   INTERACTIVE CONTROLS block) already reads as glass without the blur, so
+   removing it there was a pure performance win.
+
+   What's left here is only the handful of large, few-in-number surfaces
+   (.card, .modal-content, .storage-panel, .site-header, .definition-card,
+   and form fields) where blur still runs by default because there are
+   only ever a few of them on screen at once — but re-sampling even those
+   during a fast scroll adds up, so we still shed their blur for the
+   ~200ms window script.js marks with body.is-scrolling, same as before. */
+body.is-scrolling.bubbly-mode .card,
+body.is-scrolling.bubbly-mode .modal-content,
+body.is-scrolling.bubbly-mode .storage-panel,
+body.is-scrolling.bubbly-mode .site-header,
+body.is-scrolling.bubbly-mode .definition-card,
+body.is-scrolling.bubbly-mode input[type="text"],
+body.is-scrolling.bubbly-mode input[type="number"],
+body.is-scrolling.bubbly-mode input[type="url"],
+body.is-scrolling.bubbly-mode input[type="password"],
+body.is-scrolling.bubbly-mode textarea,
+body.is-scrolling.bubbly-mode select {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transition: none !important;
+}
+
+/* The fixed fish/bubble overlays don't need to react to scroll at all —
+   promoting each onto its own compositor layer keeps the browser from
+   re-rasterizing their (fairly heavy: gradients, box-shadows, 3D
+   transforms) contents every time it repaints the page during a scroll. */
+.bubble-field,
+.fish-field {
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* Individual bubbles weren't isolated before — without this, a repaint
+   of one can force a repaint of the whole #bubble-field stacking
+   context (and everything else sharing its layer) during scroll. */
+.bubble-particle {
+  will-change: transform;
 }
