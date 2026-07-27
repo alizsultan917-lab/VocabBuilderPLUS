@@ -148,6 +148,180 @@ h1, h2, h3 {
   box-shadow: 0 0 0 3px rgba(244, 193, 92, 0.28);
 }
 
+/* ---------- 🎧 Audio Window master toggle (ON state) ---------- */
+#audio-window-toggle-btn.active {
+  background: var(--blue);
+  border-color: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3);
+}
+
+/* =========================================================================
+   🎧 FLOATING VOCABULARY AUDIO WINDOW
+   ---------------------------------------------------------------------
+   Detachable, draggable mini-player gated entirely behind the master
+   toggle above. Hidden by default (.hidden = display:none); once the
+   toggle is on, JS removes .hidden and adds .vaw-open on the next
+   frame so the fade/rise transition below actually plays. Uses
+   position + visibility/opacity (rather than only display) so opening
+   and closing can both animate smoothly, per spec.
+========================================================================= */
+.vocab-audio-window {
+  position: fixed;
+  top: 90px;
+  right: 24px;
+  left: auto;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  /* Above every other overlay in the app (customize-mode lift 90,
+     header 70, header-widgets 60) but still below .modal (100), so a
+     modal dialog always wins if both happen to be open together. */
+  z-index: 98;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  box-shadow: var(--shadow-lift);
+  overflow: hidden;
+
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(10px) scale(0.97);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
+}
+
+.vocab-audio-window.vaw-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0s;
+}
+
+.vaw-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.6rem;
+  background: linear-gradient(135deg, var(--blue-deep), var(--blue) 65%, #2f78bd);
+  color: #fff;
+  cursor: grab;
+  user-select: none;
+}
+
+.vaw-header.vaw-dragging,
+.vaw-header:active {
+  cursor: grabbing;
+}
+
+.vaw-drag-grip {
+  font-size: 0.85rem;
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+
+.vaw-header-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  overflow: hidden;
+}
+
+.vaw-word {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 700;
+  font-size: 0.98rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vaw-position {
+  font-size: 0.7rem;
+  color: #cfe1f3;
+  white-space: nowrap;
+}
+
+.vaw-header-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.vaw-header-actions .icon-btn {
+  width: 24px;
+  height: 24px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.vaw-header-actions .icon-btn:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.vaw-body {
+  padding: 0.7rem 0.75rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.vaw-pron-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.vaw-pron-row .pron-play-btn {
+  flex: 1;
+  width: auto;
+  border-radius: 8px;
+  font-size: 0.78rem;
+}
+
+.vaw-definitions {
+  max-height: 160px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
+.vaw-def-list {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.vaw-def-list li {
+  margin-bottom: 0.4rem;
+  line-height: 1.4;
+}
+
+.vaw-empty-state {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.vaw-cycle-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.vaw-cycle-row .btn {
+  flex: 1;
+}
+
+.vaw-delete-row {
+  display: flex;
+}
+
+.vaw-delete-row .btn {
+  flex: 1;
+}
+
 .storage-panel {
   position: absolute;
   top: 32px;
@@ -821,6 +995,30 @@ body.customize-mode .customizable .resize-handle {
   flex: 0 1 110px;
 }
 
+.page-dual-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.page-dual-field label {
+  margin-bottom: 0.2rem;
+}
+
+.page-pending-tag {
+  display: inline-block;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--danger);
+  background: #fbe4e4;
+  border-radius: 10px;
+  padding: 0.05rem 0.4rem;
+  margin-left: 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  vertical-align: middle;
+}
+
 /* Bounded-height, internally-scrolling panels for definitions/images —
    keeps the add-word card a fixed, predictable height no matter how many
    results come back from a lookup. */
@@ -1345,6 +1543,11 @@ tbody tr:hover {
 .def-cell {
   max-width: 320px;
   color: var(--ink-soft);
+  /* 🎧 Same reasoning as .definition-card above — keeps a double-tap
+     on a saved word's definitions cell from being swallowed by the
+     browser's zoom gesture, so it reliably reaches the Audio Window's
+     dblclick trigger (see attachRowListeners() in script.js). */
+  touch-action: manipulation;
 }
 
 .manual-inline-tag {
@@ -1444,6 +1647,23 @@ tbody tr:hover {
   margin-top: 0.5rem;
 }
 
+/* Compact variant used by small yes/no confirmations (e.g. the "To Page"
+   pending-fill prompt) rather than full data-entry modals. */
+.modal-content-compact {
+  max-width: 380px;
+  text-align: center;
+}
+
+.modal-content-compact .modal-actions {
+  justify-content: center;
+}
+
+.confirm-prompt-text {
+  color: var(--ink-soft);
+  line-height: 1.5;
+  margin-bottom: 1.2rem;
+}
+
 /* ---------- Footer ---------- */
 .site-footer {
   text-align: center;
@@ -1485,6 +1705,12 @@ tbody tr:hover {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0.6rem 0.75rem;
+  /* 🎧 Without this, a double-tap on touch devices can register as the
+     browser's double-tap-to-zoom gesture instead of a clean dblclick
+     event, which is how the Audio Window double-select is triggered
+     (see script.js). This tells the browser "no zoom gesture here,
+     just pass taps straight through as click/dblclick". */
+  touch-action: manipulation;
 }
 
 .definition-card .definition-text {
@@ -1504,6 +1730,47 @@ tbody tr:hover {
   height: 17px;
   accent-color: var(--blue);
   cursor: pointer;
+}
+
+/* ---------- 🎧 Audio Window double-select (Add-a-Word form only) ----
+   While the Audio Window master toggle is on, double-clicking a
+   definition card marks it with a "double tick" badge to show it will
+   also save the word into the Audio Window on submit. A single click on
+   the checkbox is untouched — it still just selects/deselects that one
+   definition, same as always. */
+.definition-checkbox-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  margin-top: 0.3rem;
+}
+
+.definition-checkbox-wrap .definition-checkbox {
+  margin-top: 0;
+}
+
+.vaw-double-tick {
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -1px;
+  color: #fff;
+  background: var(--blue);
+  padding: 1px 3px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.definitions-list.vaw-select-active .definition-card {
+  cursor: pointer;
+}
+
+.definition-card.vaw-double-selected {
+  border-color: var(--blue);
+  background: var(--blue-pale);
+  box-shadow: 0 0 0 1px var(--blue-soft) inset;
 }
 
 .definition-source {
@@ -2808,6 +3075,7 @@ body.bubbly-mode .switch-thumb {
 
 .shortcut-key-input {
   min-width: 76px;
+  max-width: 150px;
   text-align: center;
   padding: 0.32rem 0.5rem;
   font-size: 0.76rem;
@@ -2820,6 +3088,8 @@ body.bubbly-mode .switch-thumb {
   cursor: pointer;
   transition: background 0.15s ease, box-shadow 0.15s ease;
   flex-shrink: 0;
+  white-space: normal;
+  line-height: 1.25;
 }
 
 .shortcut-key-input:hover {
@@ -2837,6 +3107,7 @@ body.bubbly-mode .switch-thumb {
    clickable/listening, since these aren't independently recordable. */
 .shortcut-key-display {
   min-width: 76px;
+  max-width: 150px;
   text-align: center;
   padding: 0.32rem 0.5rem;
   font-size: 0.76rem;
@@ -2847,6 +3118,8 @@ body.bubbly-mode .switch-thumb {
   background: transparent;
   color: var(--ink-soft);
   flex-shrink: 0;
+  white-space: normal;
+  line-height: 1.25;
 }
 
 .shortcut-row-hint {

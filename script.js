@@ -215,6 +215,15 @@ const form = document.getElementById("entry-form");
 const wordInput = document.getElementById("word-input");
 const bookInput = document.getElementById("book-input");
 const pageInput = document.getElementById("page-input");
+const pageStartInput = document.getElementById("page-start-input");
+const pageEndInput = document.getElementById("page-end-input");
+const pageSingleGroup = document.getElementById("page-single-group");
+const pageDualGroup = document.getElementById("page-dual-group");
+const mergePageBarsToggle = document.getElementById("merge-page-bars-toggle");
+
+const topageConfirmModal = document.getElementById("topage-confirm-modal");
+const topageConfirmOkBtn = document.getElementById("topage-confirm-ok-btn");
+const topageConfirmCancelBtn = document.getElementById("topage-confirm-cancel-btn");
 const definitionInput = document.getElementById("definition-input");
 const addDefinitionBtn = document.getElementById("add-definition-btn");
 const bookSuggestions = document.getElementById("book-suggestions");
@@ -616,6 +625,7 @@ const CUSTOMIZABLE_IDS = [
   "customize-widget",
   "storage-widget",
   "word-input",
+  "page-input-wrap",
   "book-input",
   "search-input",
   "book-filter",
@@ -1751,7 +1761,47 @@ function initFetchLimitsUI() {
   systemImgLimitInput.value = getSystemImgLimit();
   aiImgLimitInput.value = getAiImgLimit();
   manualImgLimitInput.value = getManualImgLimit();
+  if (mergePageBarsToggle) mergePageBarsToggle.checked = pageBarMerged;
 }
+
+/* ---------------------------------------------------------------------
+   PAGE BAR LAYOUT MODE — merged single bar (default, matches the app's
+   original behavior) vs. separate From Page / To Page bars. Persisted so
+   the choice survives a refresh, and switching modes never touches any
+   already-saved entry (seq/order untouched either way — see
+   addEntryFromForm() for how each mode maps onto pageStart/pageEnd).
+--------------------------------------------------------------------- */
+const PAGE_BAR_MODE_STORAGE = "litVocabMergePageBars";
+
+function getPageBarMerged() {
+  try {
+    const raw = localStorage.getItem(PAGE_BAR_MODE_STORAGE);
+    return raw === null ? true : raw === "true"; // default: merged (original single-bar behavior)
+  } catch (err) {
+    return true;
+  }
+}
+
+let pageBarMerged = getPageBarMerged();
+
+function setPageBarMode(merged) {
+  pageBarMerged = merged;
+  if (pageSingleGroup) pageSingleGroup.classList.toggle("hidden", !merged);
+  if (pageDualGroup) pageDualGroup.classList.toggle("hidden", merged);
+  if (mergePageBarsToggle) mergePageBarsToggle.checked = merged;
+  try {
+    localStorage.setItem(PAGE_BAR_MODE_STORAGE, String(merged));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+if (mergePageBarsToggle) {
+  mergePageBarsToggle.addEventListener("change", () => {
+    setPageBarMode(mergePageBarsToggle.checked);
+  });
+}
+setPageBarMode(pageBarMerged);
 
 /* ---------------------------------------------------------------------
    DISPLAY SIZES — search bar width, definition text size, and the size
@@ -4525,6 +4575,17 @@ function normalizeAudioUrl(url) {
 // Accepts "450", "450-470", "450–470" (en dash), "450—470" (em dash), or
 // "450 to 470". Returns { pageStart, pageEnd } or null if the text isn't a
 // valid page/range (non-numeric, non-positive, or start > end).
+// PAGE-BAR FIELD KEY MAP — Dual-Bar Mode's two inputs each need an explicit,
+// named key onto the entry's state so anything driven by "which bar is
+// this" (batch-fill, auto-trigger, future automation) can look the field
+// up by name instead of hardcoding pageStart/pageEnd inline everywhere.
+// "from page" already behaved this way implicitly; "to page" is added
+// here explicitly so both bars are mapped the same way.
+const PAGE_FIELD_KEYS = {
+  "from page": "pageStart",
+  "to page": "pageEnd",
+};
+
 function parsePageRangeInput(raw) {
   const text = String(raw ?? "").trim();
   if (!text) return null;
@@ -4549,15 +4610,28 @@ function parsePageRangeInput(raw) {
 }
 
 // Human-readable label for a page range: "Page 42" for a single page,
-// "Page 450-470" for a real range.
+// "Page 450-470" for a real range, "Page 42+" for an entry saved in
+// Dual-Bar Mode whose "To Page" is still pending (pageEnd === null).
 function formatPageLabel(pageStart, pageEnd) {
+  if (pageEnd == null) return `Page ${pageStart}+`;
   return pageStart === pageEnd ? `Page ${pageStart}` : `Page ${pageStart}-${pageEnd}`;
 }
 
 // Round-trips a range back into the compact text a person would type
-// ("42" or "450-470"), used to prefill the Page input when editing.
+// ("42" or "450-470"), used to prefill the Page input when editing. A
+// still-pending entry (pageEnd === null) falls back to just its start
+// page, which stays a valid, parseable value.
 function formatPageRangeText(pageStart, pageEnd) {
+  if (pageEnd == null) return String(pageStart);
   return pageStart === pageEnd ? String(pageStart) : `${pageStart}-${pageEnd}`;
+}
+
+// Wherever a real page number is needed for comparison/grouping (page
+// filter, page grouping) but an entry might still be pending, this
+// resolves to pageStart itself — never mutates the entry's actual
+// (possibly still-null) pageEnd.
+function resolvedPageEnd(entry) {
+  return entry.pageEnd == null ? entry.pageStart : entry.pageEnd;
 }
 
 // Shared ordering used everywhere entries are processed for display,
@@ -5013,12 +5087,33 @@ function renderDefinitions(list, containerEl, onRemove, onToggle) {
     containerEl.innerHTML = '<p class="empty-state" style="padding:0.6rem 0;">Nothing yet — type a word above, or add your own below.</p>';
     return;
   }
+  // 🎧 Double-select visual: only the Add-a-Word form's definitions list
+  // (never the Edit modal's) shows the extra "double tick" badge, and
+  // only while the Audio Window master toggle is on — see the click-cycle
+  // handler near vawFlaggedDefIds further down in this file. While active,
+  // each click on a definition cycles it through three states: unselected
+  // -> selected -> selected + flagged for the Audio Window -> unselected.
+  const showVawBadges = containerEl === definitionsList && isAudioWindowActive;
+  containerEl.classList.toggle("vaw-select-active", showVawBadges);
   containerEl.innerHTML = list
     .map((d) => {
       const isSelected = d.selected === true;
+      const isVawFlagged = showVawBadges && vawFlaggedDefIds.has(d.id);
+      const vawTitle = !showVawBadges
+        ? ""
+        : isVawFlagged
+        ? "Double-selected — will also save to the Audio Window. Click again to clear."
+        : isSelected
+        ? "Click again to also save this word to the Audio Window"
+        : "Click to select this definition";
       return `
-      <div class="definition-card${isSelected ? "" : " unselected"}" data-id="${d.id}">
-        <input type="checkbox" class="definition-checkbox" data-id="${d.id}" ${isSelected ? "checked" : ""} title="Include this definition in the entry">
+      <div class="definition-card${isSelected ? "" : " unselected"}${isVawFlagged ? " vaw-double-selected" : ""}" data-id="${d.id}"${
+        showVawBadges ? ` title="${vawTitle}"` : ""
+      }>
+        <span class="definition-checkbox-wrap">
+          <input type="checkbox" class="definition-checkbox" data-id="${d.id}" ${isSelected ? "checked" : ""} title="Include this definition in the entry">
+          ${isVawFlagged ? '<span class="vaw-double-tick" aria-hidden="true">✓✓</span>' : ""}
+        </span>
         <div class="definition-text">${sourceLabel(d.source)}${escapeHtml(d.text)}</div>
         <button type="button" class="definition-remove-btn" data-id="${d.id}" title="Remove this definition">✕</button>
       </div>`;
@@ -5141,6 +5236,8 @@ function addPendingDefinition(text, source, selected = false) {
 
 function removePendingDefinition(id) {
   pendingDefinitions = pendingDefinitions.filter((d) => d.id !== id);
+  vawFlaggedDefIds.delete(id);
+  updateVawPendingTag();
   renderDefinitions(pendingDefinitions, definitionsList, removePendingDefinition, togglePendingDefinition);
 }
 
@@ -5193,6 +5290,11 @@ function resetFormPendingState() {
   imageLoadingTag.classList.add("hidden");
   aiFetchStatus.classList.add("hidden");
   lookupState = { word: "", dictDone: false };
+  // 🎧 Any pending "add to Audio Window" mark(s) belong to the word that
+  // was just cleared (saved or discarded) — never carry them over to
+  // whatever gets typed next.
+  vawFlaggedDefIds.clear();
+  updateVawPendingTag();
 }
 
 defSelectAllBtn.addEventListener("click", () => {
@@ -5460,7 +5562,7 @@ function guardedAddEntry(token) {
   addEntryFromForm();
 }
 
-[wordInput, bookInput, pageInput].forEach((el) => {
+[wordInput, bookInput, pageInput, pageStartInput, pageEndInput].forEach((el) => {
   el.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" || e.isComposing) return;
     const token = beginAddAttempt();
@@ -5489,11 +5591,14 @@ form.addEventListener("submit", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" || e.isComposing) return;
   if (!editModal.classList.contains("hidden")) return; // edit modal has its own Save button
+  if (!topageConfirmModal.classList.contains("hidden")) return; // confirm modal has its own Enter/Escape handling
   const target = e.target;
   const hasOwnHandler =
     target === wordInput ||
     target === bookInput ||
     target === pageInput ||
+    target === pageStartInput ||
+    target === pageEndInput ||
     target === definitionInput ||
     target === imageUrlInput ||
     target === searchInput ||
@@ -5651,7 +5756,6 @@ addImageBtn.addEventListener("click", () => {
 function addEntryFromForm() {
   const word = wordInput.value.trim();
   const bookTitle = bookInput.value.trim();
-  const pageRange = parsePageRangeInput(pageInput.value);
 
   if (!word) {
     alert("Please enter a word before adding.");
@@ -5663,10 +5767,42 @@ function addEntryFromForm() {
     bookInput.focus();
     return;
   }
-  if (!pageRange) {
-    alert("Please enter a valid page number or page range (e.g. 42 or 450-470) before adding.");
-    pageInput.focus();
-    return;
+
+  // PAGE — reads from whichever bar layout is currently active (see the
+  // "PAGE BAR LAYOUT MODE" block above). Single-Bar Mode behaves exactly
+  // as before. Dual-Bar Mode allows "To Page" to be left blank (saved as
+  // a pending pageEnd: null) — see the retroactive batch-fill below for
+  // what happens once a "To Page" value is finally supplied.
+  let pageRange = null;
+  let batchFillValue = null;
+
+  if (pageBarMerged) {
+    pageRange = parsePageRangeInput(pageInput.value);
+    if (!pageRange) {
+      alert("Please enter a valid page number or page range (e.g. 42 or 450-470) before adding.");
+      pageInput.focus();
+      return;
+    }
+  } else {
+    const fromRaw = pageStartInput.value.trim();
+    const toRaw = pageEndInput.value.trim();
+    if (!/^\d+$/.test(fromRaw) || parseInt(fromRaw, 10) < 1) {
+      alert("Please enter a valid 'From Page' number before adding.");
+      pageStartInput.focus();
+      return;
+    }
+    const pageStart = parseInt(fromRaw, 10);
+    let pageEnd = null;
+    if (toRaw) {
+      if (!/^\d+$/.test(toRaw) || parseInt(toRaw, 10) < pageStart) {
+        alert("'To Page' must be a valid page number no smaller than 'From Page' — or leave it blank to fill it in later.");
+        pageEndInput.focus();
+        return;
+      }
+      pageEnd = parseInt(toRaw, 10);
+      batchFillValue = pageEnd;
+    }
+    pageRange = { pageStart, pageEnd };
   }
 
   // Only ticked ("selected") definitions/images are saved. If the user
@@ -5702,9 +5838,31 @@ function addEntryFromForm() {
     phonetics: pendingPhonetics || { us: null, uk: null },
   };
 
+  // RETROACTIVE BATCH-FILL (Dual-Bar Mode only): supplying a "To Page"
+  // value here fills that same value into every previously saved entry
+  // still waiting on one (pageEnd === null) — and ONLY their pageEnd.
+  // Creation order, array position, and seq are left completely
+  // untouched for every entry this touches, including this new one
+  // (assigned its own seq below, same as any other add).
+  if (batchFillValue !== null) {
+    entries.forEach((e) => {
+      if (e.pageEnd === null) e.pageEnd = batchFillValue;
+    });
+  }
+
   entries.push(entry);
   saveEntries();
   saveLastBookPage(bookTitle, formatPageRangeText(pageRange.pageStart, pageRange.pageEnd));
+
+  // 🎧 The entry is always saved normally regardless of the mark below —
+  // this only additionally drops it into the Audio Window's curated
+  // list when the word was double-selected while composing it, and only
+  // while the master toggle is on.
+  if (isAudioWindowActive && vawFlaggedDefIds.size > 0) {
+    addVawSavedWordId(entry.id);
+    if (!vawCurrentId) vawCurrentId = entry.id;
+    renderVawContent();
+  }
 
   // Reset only the word/definitions/images — keep Book & Page as-is.
   wordInput.value = "";
@@ -5719,6 +5877,109 @@ function addEntryFromForm() {
 }
 
 /* ---------------------------------------------------------------------
+   TO PAGE — IMMEDIATE AUTO-FILL TRIGGER (Dual-Bar Mode)
+
+   The RETROACTIVE BATCH-FILL above only runs once a brand-new word is
+   actually submitted with a "To Page" value attached. This block adds a
+   second, independent trigger: typing a valid value straight into the
+   "To Page" bar (PAGE_FIELD_KEYS["to page"] → pageEnd) immediately offers
+   to apply it to every entry still waiting on one — no new word needed.
+
+   A short debounce on "input" avoids popping the confirmation on every
+   keystroke while a multi-digit page number is still being typed; a
+   "change" listener (fires on blur/commit) catches it right away in case
+   the debounce hasn't landed yet. Re-entering the exact same value that
+   was already asked about (and answered either way) does not re-prompt.
+--------------------------------------------------------------------- */
+let toPageAutoFillCandidate = null;
+let toPageLastPromptedValue = null;
+let toPageInputDebounce = null;
+
+function hasPendingToPageEntries() {
+  return entries.some((e) => e.pageEnd === null);
+}
+
+// Mirrors the validation addEntryFromForm() applies to the same field —
+// a real page number no smaller than whatever "From Page" currently holds.
+function validToPageCandidate(raw) {
+  if (!/^\d+$/.test(raw)) return null;
+  const value = parseInt(raw, 10);
+  if (value < 1) return null;
+  const fromRaw = pageStartInput.value.trim();
+  if (/^\d+$/.test(fromRaw) && value < parseInt(fromRaw, 10)) return null;
+  return value;
+}
+
+function maybePromptToPageAutoFill() {
+  const raw = pageEndInput.value.trim();
+  if (!raw) {
+    toPageLastPromptedValue = null; // field cleared — allow re-prompting later
+    return;
+  }
+  const value = validToPageCandidate(raw);
+  if (value === null) return;
+  if (value === toPageLastPromptedValue) return; // already asked about this value
+  if (!hasPendingToPageEntries()) return; // nothing to fill in
+  toPageLastPromptedValue = value;
+  openToPageConfirmModal(value);
+}
+
+function openToPageConfirmModal(value) {
+  toPageAutoFillCandidate = value;
+  topageConfirmModal.classList.remove("hidden");
+  topageConfirmOkBtn.focus();
+}
+
+function closeToPageConfirmModal() {
+  topageConfirmModal.classList.add("hidden");
+  toPageAutoFillCandidate = null;
+}
+
+function commitToPageAutoFill() {
+  if (toPageAutoFillCandidate === null) {
+    closeToPageConfirmModal();
+    return;
+  }
+  const value = toPageAutoFillCandidate;
+  entries.forEach((e) => {
+    if (e.pageEnd === null) e.pageEnd = value;
+  });
+  saveEntries();
+  renderTable();
+  closeToPageConfirmModal();
+}
+
+pageEndInput.addEventListener("input", () => {
+  clearTimeout(toPageInputDebounce);
+  toPageInputDebounce = setTimeout(maybePromptToPageAutoFill, 500);
+});
+
+pageEndInput.addEventListener("change", () => {
+  clearTimeout(toPageInputDebounce);
+  maybePromptToPageAutoFill();
+});
+
+function cancelToPageAutoFill() {
+  toPageLastPromptedValue = null; // let the same value re-prompt if retried
+  closeToPageConfirmModal();
+}
+
+topageConfirmOkBtn.addEventListener("click", commitToPageAutoFill);
+topageConfirmCancelBtn.addEventListener("click", cancelToPageAutoFill);
+
+// Enter confirms, Escape cancels — scoped to the modal itself so this
+// never fights with the add-entry Enter handling on the page bars below.
+topageConfirmModal.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    commitToPageAutoFill();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    cancelToPageAutoFill();
+  }
+});
+
+/* ---------------------------------------------------------------------
    PREFILL LAST BOOK / PAGE ON LOAD
 --------------------------------------------------------------------- */
 function prefillLastBookPage() {
@@ -5726,6 +5987,10 @@ function prefillLastBookPage() {
   if (last) {
     bookInput.value = last.book || "";
     pageInput.value = last.page || "";
+    // Dual-Bar Mode's "From Page" gets the same prefill; "To Page" is
+    // deliberately left blank so a fresh page load doesn't accidentally
+    // carry over — and re-batch-fill — a stale "To Page" value.
+    if (pageStartInput) pageStartInput.value = last.page || "";
   }
 }
 
@@ -5739,6 +6004,7 @@ function deleteEntry(id) {
 
   entries = entries.filter((e) => e.id !== id);
   saveEntries();
+  removeVawSavedWordId(id);
   refreshBookFilterOptions();
   refreshBookDatalist();
   renderTable();
@@ -6582,6 +6848,7 @@ deleteAllBtn.addEventListener("click", () => {
 
   entries = [];
   saveEntries();
+  clearVawSavedWords();
   refreshBookFilterOptions();
   refreshBookDatalist();
   renderTable();
@@ -6634,8 +6901,8 @@ importFileInput.addEventListener("change", () => {
       incoming.forEach((raw) => {
         // Accept both the current range shape and legacy single-page exports.
         const pageStart = typeof raw.pageStart === "number" ? raw.pageStart : raw.pageNo;
-        const pageEnd = typeof raw.pageEnd === "number" ? raw.pageEnd : raw.pageNo;
-        if (typeof pageStart !== "number" || typeof pageEnd !== "number") return;
+        const pageEnd = typeof raw.pageEnd === "number" ? raw.pageEnd : raw.pageEnd === null ? null : raw.pageNo;
+        if (typeof pageStart !== "number" || (typeof pageEnd !== "number" && pageEnd !== null)) return;
 
         const key = `${raw.word}|${raw.bookTitle}|${pageStart}-${pageEnd}`;
         if (existingKeys.has(key)) return; // skip duplicates
@@ -6702,7 +6969,7 @@ function getFilteredEntries() {
     pageQueryNum = parseInt(pageQuery, 10);
     if (Number.isInteger(pageQueryNum)) {
       const hasExactMatch = entries.some(
-        (e) => e.pageStart === pageQueryNum && e.pageEnd === pageQueryNum && (!selectedBook || e.bookTitle === selectedBook)
+        (e) => e.pageStart === pageQueryNum && resolvedPageEnd(e) === pageQueryNum && (!selectedBook || e.bookTitle === selectedBook)
       );
       useRangeFallback = !hasExactMatch;
     }
@@ -6712,9 +6979,10 @@ function getFilteredEntries() {
     if (selectedBook && e.bookTitle !== selectedBook) return false;
     if (pageQuery) {
       if (!Number.isInteger(pageQueryNum)) return false;
+      const pe = resolvedPageEnd(e);
       const matches = useRangeFallback
-        ? e.pageStart <= pageQueryNum && pageQueryNum <= e.pageEnd
-        : e.pageStart === pageQueryNum && e.pageEnd === pageQueryNum;
+        ? e.pageStart <= pageQueryNum && pageQueryNum <= pe
+        : e.pageStart === pageQueryNum && pe === pageQueryNum;
       if (!matches) return false;
     }
     if (searchQuery) {
@@ -6806,7 +7074,7 @@ function renderDefinitionCell(entry) {
     );
   }
   const content = groups.length ? groups.join("") : '<span class="no-image">—</span>';
-  return `<td data-label="Definitions" class="def-cell">${content}</td>`;
+  return `<td data-label="Definitions" class="def-cell" data-id="${entry.id}">${content}</td>`;
 }
 
 function renderRowCells(entry, includeBookColumn) {
@@ -6843,7 +7111,13 @@ function renderRowCells(entry, includeBookColumn) {
     ${
       includeBookColumn
         ? `<td data-label="Book">${escapeHtml(entry.bookTitle)}</td>
-           <td data-label="Page">${entry.pageStart === entry.pageEnd ? entry.pageStart : `${entry.pageStart}-${entry.pageEnd}`}</td>`
+           <td data-label="Page">${
+             entry.pageEnd == null
+               ? `${entry.pageStart}<span class="page-pending-tag" title="Waiting for a To Page value">pending</span>`
+               : entry.pageStart === entry.pageEnd
+               ? entry.pageStart
+               : `${entry.pageStart}-${entry.pageEnd}`
+           }</td>`
         : ""
     }
     ${renderDefinitionCell(entry)}
@@ -6934,6 +7208,15 @@ function attachRowListeners() {
 
   tableContainer.querySelectorAll(".delete-btn").forEach((btn) => {
     btn.addEventListener("click", () => deleteEntry(btn.dataset.id));
+  });
+
+  // 🎧 Strictly gated double-click trigger for the Vocabulary Audio
+  // Window — see the "FLOATING VOCABULARY AUDIO WINDOW" block near the
+  // end of this file. When the master toggle is OFF this listener still
+  // exists (rows get re-rendered constantly), but it bails out
+  // immediately with no side effects at all, per spec.
+  tableContainer.querySelectorAll(".def-cell").forEach((cell) => {
+    cell.addEventListener("dblclick", () => vawHandleDefDblClick(cell.dataset.id));
   });
 
   tableContainer.querySelectorAll(".row-thumb").forEach((imgEl) => {
@@ -7132,6 +7415,388 @@ window.addEventListener("message", (event) => {
 });
 
 /* =========================================================================
+   FLOATING VOCABULARY AUDIO WINDOW
+   ---------------------------------------------------------------------
+   A detachable, draggable mini-player for listening to and cycling
+   through saved words — entirely gated behind the master toggle button
+   (#audio-window-toggle-btn / isAudioWindowActive below). When the
+   toggle is OFF, the app behaves identically to before this feature
+   existed: the floating window (#vocab-audio-window) stays hidden and
+   non-interactive, and both the double-click trigger (wired in
+   attachRowListeners() above, on each rendered .def-cell) and the
+   dedicated hotkeys (wired into the existing shortcut-config system
+   just below this block) become no-ops the instant they're checked.
+
+   Word list + navigation: the "playlist" only ever contains words that
+   have been explicitly saved into the window — either by double-
+   clicking an already-saved word's definitions in the table below (see
+   attachRowListeners() above), or by double-clicking a definition while
+   composing a brand-new word up in the "Add a Word" form and then
+   clicking "Add Entry" (see the double-select block further down).
+   Nothing is ever added implicitly just by existing in the register.
+========================================================================= */
+const AUDIO_WINDOW_ACTIVE_STORAGE = "vocabRegister_audioWindowActive";
+const VAW_POSITION_STORAGE = "vocabRegister_audioWindowPosition";
+const VAW_SAVED_WORDS_STORAGE = "vocabRegister_audioWindowWords";
+
+let isAudioWindowActive = false;
+let vawCurrentId = null;
+
+// The curated "saved to the window" list — an array of entry ids, kept
+// entirely separate from `entries` itself. This is what getVawWordList()
+// below reads for both the Prev/Next playlist and the word count shown
+// in the header, so the window only ever shows words explicitly added
+// to it, never every saved word by default.
+function loadVawSavedWordIds() {
+  try {
+    const raw = localStorage.getItem(VAW_SAVED_WORDS_STORAGE);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+let vawSavedWordIds = loadVawSavedWordIds();
+
+function saveVawSavedWordIds() {
+  try {
+    localStorage.setItem(VAW_SAVED_WORDS_STORAGE, JSON.stringify(vawSavedWordIds));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function addVawSavedWordId(id) {
+  if (!id || vawSavedWordIds.includes(id)) return;
+  vawSavedWordIds.push(id);
+  saveVawSavedWordIds();
+}
+
+function removeVawSavedWordId(id) {
+  const idx = vawSavedWordIds.indexOf(id);
+  if (idx === -1) return;
+  vawSavedWordIds.splice(idx, 1);
+  saveVawSavedWordIds();
+  if (vawCurrentId === id) vawCurrentId = null;
+  renderVawContent();
+}
+
+function clearVawSavedWords() {
+  vawSavedWordIds = [];
+  saveVawSavedWordIds();
+  vawCurrentId = null;
+  renderVawContent();
+}
+
+// Per-definition "double-select" marks for the Add-a-Word form — set
+// while composing a brand-new word, before it's ever saved (see the
+// definitions-list dblclick handler below). Holds the ids of whichever
+// pendingDefinitions cards were double-clicked; the word itself only
+// gets added to the Audio Window on save if this set is non-empty.
+// Consumed (and cleared) the instant the entry is actually added — see
+// addEntryFromForm() and resetFormPendingState() further up the file.
+let vawFlaggedDefIds = new Set();
+
+const audioWindowToggleBtn = document.getElementById("audio-window-toggle-btn");
+const vocabAudioWindow = document.getElementById("vocab-audio-window");
+const vawDragHandle = document.getElementById("vaw-drag-handle");
+const vawWordEl = document.getElementById("vaw-word");
+const vawPositionEl = document.getElementById("vaw-position");
+const vawDefinitionsEl = document.getElementById("vaw-definitions");
+const vawPlayUsBtn = document.getElementById("vaw-play-us-btn");
+const vawPlayUkBtn = document.getElementById("vaw-play-uk-btn");
+const vawPrevBtn = document.getElementById("vaw-prev-btn");
+const vawNextBtn = document.getElementById("vaw-next-btn");
+const vawCloseBtn = document.getElementById("vaw-close-btn");
+const vawDeleteBtn = document.getElementById("vaw-delete-btn");
+const vawHotkeysBtn = document.getElementById("vaw-hotkeys-btn");
+const vawPendingTag = document.getElementById("vaw-pending-tag");
+
+function updateVawPendingTag() {
+  vawPendingTag?.classList.toggle("hidden", vawFlaggedDefIds.size === 0);
+}
+
+function getVawWordList() {
+  return entries.filter((e) => vawSavedWordIds.includes(e.id)).sort(compareEntriesForExport);
+}
+
+function getVawCurrentEntry() {
+  return entries.find((e) => e.id === vawCurrentId) || null;
+}
+
+function renderVawContent() {
+  if (!vocabAudioWindow) return;
+  const list = getVawWordList();
+  const entry = getVawCurrentEntry();
+
+  if (!entry) {
+    vawWordEl.textContent = "—";
+    vawPositionEl.textContent = "";
+    vawDefinitionsEl.innerHTML =
+      '<p class="vaw-empty-state">No words saved to this window yet. Double-click a word\u2019s definitions in the table to add it, or double-click a definition while composing a new word above and then click "Add Entry".</p>';
+    return;
+  }
+
+  const idx = list.findIndex((e) => e.id === entry.id);
+  vawWordEl.textContent = entry.word;
+  vawPositionEl.textContent = list.length ? `${idx + 1} / ${list.length}` : "";
+
+  const { definitions } = getFilteredData(entry);
+  vawDefinitionsEl.innerHTML = definitions.length
+    ? `<ul class="vaw-def-list">${definitions
+        .map((d) => `<li>${sourceLabel(d.source)}${escapeHtml(d.text)}</li>`)
+        .join("")}</ul>`
+    : '<p class="vaw-empty-state">No definitions saved for this word yet.</p>';
+}
+
+function cycleVaw(direction) {
+  const list = getVawWordList();
+  if (!list.length) return;
+  const idx = list.findIndex((e) => e.id === vawCurrentId);
+  const nextIdx = idx === -1 ? 0 : (idx + direction + list.length) % list.length;
+  vawCurrentId = list[nextIdx].id;
+  renderVawContent();
+}
+
+function playVawPronunciation(accent) {
+  const entry = getVawCurrentEntry();
+  if (!entry) return;
+  playPronunciation(entry, accent);
+}
+
+// 🎧 Removes the word currently loaded in the Audio Window from *this
+// window's* curated list only — it stays in your register and the main
+// table untouched. Figures out (before removing anything) which
+// neighboring word in the window's queue to land on afterward, so
+// closing out a word gracefully advances to the next one instead of
+// leaving the window empty whenever another saved word is still around.
+function deleteVawCurrentEntry() {
+  const entry = getVawCurrentEntry();
+  if (!entry) return;
+  if (!confirm(`Remove "${entry.word}" from the Audio Window? It will stay in your register.`)) return;
+
+  const list = getVawWordList();
+  const idx = list.findIndex((e) => e.id === entry.id);
+  let nextId = null;
+  if (list.length > 1) {
+    const nextIdx = (idx + 1) % list.length;
+    const prevIdx = (idx - 1 + list.length) % list.length;
+    nextId = list[nextIdx].id !== entry.id ? list[nextIdx].id : list[prevIdx].id;
+  }
+
+  removeVawSavedWordId(entry.id); // also clears vawCurrentId + re-renders; overridden right after
+
+  vawCurrentId = nextId; // null (empty state) if that was the last word in the window
+  renderVawContent();
+}
+
+// Strictly gated double-click trigger — called from attachRowListeners()
+// on every rendered .def-cell. If the master toggle is OFF this returns
+// immediately with no side effects whatsoever: nothing is saved, shown,
+// or triggered, per spec. When ON, this is one of the two ways a word
+// gets permanently saved into the window's curated list (the other is
+// the double-select-in-the-Add-form flow below).
+function vawHandleDefDblClick(entryId) {
+  if (!isAudioWindowActive) return;
+  if (!entryId) return;
+  addVawSavedWordId(entryId);
+  vawCurrentId = entryId;
+  renderVawContent();
+  showVawWindow();
+}
+
+function showVawWindow() {
+  if (!vocabAudioWindow) return;
+  vocabAudioWindow.classList.remove("hidden");
+  vocabAudioWindow.setAttribute("aria-hidden", "false");
+  // Let the "hidden" removal land first so the opening transition
+  // actually plays instead of the window just popping in.
+  requestAnimationFrame(() => vocabAudioWindow.classList.add("vaw-open"));
+}
+
+function hideVawWindow() {
+  if (!vocabAudioWindow) return;
+  vocabAudioWindow.classList.remove("vaw-open");
+  vocabAudioWindow.setAttribute("aria-hidden", "true");
+  // Functionally inert the instant the class above is removed
+  // (opacity/pointer-events go to 0 immediately per the CSS) — the
+  // "hidden" class is only added after the closing transition finishes,
+  // purely so display:none doesn't cut the animation short.
+  setTimeout(() => {
+    if (!isAudioWindowActive) vocabAudioWindow.classList.add("hidden");
+  }, 220);
+}
+
+function setAudioWindowActive(on) {
+  isAudioWindowActive = !!on;
+  try {
+    localStorage.setItem(AUDIO_WINDOW_ACTIVE_STORAGE, String(isAudioWindowActive));
+  } catch (err) {
+    // non-fatal
+  }
+  if (audioWindowToggleBtn) {
+    audioWindowToggleBtn.setAttribute("aria-pressed", String(isAudioWindowActive));
+    audioWindowToggleBtn.classList.toggle("active", isAudioWindowActive);
+    audioWindowToggleBtn.title = `Audio Window: ${isAudioWindowActive ? "ON" : "OFF"}`;
+  }
+  if (isAudioWindowActive) {
+    renderVawContent();
+    showVawWindow();
+    renderDefinitions(pendingDefinitions, definitionsList, removePendingDefinition, togglePendingDefinition);
+  } else {
+    hideVawWindow();
+    // The double-select marks only make sense while the feature is on.
+    vawFlaggedDefIds.clear();
+    updateVawPendingTag();
+    renderDefinitions(pendingDefinitions, definitionsList, removePendingDefinition, togglePendingDefinition);
+  }
+}
+
+audioWindowToggleBtn?.addEventListener("click", () => setAudioWindowActive(!isAudioWindowActive));
+vawCloseBtn?.addEventListener("click", () => setAudioWindowActive(false));
+vawPrevBtn?.addEventListener("click", () => cycleVaw(-1));
+vawNextBtn?.addEventListener("click", () => cycleVaw(1));
+vawPlayUsBtn?.addEventListener("click", () => playVawPronunciation("us"));
+vawPlayUkBtn?.addEventListener("click", () => playVawPronunciation("uk"));
+vawDeleteBtn?.addEventListener("click", () => deleteVawCurrentEntry());
+// Reuses the existing "⌨️ Keyboard Shortcuts" sidebar (see the shortcut
+// system below) rather than a second, separate config UI — the three
+// Audio Window bindings are registered as ordinary fields in that same
+// click-to-record system, so this just opens it.
+vawHotkeysBtn?.addEventListener("click", () => {
+  document.getElementById("shortcuts-toggle-btn")?.click();
+});
+
+// ---- Click-cycle: mark a brand-new (not-yet-saved) word for the window
+// while it's still being composed in the Add-a-Word form ----------------
+// Only active while the master toggle is ON — otherwise this is a
+// complete no-op, same as the table's double-click trigger, and every
+// click behaves exactly as it always has (the checkbox's own native
+// check/uncheck, via the "change" listener in renderDefinitions).
+//
+// 🎧 THE BUG THIS BLOCK FIXES: earlier versions tried to detect a
+// "double-click" — first from the browser's native dblclick event, then
+// from a manual two-clicks-within-400ms timer. Both were flaky: whether
+// two clicks counted as "one double-click" depended on exactly how fast
+// the person clicked, which is inherently inconsistent from one attempt
+// to the next — sometimes registering, sometimes not, sometimes
+// registering AND immediately un-registering.
+//
+// Fix: drop timing out of the equation entirely. While the Audio Window
+// is on, each click on a definition just advances it through a fixed
+// 3-state cycle, based on its current state — not on how quickly the
+// clicks arrive:
+//   1st click: unselected      -> selected
+//   2nd click: selected        -> selected + flagged for Audio Window
+//   3rd click: selected+flagged -> unselected (back to the start)
+// This is deterministic — the same click always produces the same
+// result, with no window to miss or double-fire.
+function vawCycleDefinitionState(id) {
+  const def = pendingDefinitions.find((d) => d.id === id);
+  if (!def) return;
+  const isFlagged = vawFlaggedDefIds.has(id);
+  if (!def.selected) {
+    def.selected = true; // 1st click: plain selection, same as before
+  } else if (!isFlagged) {
+    vawFlaggedDefIds.add(id); // 2nd click: also mark for the Audio Window
+  } else {
+    def.selected = false; // 3rd click: clear both, back to unselected
+    vawFlaggedDefIds.delete(id);
+  }
+  renderDefinitions(pendingDefinitions, definitionsList, removePendingDefinition, togglePendingDefinition);
+  updateVawPendingTag();
+}
+
+definitionsList.addEventListener("click", (e) => {
+  if (!isAudioWindowActive) return;
+  if (e.target.closest(".definition-remove-btn")) return; // never cycle a card being deleted
+  const card = e.target.closest(".definition-card");
+  if (!card) return;
+  if (e.target.closest(".definition-checkbox")) {
+    // Stop the checkbox's own native check/uncheck (and the "change"
+    // event it would fire) — vawCycleDefinitionState() below manages
+    // `selected` itself, as part of the 3-state cycle.
+    e.preventDefault();
+  }
+  vawCycleDefinitionState(card.dataset.id);
+});
+
+// ---- Dragging (header bar only; buttons inside it are excluded) ------
+(function initVawDrag() {
+  if (!vawDragHandle || !vocabAudioWindow) return;
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+
+  vawDragHandle.addEventListener("mousedown", (e) => {
+    if (e.target.closest(".icon-btn")) return;
+    dragging = true;
+    const rect = vocabAudioWindow.getBoundingClientRect();
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = rect.left;
+    startTop = rect.top;
+    vocabAudioWindow.style.left = `${startLeft}px`;
+    vocabAudioWindow.style.top = `${startTop}px`;
+    vocabAudioWindow.style.right = "auto";
+    vocabAudioWindow.style.bottom = "auto";
+    vawDragHandle.classList.add("vaw-dragging");
+    e.preventDefault();
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const maxLeft = Math.max(0, window.innerWidth - vocabAudioWindow.offsetWidth);
+    const maxTop = Math.max(0, window.innerHeight - vocabAudioWindow.offsetHeight);
+    const newLeft = Math.min(Math.max(0, startLeft + (e.clientX - startX)), maxLeft);
+    const newTop = Math.min(Math.max(0, startTop + (e.clientY - startY)), maxTop);
+    vocabAudioWindow.style.left = `${newLeft}px`;
+    vocabAudioWindow.style.top = `${newTop}px`;
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    vawDragHandle.classList.remove("vaw-dragging");
+    try {
+      localStorage.setItem(
+        VAW_POSITION_STORAGE,
+        JSON.stringify({ left: vocabAudioWindow.style.left, top: vocabAudioWindow.style.top })
+      );
+    } catch (err) {
+      // non-fatal
+    }
+  });
+})();
+
+// ---- Init: restore last position + on/off state ----------------------
+(function initVawPersisted() {
+  try {
+    const rawPos = localStorage.getItem(VAW_POSITION_STORAGE);
+    if (rawPos && vocabAudioWindow) {
+      const pos = JSON.parse(rawPos);
+      if (pos?.left && pos?.top) {
+        vocabAudioWindow.style.left = pos.left;
+        vocabAudioWindow.style.top = pos.top;
+        vocabAudioWindow.style.right = "auto";
+        vocabAudioWindow.style.bottom = "auto";
+      }
+    }
+  } catch (err) {
+    // non-fatal — falls back to the CSS default position
+  }
+  let savedActive = false;
+  try {
+    savedActive = localStorage.getItem(AUDIO_WINDOW_ACTIVE_STORAGE) === "true";
+  } catch (err) {
+    savedActive = false;
+  }
+  setAudioWindowActive(savedActive);
+})();
+
+/* =========================================================================
    CUSTOMIZABLE KEYBOARD SHORTCUT SYSTEM
    ---------------------------------------------------------------------
    A single source of truth (SHORTCUT_FIELDS + shortcutConfig) drives:
@@ -7165,26 +7830,44 @@ window.addEventListener("message", (event) => {
   // the Pass-Through Modifier button in the sidebar and press any key —
   // CapsLock, Tab, ContextMenu, Alt, a letter, whatever — to use that
   // instead.
+  // ---- Shortcut value shape --------------------------------------------
+  // Every field below (except passThroughModifier, which stays a single
+  // bare code) holds an ARRAY of 1 or 2 KeyboardEvent.code strings:
+  //   ["BracketLeft"]              -> fires on that single key
+  //   ["PageDown", "BracketRight"] -> fires only while BOTH are held down
+  //                                   at the same time (a two-key chord)
+  // The sidebar's click-to-record UI (see startRecording() below) is what
+  // lets a person choose either shape for any field — hold one key and
+  // release it for a single-key binding, or hold a second key down before
+  // releasing either one to capture a simultaneous two-key combo instead.
   const DEFAULT_SHORTCUTS = {
     passThroughModifier: "Shift",
 
-    defUp: "ArrowUp",
-    defDown: "ArrowDown",
-    imgLeft: "ArrowLeft",
-    imgRight: "ArrowRight",
-    selectItem: "Space",
+    defUp: ["ArrowUp"],
+    defDown: ["ArrowDown"],
+    imgLeft: ["ArrowLeft"],
+    imgRight: ["ArrowRight"],
+    selectItem: ["Space"],
 
-    focusGeminiTab: "F7",
-    focusAppTab: "F8",
+    focusGeminiTab: ["F7"],
+    focusAppTab: ["F8"],
 
-    // Focus mappings — jump straight into the Word / Page bars.
-    focusWordInput: "Backslash",
-    focusPageInput: "Slash",
+    // Focus mappings — jump straight into the Word / Page bars. Only
+    // "From Page" had a dedicated binding before; "To Page" (the other
+    // half of Dual-Bar Mode) is mapped the same way now.
+    focusWordInput: ["Backslash"],
+    focusPageInput: ["Slash"],
+    focusToPageInput: ["Comma"],
+
+    // Toggles Dual-Bar Mode <-> Single-Bar Mode for the Page section —
+    // same key mapped both ways, matching how every other toggle-style
+    // action in this file is a single binding.
+    togglePageBarMode: ["F5"],
 
     // Word Bar inline cursor navigation — only acts while the Word
     // Input Bar itself is actively focused (see the dispatcher below).
-    wordCursorLeft: "Minus",
-    wordCursorRight: "Equal",
+    wordCursorLeft: ["Minus"],
+    wordCursorRight: ["Equal"],
 
     // Multi-key Page Calculation (simultaneous press) — Increment/
     // Decrement Page Number aren't separate bindings of their own; they
@@ -7192,20 +7875,34 @@ window.addEventListener("message", (event) => {
     // wordCursorRight/wordCursorLeft (default: '/' + '=' to increment,
     // '/' + '-' to decrement). Rebinding either of those three keys
     // above automatically updates which physical keys the chord needs.
+    // (This is a separate, derived composite feature — distinct from
+    // the general per-field two-key chord support described above.)
 
-    playUs: "BracketLeft",
-    playUk: "BracketRight",
+    playUs: ["BracketLeft"],
+    playUk: ["BracketRight"],
 
-    toggleSettings: "F1",
-    quickSearch: "F3",
-    advancedPanel: "F6",
-    manualBackup: "F9",
+    toggleSettings: ["F1"],
+    quickSearch: ["F3"],
+    advancedPanel: ["F6"],
+    manualBackup: ["F9"],
 
-    searchGemini: "Quote",
-    fetchAi: "F2",
-    addEntry: "Enter",
-    addManualDefinition: "Semicolon",
-    addManualImage: "F4",
+    searchGemini: ["Quote"],
+    fetchAi: ["F2"],
+    addEntry: ["Enter"],
+    addManualDefinition: ["Semicolon"],
+    addManualImage: ["F4"],
+
+    // 🎧 Vocabulary Audio Window — only fire while the master toggle
+    // (isAudioWindowActive) is on, and only outside text-entry fields;
+    // see the dispatcher cases below. The four pronunciation/navigation
+    // actions default to genuine two-key chords built on Page Down, so
+    // they never collide with a single bracket/arrow press used
+    // elsewhere in the app.
+    audioTrigger: ["PageDown", "BracketLeft"], // Page Down + [ -> US pronunciation
+    audioTriggerUk: ["PageDown", "BracketRight"], // Page Down + ] -> UK pronunciation
+    audioCyclePrev: ["PageDown", "ArrowLeft"], // Page Down + ← -> previous word
+    audioCycleNext: ["PageDown", "ArrowRight"], // Page Down + → -> next word
+    vawDelete: ["Delete"], // remove the word loaded in the window from the Audio Window only
   };
 
   // Rendering metadata for the sidebar — order here is display order.
@@ -7234,9 +7931,17 @@ window.addEventListener("message", (event) => {
     { key: "focusAppTab", label: "Return to App Tab", group: "Extension / Tabs" },
 
     { key: "focusWordInput", label: "Focus Word Input Bar", group: "Focus & Cursor" },
-    { key: "focusPageInput", label: "Focus Page Input Bar", group: "Focus & Cursor" },
+    { key: "focusPageInput", label: "Focus Page Input Bar (From Page)", group: "Focus & Cursor" },
+    { key: "focusToPageInput", label: "Focus To Page Input Bar", group: "Focus & Cursor" },
+    { key: "togglePageBarMode", label: "Toggle Page Bar Layout (Single/Dual)", group: "Focus & Cursor" },
     { key: "wordCursorLeft", label: "Move Cursor Left in Word Bar", group: "Focus & Cursor" },
     { key: "wordCursorRight", label: "Move Cursor Right in Word Bar", group: "Focus & Cursor" },
+
+    { key: "audioTrigger", label: "🎧 Play/Replay Pronunciation — US (Audio Window)", group: "Vocabulary Audio Window" },
+    { key: "audioTriggerUk", label: "🎧 Play/Replay Pronunciation — UK (Audio Window)", group: "Vocabulary Audio Window" },
+    { key: "audioCyclePrev", label: "🎧 Cycle Word Backward (Audio Window)", group: "Vocabulary Audio Window" },
+    { key: "audioCycleNext", label: "🎧 Cycle Word Forward (Audio Window)", group: "Vocabulary Audio Window" },
+    { key: "vawDelete", label: "🎧 Remove Current Word from Audio Window", group: "Vocabulary Audio Window" },
   ];
 
   // The Pass-Through Modifier can be set to literally any key (see
@@ -7259,6 +7964,8 @@ window.addEventListener("message", (event) => {
     Enter: "Enter ⏎",
     Quote: "'",
     Semicolon: ";",
+    Comma: ",",
+    Period: ".",
     BracketLeft: "[",
     BracketRight: "]",
     Escape: "Esc",
@@ -7269,6 +7976,12 @@ window.addEventListener("message", (event) => {
     CapsLock: "Caps Lock",
     Tab: "Tab ⇥",
     ContextMenu: "Menu ☰",
+    PageDown: "Page Down",
+    PageUp: "Page Up",
+    Delete: "Delete ⌫",
+    Backspace: "Backspace ⌫",
+    Home: "Home",
+    End: "End",
   };
   function labelForCode(code) {
     if (!code) return "— unbound —";
@@ -7278,28 +7991,84 @@ window.addEventListener("message", (event) => {
     if (/^Digit[0-9]$/.test(code)) return code.slice(5);
     return code;
   }
+  // A field's value is an array of 1 or 2 codes — this renders either
+  // shape ("X" or "X + Y") for the sidebar buttons and title hints.
+  function labelForCodes(codes) {
+    if (!Array.isArray(codes) || codes.length === 0) return "— unbound —";
+    return codes.map(labelForCode).join(" + ");
+  }
+  // Order-independent equality for two code arrays — used both to detect
+  // clashes between fields and to compare a freshly-recorded combo
+  // against what's already assigned elsewhere.
+  function codesEqual(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    const sortedA = [...a].sort();
+    const sortedB = [...b].sort();
+    return sortedA.every((c, i) => c === sortedB[i]);
+  }
 
   // ---- Load / persist config ------------------------------------------
+  // Normalizes whatever shape a saved value happens to be in — a bare
+  // string (the old, pre-chord-support format), an array, or missing
+  // entirely — into the current "array of 1-2 codes" shape, so upgrading
+  // from an older saved config never breaks.
+  function normalizeCodes(value) {
+    if (!value) return [];
+    if (typeof value === "string") return [value];
+    if (Array.isArray(value)) return value.filter(Boolean).slice(0, 2);
+    return [];
+  }
+
+  // Deep-enough clone (arrays are per-field, never nested further) so
+  // mutating one config's fields never reaches back into the shared
+  // DEFAULT_SHORTCUTS arrays.
+  function cloneDefaultShortcuts() {
+    const clone = {};
+    Object.keys(DEFAULT_SHORTCUTS).forEach((k) => {
+      clone[k] = Array.isArray(DEFAULT_SHORTCUTS[k]) ? [...DEFAULT_SHORTCUTS[k]] : DEFAULT_SHORTCUTS[k];
+    });
+    return clone;
+  }
+
   function loadConfig() {
+    let saved = {};
     try {
       const raw = localStorage.getItem(SHORTCUT_STORAGE_KEY);
-      const saved = raw ? JSON.parse(raw) : {};
-      const merged = { ...DEFAULT_SHORTCUTS, ...saved };
-      return merged;
+      saved = raw ? JSON.parse(raw) : {};
     } catch (err) {
       console.warn("[Shortcuts] Couldn't read saved shortcut config — using defaults.", err);
-      return { ...DEFAULT_SHORTCUTS };
+      saved = {};
     }
+    const merged = cloneDefaultShortcuts();
+    Object.keys(saved).forEach((k) => {
+      if (k === "passThroughModifier") {
+        if (saved[k]) merged.passThroughModifier = saved[k];
+        return;
+      }
+      merged[k] = normalizeCodes(saved[k]);
+    });
+    return merged;
   }
 
   let shortcutConfig = loadConfig();
-  let codeToAction = {};
+  // Built by rebuildCodeToAction(): singleKeyActions maps a lone code
+  // straight to its action key; chordActions holds every two-key-combo
+  // field as { action, keys: [a, b] } for the dispatcher's chord loop.
+  let singleKeyActions = {};
+  let chordActions = [];
 
   function rebuildCodeToAction() {
-    codeToAction = {};
+    singleKeyActions = {};
+    chordActions = [];
     Object.keys(shortcutConfig).forEach((k) => {
       if (k === "passThroughModifier") return;
-      if (shortcutConfig[k]) codeToAction[shortcutConfig[k]] = k;
+      const codes = shortcutConfig[k];
+      if (!Array.isArray(codes) || codes.length === 0) return;
+      if (codes.length === 1) {
+        singleKeyActions[codes[0]] = k;
+      } else {
+        chordActions.push({ action: k, keys: codes });
+      }
     });
   }
 
@@ -7315,11 +8084,14 @@ window.addEventListener("message", (event) => {
   // sitting on the Gemini tab itself — see background.js / bridge-app.js
   // for the relay, and content-gemini.js for where it's consumed.
   function syncTabSwitchKeysToExtension() {
+    // These two fields are expected to stay single-key bindings for the
+    // extension bridge to make sense; if someone rebinds either to a
+    // two-key chord, only the first key is relayed.
     window.postMessage(
       {
         type: "SYNC_SHORTCUT_KEYS",
-        focusGeminiKey: shortcutConfig.focusGeminiTab,
-        focusAppKey: shortcutConfig.focusAppTab,
+        focusGeminiKey: shortcutConfig.focusGeminiTab?.[0] || null,
+        focusAppKey: shortcutConfig.focusAppTab?.[0] || null,
       },
       window.location.origin
     );
@@ -7363,11 +8135,19 @@ window.addEventListener("message", (event) => {
 
   let recordingBtn = null;
   let recordingKey = null;
+  let recordingCleanup = null; // detaches the in-progress capture's own listeners
 
   function cancelRecording() {
+    if (recordingCleanup) {
+      recordingCleanup();
+      recordingCleanup = null;
+    }
     if (recordingBtn) {
       recordingBtn.classList.remove("listening");
-      recordingBtn.textContent = labelForCode(shortcutConfig[recordingKey]);
+      recordingBtn.textContent =
+        recordingKey === "passThroughModifier"
+          ? labelForCode(shortcutConfig.passThroughModifier)
+          : labelForCodes(shortcutConfig[recordingKey]);
     }
     recordingBtn = null;
     recordingKey = null;
@@ -7375,10 +8155,10 @@ window.addEventListener("message", (event) => {
 
   // Physical modifier-only key codes and the family name each normalizes
   // to. Regular shortcut fields still reject these outright (a bare
-  // Shift/Alt/Control/Meta press makes no sense as a standalone
-  // "trigger this action" binding) — but the Pass-Through Modifier field
-  // uses this map to fold ShiftLeft/ShiftRight into plain "Shift" and so
-  // on, so either physical key works no matter which one gets pressed.
+  // Shift/Alt/Control/Meta press makes no sense as part of a "trigger
+  // this action" binding) — but the Pass-Through Modifier field uses
+  // this map to fold ShiftLeft/ShiftRight into plain "Shift" and so on,
+  // so either physical key works no matter which one gets pressed.
   const MODIFIER_CODES = new Set([
     "AltLeft", "AltRight", "ControlLeft", "ControlRight",
     "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight",
@@ -7390,6 +8170,12 @@ window.addEventListener("message", (event) => {
     MetaLeft: "Meta", MetaRight: "Meta",
   };
 
+  // Click-to-record, chord-capable: press one key and release it for a
+  // single-key binding, or — while still holding it — press a second key
+  // to build a simultaneous two-key combo, then release either key to
+  // confirm. Recording finalizes the instant the first held key of the
+  // in-progress capture is released, using whatever 1-2 codes were
+  // pressed down together up to that point.
   function startRecording(btn, key) {
     cancelRecording();
     recordingBtn = btn;
@@ -7398,82 +8184,129 @@ window.addEventListener("message", (event) => {
     btn.textContent = "Press a key…";
 
     // The Pass-Through Modifier isn't a "press this to trigger an
-    // action" binding like every other field — it's whatever key you
-    // hold down, so it's allowed to be literally anything, including
-    // Shift/Alt/Control/Meta themselves.
+    // action" binding like every other field — it's whatever single key
+    // you hold down, so it's allowed to be literally anything, including
+    // Shift/Alt/Control/Meta themselves, and never forms a two-key combo
+    // of its own.
     const isPassThroughField = key === "passThroughModifier";
+    const pendingKeys = [];
+    let pendingKeyChar = null; // pass-through only: the actual e.key for the captured code
 
-    // Capture phase + {once:true} so this fires (and fully swallows the
-    // event via stopPropagation) before the global dispatcher below —
-    // and before anything else on the page — ever sees the keystroke.
-    window.addEventListener(
-      "keydown",
-      (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+    function cleanup() {
+      window.removeEventListener("keydown", onKeyDown, { capture: true });
+      window.removeEventListener("keyup", onKeyUp, { capture: true });
+    }
 
-        if (e.code === "Escape") {
-          cancelRecording();
-          return;
-        }
-        if (!isPassThroughField && MODIFIER_CODES.has(e.code)) {
-          cancelRecording();
-          alert("That's a modifier key — it can only be set as the Pass-Through Modifier, not a standalone shortcut.");
-          return;
-        }
-
-        const newCode = isPassThroughField && NATIVE_MODIFIER_FAMILY[e.code]
-          ? NATIVE_MODIFIER_FAMILY[e.code]
-          : e.code;
-
-        if (isPassThroughField) {
-          // A held modifier isn't a single-press shortcut, so it doesn't
-          // go through the clash check below — but if the chosen key
-          // normally types a visible character (a letter, digit, Space,
-          // punctuation...), holding it alone will stop it from typing
-          // that character anywhere else in the app, so confirm first
-          // instead of silently surprising you later.
-          if (e.key.length === 1) {
-            const proceed = confirm(
-              `"${labelForCode(newCode)}" normally types a character. Using it as your Pass-Through Modifier means holding it by itself will stop it from typing that character anywhere in the app. Continue?`
-            );
-            if (!proceed) {
-              cancelRecording();
-              return;
-            }
-          }
-          shortcutConfig.passThroughModifier = newCode;
-          saveConfig();
-          cancelRecording();
-          renderSidebarRows();
-          applyShortcutTitles();
-          return;
-        }
-
-        const clashKey = Object.keys(shortcutConfig).find(
-          (k) => k !== "passThroughModifier" && k !== key && shortcutConfig[k] === newCode
+    function finalizePassThrough() {
+      const newCode = pendingKeys[0];
+      // A held modifier isn't a single-press shortcut, so it doesn't go
+      // through the clash check below — but if the chosen key normally
+      // types a visible character (a letter, digit, Space, punctuation
+      // ...), holding it alone will stop it from typing that character
+      // anywhere else in the app, so confirm first instead of silently
+      // surprising you later.
+      if (pendingKeyChar && pendingKeyChar.length === 1) {
+        const proceed = confirm(
+          `"${labelForCode(newCode)}" normally types a character. Using it as your Pass-Through Modifier means holding it by itself will stop it from typing that character anywhere in the app. Continue?`
         );
-        if (clashKey) {
-          const clashField = SHORTCUT_FIELDS.find((f) => f.key === clashKey);
-          const proceed = confirm(
-            `"${labelForCode(newCode)}" is already used for "${clashField ? clashField.label : clashKey}". ` +
-              `Assign it here anyway? (That other shortcut will become unbound.)`
-          );
-          if (!proceed) {
-            cancelRecording();
-            return;
-          }
-          shortcutConfig[clashKey] = null;
+        if (!proceed) {
+          cancelRecording();
+          return;
         }
+      }
+      shortcutConfig.passThroughModifier = newCode;
+      saveConfig();
+      cancelRecording();
+      renderSidebarRows();
+      applyShortcutTitles();
+    }
 
-        shortcutConfig[key] = newCode;
-        saveConfig();
+    function finalizeChord() {
+      const newCodes = pendingKeys.slice(0, 2);
+      const clashField = SHORTCUT_FIELDS.find(
+        (f) => f.key !== key && codesEqual(shortcutConfig[f.key], newCodes)
+      );
+      if (clashField) {
+        const proceed = confirm(
+          `"${labelForCodes(newCodes)}" is already used for "${clashField.label}". ` +
+            `Assign it here anyway? (That other shortcut will become unbound.)`
+        );
+        if (!proceed) {
+          cancelRecording();
+          return;
+        }
+        shortcutConfig[clashField.key] = [];
+      }
+
+      shortcutConfig[key] = newCodes;
+      saveConfig();
+      cancelRecording();
+      renderSidebarRows();
+      applyShortcutTitles();
+    }
+
+    function finalize() {
+      cleanup();
+      recordingCleanup = null;
+      if (pendingKeys.length === 0) {
         cancelRecording();
-        renderSidebarRows();
-        applyShortcutTitles();
-      },
-      { capture: true, once: true }
-    );
+        return;
+      }
+      if (isPassThroughField) finalizePassThrough();
+      else finalizeChord();
+    }
+
+    function onKeyDown(e) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.code === "Escape") {
+        cleanup();
+        recordingCleanup = null;
+        cancelRecording();
+        return;
+      }
+      if (!isPassThroughField && MODIFIER_CODES.has(e.code)) {
+        cleanup();
+        recordingCleanup = null;
+        cancelRecording();
+        alert("That's a modifier key — it can only be set as the Pass-Through Modifier, not part of a standalone shortcut.");
+        return;
+      }
+
+      const code = isPassThroughField && NATIVE_MODIFIER_FAMILY[e.code] ? NATIVE_MODIFIER_FAMILY[e.code] : e.code;
+
+      if (isPassThroughField) {
+        // Only ever a single key — capture it and finalize right away
+        // rather than waiting for a second keypress or a release.
+        if (pendingKeys.length === 0) {
+          pendingKeys.push(code);
+          pendingKeyChar = e.key;
+        }
+        finalize();
+        return;
+      }
+
+      if (pendingKeys.includes(code)) return; // key-repeat while held; ignore
+      if (pendingKeys.length < 2) {
+        pendingKeys.push(code);
+        btn.textContent = pendingKeys.length === 1 ? `${labelForCode(code)} …` : labelForCodes(pendingKeys);
+      }
+    }
+
+    function onKeyUp(e) {
+      if (isPassThroughField) return; // already finalized on keydown above
+      const code = e.code;
+      if (!pendingKeys.includes(code)) return;
+      finalize();
+    }
+
+    // Capture phase so this fires (and fully swallows the event via
+    // stopPropagation) before the global dispatcher below — and before
+    // anything else on the page — ever sees the keystroke.
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    window.addEventListener("keyup", onKeyUp, { capture: true });
+    recordingCleanup = cleanup;
   }
 
   function renderSidebarRows() {
@@ -7493,12 +8326,12 @@ window.addEventListener("message", (event) => {
         html += `<div class="shortcut-group-title">${escapeHtml(field.group)}</div>`;
         lastGroup = field.group;
       }
-      const code = shortcutConfig[field.key];
+      const codes = shortcutConfig[field.key];
       html += `
         <div class="shortcut-row">
           <span class="shortcut-row-label">${escapeHtml(field.label)}</span>
           <button type="button" class="shortcut-key-input" data-shortcut-key="${field.key}">${escapeHtml(
-        labelForCode(code)
+        labelForCodes(codes)
       )}</button>
         </div>`;
     });
@@ -7513,21 +8346,24 @@ window.addEventListener("message", (event) => {
     // display (and the actual chord the dispatcher listens for)
     // automatically the next time the sidebar re-renders.
     const chordSection = document.createElement("div");
+    const pageCalcKey = shortcutConfig.focusPageInput?.[0];
+    const incKeyDisplay = shortcutConfig.wordCursorRight?.[0];
+    const decKeyDisplay = shortcutConfig.wordCursorLeft?.[0];
     chordSection.innerHTML = `
       <div class="shortcut-group-title">Multi-Key Page Calculation (Simultaneous Press)</div>
       <div class="shortcut-row">
         <span class="shortcut-row-label">Increment Page Number</span>
-        <span class="shortcut-key-display">${escapeHtml(labelForCode(shortcutConfig.focusPageInput))} + ${escapeHtml(
-      labelForCode(shortcutConfig.wordCursorRight)
+        <span class="shortcut-key-display">${escapeHtml(labelForCode(pageCalcKey))} + ${escapeHtml(
+      labelForCode(incKeyDisplay)
     )}</span>
       </div>
       <div class="shortcut-row">
         <span class="shortcut-row-label">Decrement Page Number</span>
-        <span class="shortcut-key-display">${escapeHtml(labelForCode(shortcutConfig.focusPageInput))} + ${escapeHtml(
-      labelForCode(shortcutConfig.wordCursorLeft)
+        <span class="shortcut-key-display">${escapeHtml(labelForCode(pageCalcKey))} + ${escapeHtml(
+      labelForCode(decKeyDisplay)
     )}</span>
       </div>
-      <p class="shortcut-row-hint">Hold both keys of a pair down together — these aren't separately rebindable, they follow whatever "Focus Page Input Bar" / "Move Cursor Left/Right in Word Bar" are set to above.</p>
+      <p class="shortcut-row-hint">Hold both keys of a pair down together — these aren't separately rebindable, they follow whatever "Focus Page Input Bar" / "Move Cursor Left/Right in Word Bar" are set to above (their first key, if either has been rebound to a two-key combo of its own).</p>
     `;
     shortcutFieldsList.appendChild(chordSection);
 
@@ -7538,7 +8374,7 @@ window.addEventListener("message", (event) => {
 
   shortcutsResetBtn?.addEventListener("click", () => {
     if (!confirm("Reset all keyboard shortcuts to their defaults?")) return;
-    shortcutConfig = { ...DEFAULT_SHORTCUTS };
+    shortcutConfig = cloneDefaultShortcuts();
     saveConfig();
     renderSidebarRows();
     applyShortcutTitles();
@@ -7578,12 +8414,17 @@ window.addEventListener("message", (event) => {
       [storageToggleBtn, "manualBackup", "Storage settings"],
       [wordInput, "focusWordInput", "Word"],
       [pageInput, "focusPageInput", "Page No."],
+      [typeof vawPlayUsBtn !== "undefined" ? vawPlayUsBtn : null, "audioTrigger", "Play US pronunciation"],
+      [typeof vawPlayUkBtn !== "undefined" ? vawPlayUkBtn : null, "audioTriggerUk", "Play UK pronunciation"],
+      [typeof vawPrevBtn !== "undefined" ? vawPrevBtn : null, "audioCyclePrev", "Previous word"],
+      [typeof vawNextBtn !== "undefined" ? vawNextBtn : null, "audioCycleNext", "Next word"],
+      [typeof vawDeleteBtn !== "undefined" ? vawDeleteBtn : null, "vawDelete", "Remove this word from the Audio Window"],
     ];
     targets.forEach(([el, key, fallback]) => {
       if (!el) return;
       const base = ensureBaseTitle(el, fallback);
-      const code = shortcutConfig[key];
-      el.title = code ? `${base} [${labelForCode(code)}]` : base;
+      const codes = shortcutConfig[key];
+      el.title = codes && codes.length ? `${base} [${labelForCodes(codes)}]` : base;
     });
   }
 
@@ -7676,6 +8517,24 @@ window.addEventListener("message", (event) => {
   }
 
   function adjustPageNumber(delta) {
+    if (!pageBarMerged) {
+      // Dual-Bar Mode: nudge From Page always; nudge To Page too (only
+      // if it already has a value — an empty/pending To Page stays
+      // blank rather than being invented here).
+      const fromRaw = pageStartInput.value.trim();
+      const fromParsed = /^\d+$/.test(fromRaw) ? parseInt(fromRaw, 10) : 0;
+      const nextFrom = Math.max(1, fromParsed + delta);
+      pageStartInput.value = String(nextFrom);
+      pageStartInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+      const toRaw = pageEndInput.value.trim();
+      if (toRaw && /^\d+$/.test(toRaw)) {
+        const nextTo = Math.max(nextFrom, parseInt(toRaw, 10) + delta);
+        pageEndInput.value = String(nextTo);
+        pageEndInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      return;
+    }
     // Range-aware: nudges both ends of a page range together (e.g.
     // "450-470" -> "451-471"), preserving the range's width. A plain
     // single page just nudges that one number, same as before.
@@ -7766,86 +8625,9 @@ window.addEventListener("message", (event) => {
   /* -----------------------------------------------------------------
      GLOBAL KEY DISPATCHER
   ----------------------------------------------------------------- */
-  document.addEventListener("keydown", (e) => {
-    if (e.isComposing) return;
-    if (recordingBtn) return; // sidebar is actively capturing a new binding
-
-    if (!e.repeat) heldKeys[e.code] = true;
-
-    // ---- Neutralize the pass-through modifier's own default action ----
-    // Non-modifier keys each have some native default action of their
-    // own on keydown — CapsLock toggles Caps Lock, Tab shifts focus,
-    // ContextMenu opens the right-click menu, a letter types itself —
-    // regardless of what's held afterward. None of that is useful while
-    // the key is just being held to unlock literal typing for the
-    // *next* keypress, so it's suppressed here. Shift/Alt/Control/Meta
-    // have no such default action of their own, so they need nothing.
-    if (
-      shortcutConfig.passThroughModifier &&
-      !NATIVE_MODIFIER_FLAGS[shortcutConfig.passThroughModifier] &&
-      e.code === shortcutConfig.passThroughModifier &&
-      !e.altKey &&
-      !e.ctrlKey &&
-      !e.shiftKey &&
-      !e.metaKey
-    ) {
-      e.preventDefault();
-    }
-
-    // ---- Multi-key chord check (Increment/Decrement Page Number) ----
-    // Checked before the pass-through-modifier gate below (a held
-    // modifier still falls through to "leave this alone", same as
-    // every single-key shortcut) and before the single-key switch, so
-    // a genuine simultaneous hold always wins over whichever key
-    // happened to be pressed first.
-    if (!e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
-      const pageKey = shortcutConfig.focusPageInput;
-      const incKey = shortcutConfig.wordCursorRight;
-      const decKey = shortcutConfig.wordCursorLeft;
-      if (pageKey && incKey && heldKeys[pageKey] && heldKeys[incKey]) {
-        e.preventDefault();
-        adjustPageNumber(1);
-        return;
-      }
-      if (pageKey && decKey && heldKeys[pageKey] && heldKeys[decKey]) {
-        e.preventDefault();
-        adjustPageNumber(-1);
-        return;
-      }
-    }
-
-    // ---- Pass-Through Modifier: type the literal character ourselves ----
-    // Holding the configured modifier while pressing a key that's bound
-    // to one of our shortcuts should type that key's own character (e.g.
-    // Space) instead of triggering the shortcut. But Control/Alt/Meta
-    // held down suppress the browser's normal character-typing action
-    // entirely — simply doing nothing here (as before) left the
-    // keystroke producing no character at all, not a passed-through one.
-    // So when this fires while a real text field has focus, insert the
-    // character ourselves.
-    if (
-      isConfiguredModifierHeld(e) &&
-      codeToAction[e.code] &&
-      e.key.length === 1 &&
-      isTextEntryElement(document.activeElement)
-    ) {
-      e.preventDefault();
-      insertLiteralCharacter(document.activeElement, e.key);
-      return;
-    }
-
-    // Any modifier held at all means "leave this alone" for everything
-    // else: if it's the configured Pass-Through Modifier but nothing
-    // above applied (not a bound key, or focus isn't in a text field),
-    // there's nothing useful to do here — the browser's own handling
-    // (or lack thereof) for that combo takes over. If it's some other
-    // combo, it might be a browser/OS shortcut we shouldn't step on
-    // either way.
-    if (e.altKey || e.ctrlKey || e.shiftKey || e.metaKey) return;
-
-    const action = codeToAction[e.code];
-    if (!action) return;
-
+  // The full set of actions, shared by both the single-key match and the
+  // generic chord match below so neither path duplicates this logic.
+  function runAction(action, e) {
     switch (action) {
       case "toggleSettings":
         e.preventDefault();
@@ -7882,7 +8664,7 @@ window.addEventListener("message", (event) => {
         // careful per-field exclusions — by the pre-existing document
         // Enter-listener earlier in this file. Only take over here once
         // the person has actually rebound Add Entry to something else.
-        if (shortcutConfig.addEntry === "Enter") return;
+        if (codesEqual(shortcutConfig.addEntry, ["Enter"])) return;
         if (!editModal.classList.contains("hidden")) return;
         e.preventDefault();
         guardedAddEntry(beginAddAttempt());
@@ -7959,8 +8741,28 @@ window.addEventListener("message", (event) => {
 
       case "focusPageInput":
         e.preventDefault();
-        pageInput.focus();
-        pageInput.select();
+        if (pageBarMerged) {
+          pageInput.focus();
+          pageInput.select();
+        } else {
+          pageStartInput.focus();
+          pageStartInput.select();
+        }
+        break;
+
+      case "focusToPageInput":
+        // Only meaningful in Dual-Bar Mode — Single-Bar Mode has no
+        // separate "To Page" input to jump to, so this is a no-op there.
+        e.preventDefault();
+        if (!pageBarMerged) {
+          pageEndInput.focus();
+          pageEndInput.select();
+        }
+        break;
+
+      case "togglePageBarMode":
+        e.preventDefault();
+        setPageBarMode(!pageBarMerged);
         break;
 
       case "wordCursorLeft":
@@ -7978,14 +8780,163 @@ window.addEventListener("message", (event) => {
         moveWordCursor(1);
         break;
 
+      // 🎧 Vocabulary Audio Window — strictly gated behind the master
+      // toggle (isAudioWindowActive). While the window is on, these are
+      // dedicated Audio Window commands: they fire no matter where the
+      // text cursor is sitting (word bar included), instead of typing
+      // themselves into whatever field has focus. To type one of these
+      // characters instead, hold the configured Pass-Through Modifier —
+      // that's handled earlier in the dispatcher (insertLiteralCharacter),
+      // before runAction is ever reached, so it still works normally.
+      // When the Audio Window is OFF, these are no-ops and every key
+      // types wherever it always has.
+      case "audioTrigger":
+        if (!isAudioWindowActive) return;
+        e.preventDefault();
+        playVawPronunciation("us");
+        break;
+
+      case "audioTriggerUk":
+        if (!isAudioWindowActive) return;
+        e.preventDefault();
+        playVawPronunciation("uk");
+        break;
+
+      case "audioCyclePrev":
+        if (!isAudioWindowActive) return;
+        e.preventDefault();
+        cycleVaw(-1);
+        break;
+
+      case "audioCycleNext":
+        if (!isAudioWindowActive) return;
+        e.preventDefault();
+        cycleVaw(1);
+        break;
+
+      case "vawDelete":
+        if (!isAudioWindowActive) return;
+        e.preventDefault();
+        deleteVawCurrentEntry();
+        break;
+
       default:
         break;
     }
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.isComposing) return;
+    if (recordingBtn) return; // sidebar is actively capturing a new binding
+
+    if (!e.repeat) heldKeys[e.code] = true;
+
+    // ---- Neutralize the pass-through modifier's own default action ----
+    // Non-modifier keys each have some native default action of their
+    // own on keydown — CapsLock toggles Caps Lock, Tab shifts focus,
+    // ContextMenu opens the right-click menu, a letter types itself —
+    // regardless of what's held afterward. None of that is useful while
+    // the key is just being held to unlock literal typing for the
+    // *next* keypress, so it's suppressed here. Shift/Alt/Control/Meta
+    // have no such default action of their own, so they need nothing.
+    if (
+      shortcutConfig.passThroughModifier &&
+      !NATIVE_MODIFIER_FLAGS[shortcutConfig.passThroughModifier] &&
+      e.code === shortcutConfig.passThroughModifier &&
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.shiftKey &&
+      !e.metaKey
+    ) {
+      e.preventDefault();
+    }
+
+    // ---- Suppress Page Down/Up's native scroll while the Audio Window
+    // is on — its default chords are built on Page Down, so without this
+    // holding it down to form a combo would otherwise scroll the page
+    // out from under you first.
+    if (isAudioWindowActive && (e.code === "PageDown" || e.code === "PageUp") && !isTextEntryElement(document.activeElement)) {
+      e.preventDefault();
+    }
+
+    if (!e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+      // ---- Multi-key chord check (Increment/Decrement Page Number) ----
+      // This is a derived composite, not an ordinary SHORTCUT_FIELDS
+      // chord entry — it fires from any two of three separate single-key
+      // fields being held together — so it's checked on its own here,
+      // ahead of the generic chord loop below, using each field's first
+      // configured key.
+      const pageKey = shortcutConfig.focusPageInput?.[0];
+      const incKey = shortcutConfig.wordCursorRight?.[0];
+      const decKey = shortcutConfig.wordCursorLeft?.[0];
+      if (pageKey && incKey && heldKeys[pageKey] && heldKeys[incKey]) {
+        e.preventDefault();
+        adjustPageNumber(1);
+        return;
+      }
+      if (pageKey && decKey && heldKeys[pageKey] && heldKeys[decKey]) {
+        e.preventDefault();
+        adjustPageNumber(-1);
+        return;
+      }
+
+      // ---- Generic two-key chord check — every ordinary SHORTCUT_FIELDS
+      // entry currently bound to a two-key combo (the default Audio
+      // Window pronunciation/navigation/delete bindings, or anything a
+      // person has rebound to a chord of their own). Checked before the
+      // pass-through-modifier gate below (a held modifier still falls
+      // through to "leave this alone", same as every single-key
+      // shortcut) and before the single-key switch, so a genuine
+      // simultaneous hold always wins over whichever key happened to be
+      // pressed first.
+      for (const { action, keys } of chordActions) {
+        const [k1, k2] = keys;
+        if (heldKeys[k1] && heldKeys[k2]) {
+          runAction(action, e);
+          return;
+        }
+      }
+    }
+
+    // ---- Pass-Through Modifier: type the literal character ourselves ----
+    // Holding the configured modifier while pressing a key that's bound
+    // to one of our shortcuts should type that key's own character (e.g.
+    // Space) instead of triggering the shortcut. But Control/Alt/Meta
+    // held down suppress the browser's normal character-typing action
+    // entirely — simply doing nothing here (as before) left the
+    // keystroke producing no character at all, not a passed-through one.
+    // So when this fires while a real text field has focus, insert the
+    // character ourselves.
+    if (
+      isConfiguredModifierHeld(e) &&
+      singleKeyActions[e.code] &&
+      e.key.length === 1 &&
+      isTextEntryElement(document.activeElement)
+    ) {
+      e.preventDefault();
+      insertLiteralCharacter(document.activeElement, e.key);
+      return;
+    }
+
+    // Any modifier held at all means "leave this alone" for everything
+    // else: if it's the configured Pass-Through Modifier but nothing
+    // above applied (not a bound key, or focus isn't in a text field),
+    // there's nothing useful to do here — the browser's own handling
+    // (or lack thereof) for that combo takes over. If it's some other
+    // combo, it might be a browser/OS shortcut we shouldn't step on
+    // either way.
+    if (e.altKey || e.ctrlKey || e.shiftKey || e.metaKey) return;
+
+    const action = singleKeyActions[e.code];
+    if (!action) return;
+
+    runAction(action, e);
   });
 
-  // Clears each key's held state the instant it's released, so the
-  // Increment/Decrement Page Number chord above only ever fires on a
-  // genuine simultaneous hold, never on a stale "was down earlier".
+  // Clears each key's held state the instant it's released, so every
+  // chord above (the derived Page-Calc one and the generic per-field
+  // ones alike) only ever fires on a genuine simultaneous hold, never on
+  // a stale "was down earlier".
   document.addEventListener("keyup", (e) => {
     heldKeys[e.code] = false;
   });

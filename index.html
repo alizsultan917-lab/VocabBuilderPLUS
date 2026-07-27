@@ -32,6 +32,12 @@
 
   <div class="header-widgets">
 
+    <div id="audio-window-widget" class="storage-widget">
+      <button type="button" id="audio-window-toggle-btn" class="storage-toggle-btn" title="Audio Window: OFF" aria-pressed="false">
+        <span class="storage-icon">🎧</span>
+      </button>
+    </div>
+
     <div id="shortcuts-widget" class="storage-widget">
       <button type="button" id="shortcuts-toggle-btn" class="storage-toggle-btn" title="Keyboard Shortcuts">
         <span class="storage-icon">⌨️</span>
@@ -44,6 +50,20 @@
       </button>
       <div id="limits-panel" class="storage-panel hidden">
         <p class="storage-status">Set how many System (dictionary/auto-search), AI-fetched, and Manual (typed/pasted) items are kept per word — each controlled independently. Set any field to 0 to turn that source off entirely.</p>
+
+        <div class="limits-group">
+          <h4 class="limits-group-title">Page Bar Layout</h4>
+          <div class="bubbly-toggle-row">
+            <div class="bubbly-toggle-label">
+              <span class="bubbly-toggle-title">Merge Page Bars into Single Bar</span>
+              <span class="bubbly-toggle-hint">On: one Page bar sets the whole range. Off: separate From Page / To Page bars — leave To Page blank to fill it in later for every pending word at once.</span>
+            </div>
+            <label class="switch" for="merge-page-bars-toggle">
+              <input type="checkbox" id="merge-page-bars-toggle" checked>
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+        </div>
 
         <div class="limits-group">
           <h4 class="limits-group-title">Definitions</h4>
@@ -288,7 +308,9 @@
     <button type="button" id="settings-sidebar-close-btn" class="icon-btn" title="Close">✕</button>
   </div>
   <p class="settings-sidebar-hint">
-    Click any key field below, then press the new key you want to assign. Hold your
+    Click any key field below, then press the new key you want to assign — or hold
+    <strong>two keys down together</strong> to map a simultaneous two-key combo instead
+    (release either key to confirm the capture). Hold your
     <strong>Pass-Through Modifier</strong> while pressing a mapped key to type its
     character literally instead of triggering the shortcut.
   </p>
@@ -313,9 +335,23 @@
               <label for="word-input">Word</label>
               <input type="text" id="word-input" required placeholder="e.g. Ephemeral">
             </div>
-            <div class="form-group form-group-narrow">
-              <label for="page-input">Page</label>
-              <input type="text" id="page-input" required inputmode="numeric" placeholder="42 or 450-470" title="A single page (42) or a page range (450-470)">
+            <div class="form-group form-group-narrow" id="page-input-wrap">
+              <div class="page-bar-group" id="page-single-group">
+                <label for="page-input">Page</label>
+                <input type="text" id="page-input" inputmode="numeric" placeholder="42 or 450-470" title="A single page (42) or a page range (450-470)">
+              </div>
+              <div class="page-bar-group hidden" id="page-dual-group">
+                <div class="page-dual-row">
+                  <div class="page-dual-field">
+                    <label for="page-start-input">From Page</label>
+                    <input type="text" id="page-start-input" inputmode="numeric" placeholder="42">
+                  </div>
+                  <div class="page-dual-field">
+                    <label for="page-end-input">To Page</label>
+                    <input type="text" id="page-end-input" inputmode="numeric" placeholder="(fill in later)" title="Leave blank to save as pending. Typing a value here and adding an entry fills it into every pending word saved so far.">
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -348,6 +384,7 @@
             </button>
           </div>
           <span id="ai-fetch-status" class="ai-fetch-status hidden"></span>
+          <span id="vaw-pending-tag" class="tag tag-manual hidden" title="This word will also be saved into the 🎧 Audio Window when you click Add Entry">🎧 Will also save to Audio Window</span>
 
           <!-- Book title lives here, right beside the action buttons -->
           <div class="form-group">
@@ -532,6 +569,60 @@
     <div class="modal-actions">
       <button id="cancel-edit-btn" class="btn btn-secondary" type="button">Cancel</button>
       <button id="save-edit-btn" class="btn btn-primary" type="button">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- TO PAGE AUTO-FILL CONFIRM MODAL -->
+<div id="topage-confirm-modal" class="modal hidden">
+  <div class="modal-content modal-content-compact">
+    <h3>Fill Pending Entries?</h3>
+    <p class="confirm-prompt-text" id="topage-confirm-text">Do you want to fill the pending entries with this To Page value?</p>
+    <div class="modal-actions">
+      <button id="topage-confirm-cancel-btn" class="btn btn-secondary" type="button">Cancel</button>
+      <button id="topage-confirm-ok-btn" class="btn btn-primary" type="button">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- 🎧 FLOATING VOCABULARY AUDIO WINDOW — detachable mini-player for
+     cycling through saved words and replaying their pronunciation.
+     Entirely gated behind the "Audio Window" master toggle in the
+     header (#audio-window-toggle-btn) — see the "FLOATING VOCABULARY
+     AUDIO WINDOW" block near the end of script.js. Hidden by default;
+     when the master toggle is OFF this stays hidden and inert no
+     matter what else happens on the page. Position is draggable via
+     the header bar once open (see #vaw-drag-handle). -->
+<div id="vocab-audio-window" class="vocab-audio-window hidden" aria-hidden="true">
+  <div class="vaw-header" id="vaw-drag-handle" title="Drag to move">
+    <span class="vaw-drag-grip" aria-hidden="true">⠿</span>
+    <div class="vaw-header-main">
+      <span id="vaw-word" class="vaw-word">—</span>
+      <span id="vaw-position" class="vaw-position"></span>
+    </div>
+    <div class="vaw-header-actions">
+      <button type="button" id="vaw-hotkeys-btn" class="icon-btn" title="Configure hotkeys">⌨️</button>
+      <button type="button" id="vaw-close-btn" class="icon-btn" title="Close audio window">✕</button>
+    </div>
+  </div>
+
+  <div class="vaw-body">
+    <div class="vaw-pron-row">
+      <button type="button" id="vaw-play-us-btn" class="icon-btn pron-play-btn" title="Play American pronunciation">US 🔊</button>
+      <button type="button" id="vaw-play-uk-btn" class="icon-btn pron-play-btn" title="Play British pronunciation">UK 🔊</button>
+    </div>
+
+    <div id="vaw-definitions" class="vaw-definitions scroll-panel">
+      <p class="vaw-empty-state">Double-click any word's definitions in the table below to load it here.</p>
+    </div>
+
+    <div class="vaw-cycle-row">
+      <button type="button" id="vaw-prev-btn" class="btn btn-secondary btn-small" title="Previous word">◀ Prev</button>
+      <button type="button" id="vaw-next-btn" class="btn btn-secondary btn-small" title="Next word">Next ▶</button>
+    </div>
+
+    <div class="vaw-delete-row">
+      <button type="button" id="vaw-delete-btn" class="btn btn-danger btn-small" title="Remove this word from the Audio Window only (keeps it in your register)">🗑️ Remove from Window</button>
     </div>
   </div>
 </div>
