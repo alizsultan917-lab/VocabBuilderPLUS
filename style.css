@@ -267,6 +267,54 @@ h1, h2, h3 {
   transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0s;
 }
 
+/* ---------- Audio window: opaque but themed to the wallpaper ------------
+   This floating player should stay a fully solid, always-legible panel
+   — unlike the cards/panels elsewhere it never goes see-through — but a
+   fixed off-white block looks pasted-on once a wallpaper is set and the
+   rest of the interface starts picking up its mood. Rather than hard-
+   coding a color here, this reuses the --accent-color-* family Smart
+   Color-Extraction already writes to :root (see applySmartAccentColors()
+   in script.js): when that toggle is on, the window's tint tracks the
+   wallpaper's own dominant hue; when it's off, those variables default
+   back to the app's normal blue palette, so it still looks intentional
+   rather than blank. [data-wallpaper-tone] — written by
+   applyWallpaperTone() in wallpaper-tone-contrast.js — picks which end
+   of that ramp (pale vs. deep) stays legible against that kind of
+   photo, same idea as the light/dark text switch above. */
+html[data-wallpaper-tone="light"] body.has-wallpaper .vocab-audio-window {
+  background: var(--accent-color-pale);
+  border-color: var(--accent-color-soft);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--accent-color-deep) 30%, transparent);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html[data-wallpaper-tone="dark"] body.has-wallpaper .vocab-audio-window {
+  background: var(--accent-color-deep);
+  border-color: color-mix(in srgb, var(--accent-color-soft) 55%, white);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--accent-color-deep) 55%, black);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html[data-wallpaper-tone="dark"] body.has-wallpaper .vaw-definitions,
+html[data-wallpaper-tone="dark"] body.has-wallpaper .vaw-def-list li,
+html[data-wallpaper-tone="dark"] body.has-wallpaper .vaw-body .icon-btn {
+  color: var(--on-wallpaper-text, #f5f8fb);
+}
+
+html[data-wallpaper-tone="dark"] body.has-wallpaper .vaw-empty-state {
+  color: var(--on-wallpaper-text-soft, rgba(245, 248, 251, 0.78));
+}
+
+/* Header strip: same reasoning as the body above — swap the fixed blue
+   gradient for the accent-color family once a wallpaper is set, so the
+   whole window (not just the body panel) reads as one themed piece
+   rather than a themed body under an unrelated blue header. */
+body.has-wallpaper .vaw-header {
+  background: linear-gradient(135deg, var(--accent-color-deep), var(--accent-color) 65%, var(--accent-color-soft));
+}
+
 .vaw-header {
   display: flex;
   align-items: center;
@@ -309,7 +357,7 @@ h1, h2, h3 {
 
 .vaw-position {
   font-size: 0.7rem;
-  color: #cfe1f3;
+  color: var(--accent-color-pale);
   white-space: nowrap;
 }
 
@@ -388,6 +436,39 @@ h1, h2, h3 {
 
 .vaw-delete-row .btn {
   flex: 1;
+}
+
+/* ---------- Audio window body controls: track the active accent ---------
+   .icon-btn/.btn-secondary normally hardcode the app's fixed --border/
+   --blue-pale/--blue-deep tokens rather than --accent-color-*, so on
+   their own they don't follow Smart Color-Extraction the way .btn-primary
+   already does elsewhere. Scoped to .vocab-audio-window only (not
+   applied globally) so the pron-play buttons and prev/next/cycle
+   controls pick up whichever accent is active — default blue when no
+   wallpaper is set, the extracted wallpaper accent when one is — without
+   changing .icon-btn/.btn-secondary's appearance anywhere else in the
+   app. These are self-contained pale-bg/deep-text pills, so they keep
+   their own contrast regardless of the window's own light/dark
+   background; no separate dark-tone override is needed here. The delete
+   button intentionally stays on .btn-danger's fixed --danger red rather
+   than the accent — a destructive action shouldn't recolor with the
+   wallpaper. */
+.vaw-body .icon-btn {
+  border-color: var(--accent-color-soft);
+}
+
+.vaw-body .icon-btn:hover {
+  background: var(--accent-color-pale);
+  border-color: var(--accent-color-soft);
+}
+
+.vaw-body .btn-secondary {
+  background: var(--accent-color-pale);
+  color: var(--accent-color-deep);
+}
+
+.vaw-body .btn-secondary:hover {
+  background: color-mix(in srgb, var(--accent-color-pale) 60%, var(--accent-color-soft));
 }
 
 .storage-panel {
@@ -2837,6 +2918,21 @@ body.bubbly-mode .modal-content {
   transition: background 0.2s ease, backdrop-filter 0.2s ease;
 }
 
+/* ---------- Wallpaper mode: cards go clear, not frosted -----------------
+   The rule above gives .card/.modal-content a soft frosted-glass blur,
+   which is exactly the "smear" over the wallpaper visible in the
+   screenshot — the photo behind the card gets blurred right where it
+   should read sharpest. Once a wallpaper is active, drop the blur
+   entirely and thin the white tint down further so the card reads as a
+   clear pane (still outlined by its border/shadow for shape) with the
+   wallpaper showing through crisp, instead of a foggy frosted panel. */
+body.has-wallpaper.bubbly-mode .card,
+body.has-wallpaper.bubbly-mode .modal-content {
+  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.04 + 1%), transparent);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 body.bubbly-mode .storage-panel {
   background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.16 + 3%), transparent);
   backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2));
@@ -2848,6 +2944,34 @@ body.bubbly-mode .storage-panel {
     inset 0 -12px 22px -16px var(--bubble-ring-dark),
     0 16px 34px rgba(22, 63, 99, 0.2);
   transition: background 0.2s ease, backdrop-filter 0.2s ease;
+}
+
+/* Pronunciation panel: was a hard-coded near-white block (#fbfdff) that
+   never joined the bubbly-mode glass system at all, so once the
+   surrounding .card went see-through over a wallpaper it read as a
+   pasted-on white sticker. Same glass language as .storage-panel, just
+   kept at its original smaller radius since it's a compact nested
+   panel, not a top-level card. */
+body.bubbly-mode .pronunciation-panel {
+  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.16 + 3%), transparent);
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2));
+  border-color: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.7 + 20%), transparent);
+  box-shadow:
+    inset 0 1px 0 var(--bubble-ring-bright),
+    inset 0 -8px 16px -12px var(--bubble-ring-dark);
+  transition: background 0.2s ease, backdrop-filter 0.2s ease, border-color 0.2s ease;
+}
+
+/* Once a wallpaper is active, drop its blur too (same reasoning as the
+   .card override above) and thin the tint further so it reads as clear
+   glass with an adaptive border, rather than a frosted rectangle sitting
+   in the middle of an otherwise-clear card. */
+body.has-wallpaper.bubbly-mode .pronunciation-panel {
+  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.05 + 1%), transparent);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-color: color-mix(in srgb, #fff calc(var(--wallpaper-border-alpha) * 100%), transparent);
 }
 
 /* ---------- Header keeps its own deep-blue glass gradient (needs a
@@ -2946,6 +3070,26 @@ body.bubbly-mode .btn-ai {
     linear-gradient(0deg,
       color-mix(in srgb, var(--ai) calc(var(--glass-alpha) * 0.4), transparent) 0%,
       transparent 65%);
+}
+
+/* Search Gemini: stays exactly as designed — full, opaque, colorful
+   brand gradient — right up until a wallpaper is actually uploaded.
+   No bubbly-mode-only in-between state, so turning on Liquid Interface
+   by itself doesn't wash it out; only .has-wallpaper does. Once a
+   wallpaper is present, drop to the same transparent-bubble-core
+   treatment as the other button variants, with the blue→violet→pink
+   Gemini gradient mixed in underneath at a fraction of its old
+   strength and a plain adaptive border — same "go clear" logic as the
+   cards/panels — so the wallpaper's own color shows through the button
+   rather than the button imposing an unrelated gradient over it. */
+body.has-wallpaper.bubbly-mode .btn-gemini {
+  background:
+    var(--bubble-core),
+    linear-gradient(120deg,
+      color-mix(in srgb, #4a86f7 calc(var(--glass-alpha) * 0.22), transparent) 0%,
+      color-mix(in srgb, #9168e4 calc(var(--glass-alpha) * 0.22), transparent) 55%,
+      color-mix(in srgb, #e05f9a calc(var(--glass-alpha) * 0.22), transparent) 100%);
+  border: 1px solid color-mix(in srgb, #fff calc(var(--wallpaper-border-alpha) * 100%), transparent);
 }
 
 body.bubbly-mode .icon-btn {
