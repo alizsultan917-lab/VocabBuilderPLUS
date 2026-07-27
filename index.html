@@ -240,6 +240,53 @@
           <input type="range" id="img-thumb-size-input" min="80" max="320" step="10">
         </div>
 
+        <hr class="storage-divider">
+
+        <div class="wallpaper-section">
+          <div class="bubbly-toggle-label">
+            <span class="bubbly-toggle-title">🖼️ Wallpaper</span>
+            <span class="bubbly-toggle-hint">Personalize the background behind your register</span>
+          </div>
+
+          <div class="wallpaper-preview-row">
+            <div id="wallpaper-preview" class="wallpaper-preview" aria-hidden="true"></div>
+            <div class="wallpaper-preview-actions">
+              <button type="button" id="choose-wallpaper-btn" class="btn btn-secondary btn-small">Choose Image…</button>
+              <button type="button" id="remove-wallpaper-btn" class="btn btn-secondary btn-small">Reset to Default</button>
+            </div>
+          </div>
+          <input type="file" id="wallpaper-file-input" accept="image/*" class="hidden">
+          <p id="wallpaper-status" class="storage-sync-hint">Default background — no wallpaper set.</p>
+
+          <div class="bubbly-toggle-row">
+            <div class="bubbly-toggle-label">
+              <span class="bubbly-toggle-title">🎨 Smart Color-Extraction</span>
+              <span class="bubbly-toggle-hint">Pull buttons, highlights &amp; focus borders from your wallpaper's dominant color</span>
+            </div>
+            <label class="switch" for="smart-accent-toggle">
+              <input type="checkbox" id="smart-accent-toggle">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+          <p id="smart-accent-status" class="storage-sync-hint hidden"></p>
+
+          <div class="slider-field-row">
+            <div class="slider-field-label">
+              <label for="wallpaper-dim-input">Wallpaper dimming</label>
+              <span id="wallpaper-dim-value" class="slider-value">45%</span>
+            </div>
+            <input type="range" id="wallpaper-dim-input" min="0" max="85" step="5">
+          </div>
+
+          <div class="slider-field-row">
+            <div class="slider-field-label">
+              <label for="wallpaper-blur-input">Wallpaper blur</label>
+              <span id="wallpaper-blur-value" class="slider-value">0px</span>
+            </div>
+            <input type="range" id="wallpaper-blur-input" min="0" max="20" step="1">
+          </div>
+        </div>
+
         <div class="storage-panel-actions">
           <button type="button" id="reset-display-btn" class="btn btn-secondary btn-small">Reset to Defaults</button>
         </div>

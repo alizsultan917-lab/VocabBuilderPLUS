@@ -71,6 +71,25 @@ const GLASS_BLUR_STORAGE = "litVocabGlassBlur";
 const GLASS_TINT_STORAGE = "litVocabGlassTint";
 const FISH_MODE_STORAGE = "litVocabFishMode";
 const FISH_SPECIES_STORAGE = "litVocabFishSpecies";
+// 🖼️ Wallpaper — the image itself is stored as a compressed data: URL
+// (see resizeImageForWallpaper()), separate from the dimming amount so
+// re-saving one never has to touch the other.
+const WALLPAPER_IMAGE_STORAGE = "litVocabWallpaperImage";
+const WALLPAPER_DIM_STORAGE = "litVocabWallpaperDim";
+const WALLPAPER_BLUR_STORAGE = "litVocabWallpaperBlur";
+// 🎨 Smart Color-Extraction — whether the app's accent color (buttons,
+// toggles, focus rings, progress fill) should be dynamically sampled from
+// the current wallpaper instead of using the app's default blue palette.
+const SMART_ACCENT_STORAGE = "litVocabSmartAccentEnabled";
+const DEFAULT_SMART_ACCENT = false;
+// Wallpapers are sampled at a tiny downscaled size purely to pick a
+// representative color — sampling the full-resolution stored image would
+// cost far more CPU for no better a result.
+const SMART_ACCENT_SAMPLE_SIZE = 48; // px, square canvas used for pixel sampling
+// WCAG contrast ratio the extracted accent must clear against white text
+// (buttons/switches paint white text/icons on top of the accent color),
+// matching the ratio the app's own default --blue already clears.
+const SMART_ACCENT_MIN_CONTRAST = 4.5;
 const DEFAULT_SEARCH_WIDTH = 220;   // px
 const DEFAULT_DEF_TEXT_SCALE = 100; // % (stored as whole percent, applied as a ratio)
 const DEFAULT_IMG_THUMB_SIZE = 150; // px
@@ -84,6 +103,31 @@ const DEFAULT_GLASS_TINT = 50;         // % — strength of the color tint / glo
 const DEFAULT_FISH_MODE = true;
 const FISH_SPECIES_IDS = ["clownfish", "betta", "angelfish", "guppy", "pufferfish"];
 const DEFAULT_FISH_SPECIES_PREFS = { clownfish: true, betta: true, angelfish: true, guppy: true, pufferfish: true };
+// 45% dimming keeps a busy photo from fighting with the app's own text
+// and cards by default, while still leaving it clearly recognizable.
+const DEFAULT_WALLPAPER_DIM = 45; // % — stored/shown as whole percent, applied as a 0-1 decimal
+const WALLPAPER_DIM_MIN = 0;
+const WALLPAPER_DIM_MAX = 85;
+// No blur by default — the slider lets people soften a busy photo further
+// than dimming alone can, without changing what gets stored.
+const DEFAULT_WALLPAPER_BLUR = 0; // px
+const WALLPAPER_BLUR_MIN = 0;
+const WALLPAPER_BLUR_MAX = 20;
+// Longest edge a chosen photo is downscaled to (and the JPEG quality it's
+// re-encoded at) before it's stored. Scaled up by devicePixelRatio (capped)
+// so retina/HiDPI screens get a sharper source image instead of visibly
+// upscaling a 1x-sized photo. WALLPAPER_MAX_DIMENSION_CEILING is the hard
+// cap regardless of DPR, since localStorage quota (~5-10MB total, shared
+// with every other saved preference) is the real constraint here, not the
+// screen — a 4K+ dataURL can blow past that on its own.
+const WALLPAPER_MAX_DIMENSION = 1920; // px, base (1x) target
+const WALLPAPER_MAX_DIMENSION_CEILING = 2560; // px, absolute cap even on HiDPI
+const WALLPAPER_JPEG_QUALITY = 0.9;
+// If the encoded image is still too big for localStorage at the primary
+// quality, retry at progressively lower quality/size rather than failing
+// outright — most "too large" failures are from very high-megapixel source
+// photos, not from the wallpaper feature itself being broken.
+const WALLPAPER_QUALITY_FALLBACKS = [0.9, 0.8, 0.65, 0.5];
 // Shark COLOR VARIANTS (Part 4) — distinct palettes selectable/toggleable
 // independently of shark *count* (see fish-shark-controls). Each spawned
 // shark picks one variant at random from whichever are enabled; see
@@ -323,6 +367,17 @@ const glassBlurInput = document.getElementById("glass-blur-input");
 const glassBlurValue = document.getElementById("glass-blur-value");
 const glassTintInput = document.getElementById("glass-tint-input");
 const glassTintValue = document.getElementById("glass-tint-value");
+const wallpaperPreview = document.getElementById("wallpaper-preview");
+const wallpaperStatus = document.getElementById("wallpaper-status");
+const wallpaperFileInput = document.getElementById("wallpaper-file-input");
+const chooseWallpaperBtn = document.getElementById("choose-wallpaper-btn");
+const removeWallpaperBtn = document.getElementById("remove-wallpaper-btn");
+const wallpaperDimInput = document.getElementById("wallpaper-dim-input");
+const wallpaperDimValue = document.getElementById("wallpaper-dim-value");
+const wallpaperBlurInput = document.getElementById("wallpaper-blur-input");
+const wallpaperBlurValue = document.getElementById("wallpaper-blur-value");
+const smartAccentToggle = document.getElementById("smart-accent-toggle");
+const smartAccentStatus = document.getElementById("smart-accent-status");
 const fishModeToggle = document.getElementById("fish-mode-toggle");
 const fishSpeciesControls = document.getElementById("fish-species-controls");
 const fishSpeciesCheckboxes = Array.from(
@@ -4413,6 +4468,358 @@ function applyGlassPrefs() {
   glassControls.classList.toggle("hidden", !getBubblyMode());
 }
 
+// ---- 🖼️ Wallpaper: storage + apply ------------------------------------
+// The image lives in its own localStorage key as a data: URL (already
+// downscaled/compressed by resizeImageForWallpaper() before it's ever
+// saved — see the file-input handler below), so it can be swapped or
+// cleared independently of the dimming amount.
+function getWallpaperImage() {
+  try {
+    return localStorage.getItem(WALLPAPER_IMAGE_STORAGE) || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function setWallpaperImage(dataUrl) {
+  try {
+    localStorage.setItem(WALLPAPER_IMAGE_STORAGE, dataUrl);
+    return true;
+  } catch (err) {
+    // Most likely the storage quota — the image gets compressed before
+    // this is ever called, but a very large/detailed source photo could
+    // still land here. Let the caller decide how to tell the person.
+    return false;
+  }
+}
+
+function clearWallpaperImage() {
+  try {
+    localStorage.removeItem(WALLPAPER_IMAGE_STORAGE);
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function getWallpaperDim() {
+  try {
+    return clampRange(localStorage.getItem(WALLPAPER_DIM_STORAGE), WALLPAPER_DIM_MIN, WALLPAPER_DIM_MAX, DEFAULT_WALLPAPER_DIM);
+  } catch (err) {
+    return DEFAULT_WALLPAPER_DIM;
+  }
+}
+
+function setWallpaperDim(n) {
+  try {
+    localStorage.setItem(WALLPAPER_DIM_STORAGE, String(clampRange(n, WALLPAPER_DIM_MIN, WALLPAPER_DIM_MAX, DEFAULT_WALLPAPER_DIM)));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function getWallpaperBlur() {
+  try {
+    return clampRange(localStorage.getItem(WALLPAPER_BLUR_STORAGE), WALLPAPER_BLUR_MIN, WALLPAPER_BLUR_MAX, DEFAULT_WALLPAPER_BLUR);
+  } catch (err) {
+    return DEFAULT_WALLPAPER_BLUR;
+  }
+}
+
+function setWallpaperBlur(n) {
+  try {
+    localStorage.setItem(WALLPAPER_BLUR_STORAGE, String(clampRange(n, WALLPAPER_BLUR_MIN, WALLPAPER_BLUR_MAX, DEFAULT_WALLPAPER_BLUR)));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+// Downscales/re-encodes a chosen photo client-side, entirely in-browser,
+// before it's ever written to localStorage — a straight-from-camera photo
+// can be many megabytes, which would either blow past the quota outright
+// or make every page load noticeably slower for no visible benefit at
+// normal screen sizes. Flattens onto white first so a transparent PNG
+// doesn't turn into a black wallpaper once re-encoded as opaque JPEG.
+// `quality` is exposed separately from the max-dimension calculation so
+// callers can retry at a lower quality without re-reading/re-decoding the
+// source file each time.
+function resizeImageForWallpaper(file, quality = WALLPAPER_JPEG_QUALITY) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Couldn't read that file."));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("That doesn't look like a valid image."));
+      img.onload = () => {
+        const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+        const targetMax = Math.min(WALLPAPER_MAX_DIMENSION_CEILING, Math.round(WALLPAPER_MAX_DIMENSION * dpr));
+        const scale = Math.min(1, targetMax / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.max(1, Math.round(img.naturalWidth * scale));
+        const h = Math.max(1, Math.round(img.naturalHeight * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// Encodes a chosen photo and saves it, walking down WALLPAPER_QUALITY_FALLBACKS
+// if a given encode is too large for localStorage's quota. Returns true once
+// something saves successfully, false if even the lowest fallback doesn't fit.
+async function resizeAndSaveWallpaper(file) {
+  for (const quality of WALLPAPER_QUALITY_FALLBACKS) {
+    const dataUrl = await resizeImageForWallpaper(file, quality);
+    if (setWallpaperImage(dataUrl)) return true;
+  }
+  return false;
+}
+
+function applyWallpaperPrefs() {
+  const root = document.documentElement.style;
+  const image = getWallpaperImage();
+  root.setProperty("--wallpaper-dim", String(getWallpaperDim() / 100));
+  root.setProperty("--wallpaper-blur", `${getWallpaperBlur()}px`);
+  root.setProperty("--wallpaper-image", image ? `url("${image}")` : "none");
+  document.body.classList.toggle("has-wallpaper", !!image);
+  if (wallpaperPreview) wallpaperPreview.style.backgroundImage = image ? `url("${image}")` : "none";
+  if (removeWallpaperBtn) removeWallpaperBtn.disabled = !image;
+  if (wallpaperStatus) {
+    wallpaperStatus.textContent = image
+      ? "Custom wallpaper active."
+      : "Default background — no wallpaper set.";
+  }
+}
+
+// ---- 🎨 Smart Color-Extraction: storage + apply -------------------------
+// When enabled, the app's accent color (buttons, toggle switches, focus
+// rings, range/progress fill) is sampled live from the current wallpaper
+// instead of using the app's default blue. When disabled — or whenever
+// there's no wallpaper to sample — the app falls straight back to the
+// default palette, since --accent-color and friends in style.css already
+// default to var(--blue) on their own.
+function getSmartAccentEnabled() {
+  try {
+    return localStorage.getItem(SMART_ACCENT_STORAGE) === "true";
+  } catch (err) {
+    return DEFAULT_SMART_ACCENT;
+  }
+}
+
+function setSmartAccentEnabled(enabled) {
+  try {
+    localStorage.setItem(SMART_ACCENT_STORAGE, enabled ? "true" : "false");
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d !== 0) {
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      default: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+  return { h: h * 360, s: s * 100, l: l * 100 };
+}
+
+function hslToRgb(h, s, l) {
+  h = ((h % 360) + 360) % 360 / 360;
+  s /= 100; l /= 100;
+  if (s === 0) {
+    const v = Math.round(l * 255);
+    return { r: v, g: v, b: v };
+  }
+  const hue2rgb = (p, q, t) => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return {
+    r: Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
+    g: Math.round(hue2rgb(p, q, h) * 255),
+    b: Math.round(hue2rgb(p, q, h - 1 / 3) * 255),
+  };
+}
+
+// Standard WCAG relative luminance / contrast ratio — used to check the
+// extracted color still works as a background behind the white text and
+// icons that buttons/switches paint on top of it, the same way the app's
+// own default --blue already does.
+function relativeLuminance(r, g, b) {
+  const toLinear = (c) => {
+    c /= 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+}
+
+function contrastRatio(lumA, lumB) {
+  const lighter = Math.max(lumA, lumB);
+  const darker = Math.min(lumA, lumB);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+// Samples a downscaled copy of the wallpaper on an offscreen canvas and
+// buckets pixels by hue (skipping near-gray/near-black/near-white pixels,
+// which are almost never what a person would call the image's "color").
+// The winning bucket is the one scoring highest on count × average
+// saturation, so a small patch of vivid color can still beat a much larger
+// area of dull, low-saturation background — closer to what "dominant
+// accent color" means in practice than a literal most-frequent-pixel scan.
+// Resolves null if the image can't be read or has no distinct color at all
+// (e.g. a grayscale photo), so the caller can fall back to the default theme.
+function sampleWallpaperAccentColor(imageDataUrl) {
+  return new Promise((resolve) => {
+    if (!imageDataUrl) { resolve(null); return; }
+    const img = new Image();
+    img.onerror = () => resolve(null);
+    img.onload = () => {
+      try {
+        const w = SMART_ACCENT_SAMPLE_SIZE;
+        const ratio = img.naturalHeight / img.naturalWidth || 1;
+        const h = Math.max(1, Math.round(w * ratio));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0, w, h);
+        const { data } = ctx.getImageData(0, 0, w, h);
+        const buckets = new Map();
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] < 200) continue; // skip transparent pixels
+          const px = rgbToHsl(data[i], data[i + 1], data[i + 2]);
+          if (px.s < 15 || px.l < 8 || px.l > 92) continue; // skip near-gray/black/white
+          const key = Math.round(px.h / 15) * 15;
+          const bucket = buckets.get(key) || { count: 0, hSum: 0, sSum: 0, lSum: 0 };
+          bucket.count += 1;
+          bucket.hSum += px.h;
+          bucket.sSum += px.s;
+          bucket.lSum += px.l;
+          buckets.set(key, bucket);
+        }
+        if (buckets.size === 0) { resolve(null); return; }
+        let best = null, bestScore = -1;
+        for (const bucket of buckets.values()) {
+          const score = bucket.count * (bucket.sSum / bucket.count);
+          if (score > bestScore) { bestScore = score; best = bucket; }
+        }
+        resolve({ h: best.hSum / best.count, s: best.sSum / best.count, l: best.lSum / best.count });
+      } catch (err) {
+        // Canvas can throw on an undecodable source in some browsers —
+        // treat it exactly like "couldn't extract a color".
+        resolve(null);
+      }
+    };
+    img.src = imageDataUrl;
+  });
+}
+
+// Darkens the sampled color, if needed, until it holds up as a background
+// behind white text/icons (matching the app's own default --blue), and
+// keeps saturation in a band that reads as "a color" rather than washed
+// out or neon. Never returns something less legible than the app's normal
+// theme would be.
+function adjustAccentForContrast(hsl) {
+  if (!hsl) return null;
+  let { h, l } = hsl;
+  const s = Math.max(35, Math.min(85, hsl.s));
+  for (let attempts = 0; attempts < 40; attempts++) {
+    const { r, g, b } = hslToRgb(h, s, l);
+    const ratio = contrastRatio(relativeLuminance(r, g, b), relativeLuminance(255, 255, 255));
+    if (ratio >= SMART_ACCENT_MIN_CONTRAST || l <= 15) break;
+    l -= 2;
+  }
+  return { h, s, l: Math.max(15, l) };
+}
+
+// Injects (or, given null, clears) the extracted accent across every CSS
+// variable a caller might reasonably reach for — the named family
+// (--accent-color/-deep/-soft/-pale) plus the semantic aliases used
+// directly by buttons and range/progress fills. Clearing removes the
+// inline override entirely rather than writing a color, so style.css's
+// own defaults (which mirror --blue) instantly take back over — this is
+// the "reset to default theme palette" fallback.
+function applySmartAccentColors(hsl) {
+  const root = document.documentElement.style;
+  const props = ["--accent-color", "--accent-color-deep", "--accent-color-soft", "--accent-color-pale", "--button-highlight-bg", "--progress-bar-fill"];
+  if (!hsl) {
+    props.forEach((p) => root.removeProperty(p));
+    return;
+  }
+  const { h, s, l } = hsl;
+  const clampL = (n) => Math.max(4, Math.min(96, n));
+  const fmt = (hue, sat, light) => `hsl(${hue.toFixed(1)}, ${sat.toFixed(1)}%, ${light.toFixed(1)}%)`;
+  const accent = fmt(h, s, l);
+  root.setProperty("--accent-color", accent);
+  root.setProperty("--accent-color-deep", fmt(h, Math.min(100, s + 8), clampL(l - 14)));
+  root.setProperty("--accent-color-soft", fmt(h, Math.max(20, s - 15), clampL(l + 20)));
+  root.setProperty("--accent-color-pale", fmt(h, Math.max(15, s - 25), clampL(l + 42)));
+  root.setProperty("--button-highlight-bg", accent);
+  root.setProperty("--progress-bar-fill", accent);
+}
+
+function updateSmartAccentStatus(enabled, image, adjusted, pending) {
+  if (!smartAccentStatus) return;
+  if (!enabled) {
+    smartAccentStatus.classList.add("hidden");
+    smartAccentStatus.textContent = "";
+    return;
+  }
+  smartAccentStatus.classList.remove("hidden");
+  if (!image) {
+    smartAccentStatus.textContent = "No wallpaper set — using the default accent color.";
+  } else if (pending) {
+    smartAccentStatus.textContent = "Sampling your wallpaper's colors…";
+  } else if (adjusted) {
+    smartAccentStatus.textContent = "Accent color matched to your wallpaper.";
+  } else {
+    smartAccentStatus.textContent = "Couldn't find a strong color in that image — using the default accent.";
+  }
+}
+
+// Orchestrates the whole feature: reads current prefs, samples the
+// wallpaper if applicable, and applies (or clears) the accent variables.
+// requestId guards against a slow extraction resolving after a newer one
+// (e.g. rapidly swapping wallpapers) and clobbering the latest result.
+let smartAccentRequestId = 0;
+async function applySmartAccent() {
+  const enabled = getSmartAccentEnabled();
+  const image = getWallpaperImage();
+  const requestId = ++smartAccentRequestId;
+  if (!enabled || !image) {
+    applySmartAccentColors(null);
+    updateSmartAccentStatus(enabled, image, null, false);
+    return;
+  }
+  updateSmartAccentStatus(enabled, image, null, true);
+  const sampled = await sampleWallpaperAccentColor(image);
+  if (requestId !== smartAccentRequestId) return; // superseded by a newer call
+  const adjusted = adjustAccentForContrast(sampled);
+  applySmartAccentColors(adjusted);
+  updateSmartAccentStatus(enabled, image, adjusted, false);
+}
+
 function applyDisplayPrefs() {
   const root = document.documentElement.style;
   root.setProperty("--search-bar-width", `${getSearchWidth()}px`);
@@ -4421,6 +4828,8 @@ function applyDisplayPrefs() {
   applyBubblyMode();
   applyGlassPrefs();
   applyFishPrefs();
+  applyWallpaperPrefs();
+  applySmartAccent();
 }
 
 bubblyModeToggle.addEventListener("change", () => {
@@ -4490,6 +4899,53 @@ glassTintInput.addEventListener("input", () => {
   applyGlassPrefs();
 });
 
+smartAccentToggle?.addEventListener("change", () => {
+  setSmartAccentEnabled(smartAccentToggle.checked);
+  applySmartAccent();
+});
+
+chooseWallpaperBtn?.addEventListener("click", () => wallpaperFileInput.click());
+
+wallpaperFileInput?.addEventListener("change", async () => {
+  const file = wallpaperFileInput.files?.[0];
+  wallpaperFileInput.value = ""; // clear so picking the same file again still fires "change"
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    if (wallpaperStatus) wallpaperStatus.textContent = "Please choose an image file.";
+    return;
+  }
+  if (wallpaperStatus) wallpaperStatus.textContent = "Processing image…";
+  try {
+    const saved = await resizeAndSaveWallpaper(file);
+    if (!saved) {
+      wallpaperStatus.textContent = "That image was too large to save — try a smaller photo.";
+      return;
+    }
+    applyWallpaperPrefs();
+    applySmartAccent();
+  } catch (err) {
+    if (wallpaperStatus) wallpaperStatus.textContent = err.message || "Couldn't set that as your wallpaper.";
+  }
+});
+
+removeWallpaperBtn?.addEventListener("click", () => {
+  clearWallpaperImage();
+  applyWallpaperPrefs();
+  applySmartAccent();
+});
+
+wallpaperDimInput?.addEventListener("input", () => {
+  wallpaperDimValue.textContent = `${wallpaperDimInput.value}%`;
+  setWallpaperDim(wallpaperDimInput.value);
+  applyWallpaperPrefs();
+});
+
+wallpaperBlurInput?.addEventListener("input", () => {
+  wallpaperBlurValue.textContent = `${wallpaperBlurInput.value}px`;
+  setWallpaperBlur(wallpaperBlurInput.value);
+  applyWallpaperPrefs();
+});
+
 displayToggleBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   if (displayPanel.classList.contains("hidden")) initDisplayUI();
@@ -4521,6 +4977,12 @@ resetDisplayBtn.addEventListener("click", () => {
   setGlassTransparency(DEFAULT_GLASS_TRANSPARENCY);
   setGlassBlur(DEFAULT_GLASS_BLUR);
   setGlassTint(DEFAULT_GLASS_TINT);
+  setWallpaperDim(DEFAULT_WALLPAPER_DIM);
+  setWallpaperBlur(DEFAULT_WALLPAPER_BLUR);
+  // Deliberately NOT clearing the wallpaper image itself here — that's
+  // its own explicit, separate action (the "Reset to Default" button
+  // right next to "Choose Image…"), since it's the one destructive step
+  // in this panel and shouldn't be a side effect of resetting sizes.
   initDisplayUI();
 });
 
@@ -4531,6 +4993,8 @@ function initDisplayUI() {
   const gt = getGlassTransparency();
   const gb = getGlassBlur();
   const gtint = getGlassTint();
+  const wd = getWallpaperDim();
+  const wb = getWallpaperBlur();
   searchWidthInput.value = w;
   searchWidthValue.textContent = `${w}px`;
   defTextSizeInput.value = t;
@@ -4544,6 +5008,15 @@ function initDisplayUI() {
   glassBlurValue.textContent = `${gb}px`;
   glassTintInput.value = gtint;
   glassTintValue.textContent = `${gtint}%`;
+  if (wallpaperDimInput) {
+    wallpaperDimInput.value = wd;
+    wallpaperDimValue.textContent = `${wd}%`;
+  }
+  if (wallpaperBlurInput) {
+    wallpaperBlurInput.value = wb;
+    wallpaperBlurValue.textContent = `${wb}px`;
+  }
+  if (smartAccentToggle) smartAccentToggle.checked = getSmartAccentEnabled();
   applyDisplayPrefs();
 }
 
@@ -8057,9 +8530,30 @@ definitionsList.addEventListener("click", (e) => {
   let singleKeyActions = {};
   let chordActions = [];
 
+  // Every physical key that plays a part in ANY Audio Window binding —
+  // audioTrigger / audioTriggerUk / audioCyclePrev / audioCycleNext /
+  // vawDelete — whether it's bound as that field's lone key or as one
+  // half of a two-key chord (e.g. the default "PageDown" half of
+  // ["PageDown", "BracketLeft"]). Used below to strip that key's native
+  // default action (typing a character, scrolling, moving a caret,
+  // whatever it would normally do) the instant it's pressed while the
+  // Audio Window is on — even on its own, before any second key of a
+  // chord ever comes down — instead of only once the full combo has
+  // been detected. Rebuilt every time rebuildCodeToAction() runs, so a
+  // rebinding in the sidebar keeps this set in sync automatically.
+  let vawBoundCodes = new Set();
+  const VAW_ACTION_KEYS = new Set([
+    "audioTrigger",
+    "audioTriggerUk",
+    "audioCyclePrev",
+    "audioCycleNext",
+    "vawDelete",
+  ]);
+
   function rebuildCodeToAction() {
     singleKeyActions = {};
     chordActions = [];
+    vawBoundCodes = new Set();
     Object.keys(shortcutConfig).forEach((k) => {
       if (k === "passThroughModifier") return;
       const codes = shortcutConfig[k];
@@ -8068,6 +8562,9 @@ definitionsList.addEventListener("click", (e) => {
         singleKeyActions[codes[0]] = k;
       } else {
         chordActions.push({ action: k, keys: codes });
+      }
+      if (VAW_ACTION_KEYS.has(k)) {
+        codes.forEach((c) => vawBoundCodes.add(c));
       }
     });
   }
@@ -8851,11 +9348,23 @@ definitionsList.addEventListener("click", (e) => {
       e.preventDefault();
     }
 
-    // ---- Suppress Page Down/Up's native scroll while the Audio Window
-    // is on — its default chords are built on Page Down, so without this
-    // holding it down to form a combo would otherwise scroll the page
-    // out from under you first.
-    if (isAudioWindowActive && (e.code === "PageDown" || e.code === "PageUp") && !isTextEntryElement(document.activeElement)) {
+    // ---- Suppress the native default action for any Audio Window key
+    // while the window is on — typing a character, scrolling the page
+    // (Page Down/Up's default), moving a text caret, whatever that key
+    // would otherwise do — no matter which element currently has focus,
+    // word bar included, and no matter whether this is a lone key press
+    // or just the first half of a two-key chord still waiting on its
+    // partner. Without this, holding down the first key of a chord (or
+    // pressing a key that's been rebound to a single Audio Window
+    // action) would fall straight through to the browser's own default
+    // handling before — or entirely instead of — our own dispatch below
+    // ever gets a chance to run the assigned action.
+    //
+    // The configured Pass-Through Modifier is still the escape hatch:
+    // hold it and this key goes back to doing whatever it would
+    // normally do (typing included, handled further down), exactly as
+    // for every other mapped key in the app.
+    if (isAudioWindowActive && vawBoundCodes.has(e.code) && !isConfiguredModifierHeld(e)) {
       e.preventDefault();
     }
 

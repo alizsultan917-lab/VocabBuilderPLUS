@@ -29,6 +29,30 @@
   --glass-alpha: 70%;
   --glass-blur: 20px;
   --glass-tint: 50%;
+
+  /* 🖼️ Wallpaper (set via the 🔍 Display panel; JS overrides these on
+     :root once a saved image/dimming preference is loaded). No image by
+     default — body only picks up .has-wallpaper once one is set, so
+     these unused defaults never paint anything on their own. */
+  --wallpaper-image: none;
+  --wallpaper-dim: 0.45;
+  --wallpaper-blur: 0px;
+
+  /* 🎨 Smart Color-Extraction accent (set via the 🔍 Display panel's
+     "Smart Color-Extraction" toggle; JS overrides these on :root once a
+     wallpaper is sampled for its dominant color). Defaults simply mirror
+     the app's normal blue palette, so nothing changes visually until the
+     feature is actually turned on and a wallpaper is present — see
+     applySmartAccent() in script.js. --accent-color/-deep/-soft/-pale
+     are the extracted-and-contrast-checked color family; --button-highlight-bg
+     and --progress-bar-fill are semantic aliases for the specific UI
+     elements they drive. */
+  --accent-color: var(--blue);
+  --accent-color-deep: var(--blue-deep);
+  --accent-color-soft: var(--blue-soft);
+  --accent-color-pale: var(--blue-pale);
+  --button-highlight-bg: var(--accent-color);
+  --progress-bar-fill: var(--accent-color);
 }
 
 * {
@@ -36,7 +60,7 @@
 }
 
 :focus-visible {
-  outline: 2px solid var(--blue);
+  outline: 2px solid var(--accent-color);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -47,6 +71,50 @@ body {
   color: var(--ink);
   font-family: 'Inter', system-ui, sans-serif;
   line-height: 1.55;
+}
+
+/* ---------- 🖼️ Wallpaper ----------
+   A single fixed, full-viewport layer sitting behind every other element
+   on the page (negative z-index keeps it below normal in-flow content —
+   the header, cards, and every panel already paint above it without
+   needing any changes of their own). Nothing shows until a wallpaper is
+   actually chosen: body only gets .has-wallpaper once --wallpaper-image
+   is set to a real url(...), and this stays at opacity 0 until then.
+   The dimming layer is baked into the same background-image as a flat
+   white scrim mixed in with the photo, so legibility over busy images
+   stays adjustable (see the "Wallpaper dimming" slider) without needing
+   a second stacked element. */
+body::before {
+  content: "";
+  position: fixed;
+  /* Extends past the viewport on all sides (rather than inset: 0) so that
+     when --wallpaper-blur is applied via filter, the blur has real pixels
+     to sample from at the edges instead of the transparent area outside
+     the element — without this, a blurred wallpaper would show a hard,
+     unblurred ring right at the screen edge. WALLPAPER_BLUR_MAX in
+     script.js is 20px, so 48px of overscan comfortably covers it. */
+  inset: -48px;
+  z-index: -1;
+  background-image: linear-gradient(rgba(255, 255, 255, var(--wallpaper-dim)), rgba(255, 255, 255, var(--wallpaper-dim))), var(--wallpaper-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  /* Rendering hints only — they help browsers avoid extra softening when
+     scaling the photo, but can't add detail a photo doesn't have. The
+     real sharpness fix is uploading at a higher source resolution, which
+     resizeImageForWallpaper() in script.js now allows (up to 2560px,
+     scaled further for HiDPI screens) instead of aggressively compressing
+     every upload down to 1920px at low JPEG quality. */
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  filter: blur(var(--wallpaper-blur));
+  opacity: 0;
+  transition: opacity 0.35s ease, filter 0.2s ease;
+  pointer-events: none;
+}
+
+body.has-wallpaper::before {
+  opacity: 1;
 }
 
 h1, h2, h3 {
@@ -150,7 +218,7 @@ h1, h2, h3 {
 
 /* ---------- 🎧 Audio Window master toggle (ON state) ---------- */
 #audio-window-toggle-btn.active {
-  background: var(--blue);
+  background: var(--accent-color);
   border-color: #fff;
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3);
 }
@@ -674,7 +742,7 @@ h1, h2, h3 {
 
 .slider-field-row input[type="range"] {
   width: 100%;
-  accent-color: var(--blue);
+  accent-color: var(--progress-bar-fill);
   cursor: pointer;
   height: 18px;
   padding: 0;
@@ -687,6 +755,42 @@ h1, h2, h3 {
   background: rgba(37, 99, 168, 0.06);
   border: 1px solid rgba(37, 99, 168, 0.12);
   border-radius: 14px;
+}
+
+/* ---------- 🖼️ Wallpaper controls (Display panel) ---------- */
+.wallpaper-section {
+  margin-bottom: 0.7rem;
+}
+
+.wallpaper-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0.5rem 0 0.4rem;
+}
+
+.wallpaper-preview {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background-color: var(--bg);
+  background-size: cover;
+  background-position: center;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.wallpaper-preview-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.wallpaper-preview-actions .btn {
+  width: 100%;
+  text-align: center;
 }
 
 /* ---------- Export destination checkboxes ---------- */
@@ -1075,8 +1179,8 @@ select {
 
 input:focus, textarea:focus, select:focus {
   outline: none;
-  border-color: var(--blue);
-  box-shadow: 0 0 0 3px rgba(37, 99, 168, 0.14);
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 20%, transparent);
 }
 
 textarea {
@@ -1363,12 +1467,12 @@ textarea {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--blue), var(--blue-deep));
+  background: linear-gradient(135deg, var(--button-highlight-bg), var(--accent-color-deep));
   color: #fff;
 }
 
 .btn-primary:hover {
-  background: linear-gradient(135deg, #2a6cb5, var(--blue-deep));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--button-highlight-bg) 85%, white), var(--accent-color-deep));
 }
 
 .btn-secondary {
@@ -1768,9 +1872,9 @@ tbody tr:hover {
 }
 
 .definition-card.vaw-double-selected {
-  border-color: var(--blue);
-  background: var(--blue-pale);
-  box-shadow: 0 0 0 1px var(--blue-soft) inset;
+  border-color: var(--accent-color);
+  background: var(--accent-color-pale);
+  box-shadow: 0 0 0 1px var(--accent-color-soft) inset;
 }
 
 .definition-source {
@@ -1986,7 +2090,7 @@ tbody tr:hover {
 }
 
 .switch input:checked ~ .switch-track {
-  background: linear-gradient(135deg, var(--blue), var(--blue-deep));
+  background: linear-gradient(135deg, var(--button-highlight-bg), var(--accent-color-deep));
 }
 
 .switch input:checked ~ .switch-track .switch-thumb {
@@ -1994,7 +2098,7 @@ tbody tr:hover {
 }
 
 .switch input:focus-visible ~ .switch-track {
-  outline: 2px solid var(--blue);
+  outline: 2px solid var(--accent-color);
   outline-offset: 2px;
 }
 
