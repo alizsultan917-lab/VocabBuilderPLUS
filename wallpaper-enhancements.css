@@ -1,0 +1,166 @@
+/* =========================================================================
+   wallpaper-enhancements.css
+   -------------------------------------------------------------------------
+   Append this AFTER style.css. Every rule here keys off custom properties
+   that default to no-ops (vignette 0, grain 0, border-alpha matching the
+   current fixed value) or off [data-wallpaper-tone], which is only ever
+   set once a wallpaper is actually sampled — so nothing here changes
+   today's look until the new JS in wallpaper-tone-contrast.js runs.
+   ========================================================================= */
+
+:root {
+  /* Focal point, 0%–100% each axis (50% 50% = center, matching today's
+     fixed "center" position). Feed this from a click-to-focus UI on
+     #wallpaper-preview, or leave at the default. */
+  --wallpaper-focal-x: 50%;
+  --wallpaper-focal-y: 50%;
+
+  /* Vignette + grain strength, 0–1, independent of the existing
+     --wallpaper-dim/--wallpaper-blur sliders. */
+  --wallpaper-vignette: 0.35;
+  --wallpaper-grain: 0.05;
+
+  /* Written by applyWallpaperTone() in wallpaper-tone-contrast.js.
+     Harmless defaults (0.6 matches style.css's existing fixed border
+     alpha) keep the border rule below inert until a wallpaper is
+     actually sampled. */
+  --wallpaper-luminance: 1;
+  --wallpaper-border-alpha: 0.6;
+}
+
+/* ---- Focal point --------------------------------------------------------
+   Overrides style.css's fixed background-position: center on the same
+   body::before layer used for the wallpaper. */
+body.has-wallpaper::before {
+  background-position: var(--wallpaper-focal-x) var(--wallpaper-focal-y);
+}
+
+/* ---- Vignette ------------------------------------------------------------
+   Stacked into the SAME background-image list as the existing dimming
+   scrim, so it shares body::before rather than adding another element.
+   This whole rule is a drop-in replacement for the background-image line
+   already in style.css (search for "linear-gradient(rgba(255, 255, 255"
+   under "---------- 🖼️ Wallpaper ----------"). */
+body.has-wallpaper::before {
+  background-image:
+    radial-gradient(
+      ellipse at var(--wallpaper-focal-x) var(--wallpaper-focal-y),
+      transparent 45%,
+      rgba(0, 0, 0, var(--wallpaper-vignette)) 100%
+    ),
+    linear-gradient(rgba(255, 255, 255, var(--wallpaper-dim)), rgba(255, 255, 255, var(--wallpaper-dim))),
+    var(--wallpaper-image);
+}
+
+/* ---- Film grain ----------------------------------------------------------
+   A tiled SVG-noise texture on its own pseudo-element, so it stays crisp
+   even when --wallpaper-blur softens the photo underneath it.
+   mix-blend-mode: overlay reads as texture rather than a flat gray wash. */
+body.has-wallpaper::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: var(--wallpaper-grain);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+}
+
+/* ---- Adaptive text over the wallpaper ------------------------------------
+   [data-wallpaper-tone] is set on <html> by applyWallpaperTone(). Only
+   page-level text/elements sitting DIRECTLY over the wallpaper (not
+   inside an opaque or glass card) need these — glass panels already show
+   through to whatever's beneath via backdrop-filter, so their own --ink
+   stays put; wire --on-wallpaper-text into anything free-floating, like
+   a page title overlaid straight on the photo. */
+html[data-wallpaper-tone="dark"] body.has-wallpaper {
+  --on-wallpaper-text: #f5f8fb;
+  --on-wallpaper-text-soft: rgba(245, 248, 251, 0.78);
+}
+html[data-wallpaper-tone="light"] body.has-wallpaper {
+  --on-wallpaper-text: var(--ink);
+  --on-wallpaper-text-soft: var(--ink-soft);
+}
+
+/* ---- Adaptive card borders -------------------------------------------
+   Card/panel borders scale with --wallpaper-border-alpha instead of a
+   fixed value, so a near-black or near-white photo still leaves a
+   visible edge instead of the border blending into the backdrop. Add
+   your actual card/panel selectors to this list (glass-card and
+   storage-panel are guesses based on your class names — swap in
+   whatever the real card class is). */
+body.has-wallpaper .glass-card,
+body.has-wallpaper .storage-panel {
+  border-color: color-mix(in srgb, #fff calc(var(--wallpaper-border-alpha) * 100%), transparent);
+}
+
+/* ---- Card <-> photo blending ----------------------------------------
+   A small floor-raise on blur+saturation once a wallpaper is active, so
+   cards read as frosted glass over a real photo rather than a flat tint.
+   Subtle enough not to fight the existing --glass-blur slider — just
+   nudging it while a photo is present. Apply to whichever selector your
+   glass cards actually use. */
+body.has-wallpaper .glass-card {
+  backdrop-filter: blur(calc(var(--glass-blur) * 1.15)) saturate(135%);
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 1.15)) saturate(135%);
+}
+
+/* ---- Folder-mode picker grid ------------------------------------------
+   Thumbnail grid for the "Choose from folder" flow (wallpaper-folder-
+   service.js), rendered inside the existing .wallpaper-section panel. */
+.wallpaper-folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.wallpaper-folder-thumb {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.wallpaper-folder-thumb:hover {
+  transform: scale(1.03);
+}
+.wallpaper-folder-thumb.is-selected {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-color) 35%, transparent);
+}
+.wallpaper-folder-name {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Focal-point picker ------------------------------------------------
+   Click anywhere on #wallpaper-preview to set --wallpaper-focal-x/-y
+   (JS listener not included here — a few lines on the preview element's
+   click handler computing offsetX/offsetY as percentages is enough). */
+.wallpaper-preview {
+  position: relative;
+  cursor: crosshair;
+}
+.wallpaper-focal-marker {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.5);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}

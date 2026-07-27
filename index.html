@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="wallpaper-enhancements.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -252,11 +253,15 @@
             <div id="wallpaper-preview" class="wallpaper-preview" aria-hidden="true"></div>
             <div class="wallpaper-preview-actions">
               <button type="button" id="choose-wallpaper-btn" class="btn btn-secondary btn-small">Choose Image…</button>
+              <button type="button" id="choose-wallpaper-folder-btn" class="btn btn-secondary btn-small">Choose Folder…</button>
               <button type="button" id="remove-wallpaper-btn" class="btn btn-secondary btn-small">Reset to Default</button>
             </div>
           </div>
           <input type="file" id="wallpaper-file-input" accept="image/*" class="hidden">
+          <input type="file" id="wallpaper-folder-fallback-input" webkitdirectory multiple class="hidden">
           <p id="wallpaper-status" class="storage-sync-hint">Default background — no wallpaper set.</p>
+          <p id="wallpaper-folder-status" class="storage-sync-hint hidden"></p>
+          <div id="wallpaper-folder-grid" class="wallpaper-folder-grid hidden" aria-label="Wallpaper folder photos"></div>
 
           <div class="bubbly-toggle-row">
             <div class="bubbly-toggle-label">
@@ -678,6 +683,8 @@
   <p>Stored on your device · <span id="footer-total">0</span> words registered</p>
 </footer>
 
+<script src="wallpaper-folder-service.js"></script>
+<script src="wallpaper-tone-contrast.js"></script>
 <script src="script.js"></script>
 </body>
 </html>

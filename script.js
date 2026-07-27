@@ -4581,9 +4581,102 @@ async function resizeAndSaveWallpaper(file) {
   return false;
 }
 
+// ---- 🗂️ Folder-sourced wallpapers ---------------------------------------
+// A second wallpaper source, layered on top of the existing upload-based
+// one above rather than replacing it. window.WallpaperFolder comes from
+// wallpaper-folder-service.js (loaded before this file in index.html).
+// activeFolderImageUrl holds a live blob: URL for whichever photo was
+// last picked from a folder — getActiveWallpaperImage() below is now the
+// ONE place every other function (applyWallpaperPrefs, applySmartAccent,
+// the tone classifier) reads "what's the current wallpaper" from, so a
+// folder photo and an uploaded photo are interchangeable everywhere else.
+const wallpaperFolderService = window.WallpaperFolder ? new window.WallpaperFolder.WallpaperFolderService() : null;
+let activeFolderImageUrl = null;
+
+function getActiveWallpaperImage() {
+  return activeFolderImageUrl || getWallpaperImage();
+}
+
+const chooseWallpaperFolderBtn = document.getElementById("choose-wallpaper-folder-btn");
+const wallpaperFolderFallbackInput = document.getElementById("wallpaper-folder-fallback-input");
+const wallpaperFolderGrid = document.getElementById("wallpaper-folder-grid");
+const wallpaperFolderStatus = document.getElementById("wallpaper-folder-status");
+
+async function selectFolderWallpaper(entry) {
+  if (!wallpaperFolderService) return;
+  const url = await wallpaperFolderService.loadFull(entry);
+  activeFolderImageUrl = url;
+  window.WallpaperFolder.setSelectedWallpaperName(entry.name);
+  applyWallpaperPrefs();
+  applySmartAccent();
+  if (window.WallpaperTone) window.WallpaperTone.applyWallpaperTone(url);
+}
+
+async function renderWallpaperFolderGrid(entries) {
+  if (!wallpaperFolderGrid) return;
+  wallpaperFolderGrid.innerHTML = "";
+  wallpaperFolderGrid.classList.toggle("hidden", entries.length === 0);
+  const selectedName = window.WallpaperFolder.getSelectedWallpaperName();
+  for (const entry of entries) {
+    const thumbUrl = await wallpaperFolderService.loadThumbnail(entry);
+    const el = document.createElement("div");
+    el.className = "wallpaper-folder-thumb" + (entry.name === selectedName ? " is-selected" : "");
+    el.style.backgroundImage = `url("${thumbUrl}")`;
+    el.title = entry.name;
+    el.setAttribute("role", "button");
+    el.setAttribute("tabindex", "0");
+    el.addEventListener("click", () => {
+      wallpaperFolderGrid.querySelectorAll(".is-selected").forEach((n) => n.classList.remove("is-selected"));
+      el.classList.add("is-selected");
+      selectFolderWallpaper(entry);
+    });
+    wallpaperFolderGrid.appendChild(el);
+  }
+}
+
+chooseWallpaperFolderBtn?.addEventListener("click", async () => {
+  if (!wallpaperFolderService) return;
+  try {
+    if (wallpaperFolderStatus) {
+      wallpaperFolderStatus.classList.remove("hidden");
+      wallpaperFolderStatus.textContent = "Reading folder…";
+    }
+    const entries = await wallpaperFolderService.chooseFolder(wallpaperFolderFallbackInput);
+    await renderWallpaperFolderGrid(entries);
+    if (wallpaperFolderStatus) {
+      const label = window.WallpaperFolder.getFolderLabel();
+      wallpaperFolderStatus.textContent = entries.length
+        ? `${entries.length} photo${entries.length === 1 ? "" : "s"} in "${label}" — pick one below.`
+        : "No images found in that folder.";
+    }
+  } catch (err) {
+    if (wallpaperFolderStatus) {
+      wallpaperFolderStatus.classList.remove("hidden");
+      wallpaperFolderStatus.textContent = err.message || "Couldn't read that folder.";
+    }
+  }
+});
+
+// Re-attach to the last-used folder (Chromium/Edge only — see
+// wallpaper-folder-service.js for why Firefox/Safari can't silently
+// restore a folder grant) and reselect the last-picked photo by name.
+(async function restoreWallpaperFolder() {
+  if (!wallpaperFolderService) return;
+  const entries = await wallpaperFolderService.restoreFolder();
+  if (!entries || !entries.length) return;
+  await renderWallpaperFolderGrid(entries);
+  if (wallpaperFolderStatus) {
+    wallpaperFolderStatus.classList.remove("hidden");
+    wallpaperFolderStatus.textContent = `${entries.length} photo${entries.length === 1 ? "" : "s"} in "${window.WallpaperFolder.getFolderLabel()}".`;
+  }
+  const savedName = window.WallpaperFolder.getSelectedWallpaperName();
+  const entry = savedName ? wallpaperFolderService.findByName(savedName) : null;
+  if (entry) await selectFolderWallpaper(entry);
+})();
+
 function applyWallpaperPrefs() {
   const root = document.documentElement.style;
-  const image = getWallpaperImage();
+  const image = getActiveWallpaperImage();
   root.setProperty("--wallpaper-dim", String(getWallpaperDim() / 100));
   root.setProperty("--wallpaper-blur", `${getWallpaperBlur()}px`);
   root.setProperty("--wallpaper-image", image ? `url("${image}")` : "none");
@@ -4805,7 +4898,7 @@ function updateSmartAccentStatus(enabled, image, adjusted, pending) {
 let smartAccentRequestId = 0;
 async function applySmartAccent() {
   const enabled = getSmartAccentEnabled();
-  const image = getWallpaperImage();
+  const image = getActiveWallpaperImage();
   const requestId = ++smartAccentRequestId;
   if (!enabled || !image) {
     applySmartAccentColors(null);
@@ -4830,6 +4923,7 @@ function applyDisplayPrefs() {
   applyFishPrefs();
   applyWallpaperPrefs();
   applySmartAccent();
+  if (window.WallpaperTone) window.WallpaperTone.applyWallpaperTone(getActiveWallpaperImage());
 }
 
 bubblyModeToggle.addEventListener("change", () => {
@@ -4921,8 +5015,12 @@ wallpaperFileInput?.addEventListener("change", async () => {
       wallpaperStatus.textContent = "That image was too large to save — try a smaller photo.";
       return;
     }
+    activeFolderImageUrl = null; // an explicit upload takes priority over any folder pick
+    window.WallpaperFolder?.setSelectedWallpaperName(null);
+    wallpaperFolderGrid?.querySelectorAll(".is-selected").forEach((n) => n.classList.remove("is-selected"));
     applyWallpaperPrefs();
     applySmartAccent();
+    if (window.WallpaperTone) window.WallpaperTone.applyWallpaperTone(getActiveWallpaperImage());
   } catch (err) {
     if (wallpaperStatus) wallpaperStatus.textContent = err.message || "Couldn't set that as your wallpaper.";
   }
@@ -4930,8 +5028,12 @@ wallpaperFileInput?.addEventListener("change", async () => {
 
 removeWallpaperBtn?.addEventListener("click", () => {
   clearWallpaperImage();
+  activeFolderImageUrl = null;
+  window.WallpaperFolder?.setSelectedWallpaperName(null);
+  wallpaperFolderGrid?.querySelectorAll(".is-selected").forEach((n) => n.classList.remove("is-selected"));
   applyWallpaperPrefs();
   applySmartAccent();
+  if (window.WallpaperTone) window.WallpaperTone.applyWallpaperTone(getActiveWallpaperImage());
 });
 
 wallpaperDimInput?.addEventListener("input", () => {

@@ -2818,9 +2818,16 @@ body.bubbly-mode .btn::after {
    a big gloss blob — so no ::before/::after here, only the shell. */
 body.bubbly-mode .card,
 body.bubbly-mode .modal-content {
-  background: var(--bubble-core);
-  backdrop-filter: blur(var(--glass-blur)) saturate(calc(140% + var(--glass-tint) * 0.4));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(calc(140% + var(--glass-tint) * 0.4));
+  /* Was var(--bubble-core) — the same tall, near-opaque highlight blobs
+     used on small round buttons, which reads fine at button size but
+     turns into a dense white fog once stretched across a whole card,
+     hiding the wallpaper behind it. Panels get a much thinner, flatter
+     tint instead: mostly transparent, just enough wash/blur to keep text
+     legible over a busy photo, so the wallpaper reads through the panel
+     the same way it does behind the header widgets. */
+  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.16 + 3%), transparent);
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2));
   border: 1px solid color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 12%), transparent);
   box-shadow:
     inset 0 1px 0 var(--bubble-ring-bright),
@@ -2831,9 +2838,9 @@ body.bubbly-mode .modal-content {
 }
 
 body.bubbly-mode .storage-panel {
-  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.55 + 8%), transparent);
-  backdrop-filter: blur(calc(var(--glass-blur) * 1.1)) saturate(calc(150% + var(--glass-tint) * 0.5));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 1.1)) saturate(calc(150% + var(--glass-tint) * 0.5));
+  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.16 + 3%), transparent);
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2));
   border: 1px solid color-mix(in srgb, #fff calc(var(--glass-tint) * 0.7 + 20%), transparent);
   border-radius: 22px;
   box-shadow:
