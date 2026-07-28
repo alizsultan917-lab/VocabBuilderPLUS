@@ -53,6 +53,42 @@
   --accent-color-pale: var(--blue-pale);
   --button-highlight-bg: var(--accent-color);
   --progress-bar-fill: var(--accent-color);
+
+  /* Glass-blur fade language (used wherever backdrop-filter turns on/off,
+     e.g. the scroll-performance rules near the end of this file). A
+     single soft-deceleration curve, reused everywhere, so every panel's
+     blur settles back in with the same "weight" instead of each one
+     easing differently. Asymmetric on purpose: going TO clear (glass
+     dismissed) is quick and unobtrusive since it's a means to a
+     performance end, not a moment to admire; coming BACK to frosted is
+     slower and gentler since that's the state meant to be looked at.
+
+     Both share the same ease-out family (cubic-bezier(0.16, 1, 0.3, 1) —
+     a gentle, continuously-decelerating "expo out" curve) rather than
+     one accelerating and one decelerating. An accelerating curve looks
+     smooth on paper but ends at its *fastest* point and then just stops
+     dead — that abrupt cutoff is what reads as a snap even though it's
+     technically animated. Decelerating both directions means every fade,
+     fast or slow, tapers off instead of cutting off. */
+  --glass-fade-out: 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  --glass-fade-in: 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Same expo-out family as the glass-fade tokens above, reused so the
+     fish's gap-bridge glide (see .fish-particle.fish-gap-bridge) tapers to
+     a stop the same way everything else in the app settles rather than
+     introducing a second, different-feeling motion language. Slightly
+     longer than --glass-fade-out: a body of water coasting to rest reads
+     right at a more unhurried pace than a UI panel dismissing. */
+  --fish-scroll-glide: 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Short, constant, always-on smoothing used for EVERY frame while a
+     scroll gesture is active (see .fish-particle under body.is-scrolling
+     below) — as opposed to --fish-scroll-glide above, which only kicks in
+     on the specific ticks flagged as an actual dropped rAF frame. Kept
+     much shorter than the glide so it never fights healthy, on-schedule
+     physics writes, just takes the edge off the in-between ticks that
+     land a little late without being late enough to count as a real gap. */
+  --fish-scroll-microglide: 0.1s linear;
 }
 
 * {
@@ -2547,15 +2583,129 @@ body.bubbly-mode.fish-mode-on .fish-field {
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   filter: drop-shadow(0 3px 5px rgba(22, 63, 99, 0.25));
-  /* No transition on transform: script.js sets translate3d/rotate/scale
-     every animation frame (~60fps) with its own physics-driven easing.
-     A CSS transition here fights that, adding a second layer of lag on
-     top of the JS motion (causing stutter on fast turns) and — worse —
-     animating the instant edge-to-edge wrap teleport in fishWrapBounds()
-     into a visible high-speed slide across the whole screen instead of
-     an invisible off-screen jump. Opacity can still transition safely
-     since script.js never touches it every frame. */
+  /* No transition on transform normally: script.js sets translate3d/
+     rotate/scale every animation frame (~60fps) with its own physics-
+     driven easing. A CSS transition here would fight that, adding a
+     second layer of lag on top of the JS motion (causing stutter on fast
+     turns) and — worse — animating the instant edge-to-edge wrap
+     teleport in fishWrapBounds() into a visible high-speed slide across
+     the whole screen instead of an invisible off-screen jump. Opacity
+     can still transition safely since script.js never touches it every
+     frame. See .fish-gap-bridge below for the one deliberate exception. */
   transition: opacity 0.15s ease;
+}
+
+/* ---------------------------------------------------------------------
+   Whole-gesture baseline: take the edge off EVERY tick while scrolling
+   ---------------------------------------------------------------------
+   FISH_GAP_THRESHOLD_S (script.js) only flags a tick as a "real gap" once
+   it lands >26ms late — a deliberately generous cutoff so a healthy,
+   on-schedule tick never gets routed through a transition it doesn't
+   need. In practice, though, plenty of ticks during an active scroll
+   land somewhere in between: a few ms late, not late enough to trip that
+   heuristic, but inconsistent enough — across different browsers/
+   devices/scroll speeds — to read as a small stutter when several land
+   in a row. That in-between jitter, not a single dramatic dropped frame,
+   is what actually reads as "stopping and starting" rather than smoothly
+   slowing down and speeding back up.
+
+   This rule covers that gap: for the whole scroll gesture (not just the
+   individual ticks .fish-gap-bridge below targets), every transform write
+   gets a very short, constant transition — --fish-scroll-microglide is a
+   tenth of a fraction of --fish-scroll-glide's duration, so it never
+   fights a normal on-schedule tick, it just turns whatever small timing
+   wobble does land into a tiny glide instead of a visible snap. Combined
+   with the slow-motion easing (SCROLL_SLOWMO_FACTOR/SCROLL_SLOWMO_EASE in
+   script.js), the whole scroll-to-stop-to-resume arc now reads as one
+   continuous glide instead of three separate, discrete states. Excludes
+   fish-wrap-teleport for the same reason .fish-gap-bridge does — the
+   edge-to-edge wrap must stay an instant, invisible jump. Placed before
+   .fish-gap-bridge below so, on the (rare) tick where both apply — an
+   actual dropped frame during an active scroll — the longer, more
+   deliberate glide wins instead of this shorter one. */
+body.is-scrolling .fish-particle:not(.fish-wrap-teleport) {
+  transition: transform var(--fish-scroll-microglide), opacity 0.15s ease;
+}
+
+/* ---------------------------------------------------------------------
+   Gap-only exception: bridge an actual dropped/delayed rAF tick
+   ---------------------------------------------------------------------
+   The browser doesn't guarantee fishTick's requestAnimationFrame keeps
+   firing on schedule while a scroll gesture is in progress — the main
+   thread can occasionally go well past a normal frame interval between
+   ticks even with the scroll-cost trims elsewhere (is-scrolling
+   backdrop-filter drop, cached bubble positions). With no transition at
+   all, a fish would sit at its last position for that gap and then snap
+   to the next one the moment a tick does land — visually indistinguishable
+   from "hanging" mid-swim.
+
+   This USED to be scoped to body.is-scrolling, active for the entire
+   scroll gesture regardless of whether any tick actually landed late.
+   That was the real source of visible jitter: on a healthy, fast desktop
+   browser, scrolling typically drops zero real frames, so every write for
+   the whole gesture was being routed through a transition it didn't need —
+   fighting the JS-driven motion instead of bridging a genuine gap.
+
+   "fish-gap-bridge" replaces that: script.js (fishTickCore) now measures
+   each tick's own elapsed time and adds this class, for exactly that one
+   write, only when the gap was actually large enough to be a dropped
+   frame (see FISH_GAP_THRESHOLD_S) — clearing it again the tick after. A
+   normal-cadence tick, scrolling or not, never gets a transition at all,
+   so it can never look like it's fighting the physics. fish-wrap-teleport
+   (toggled by fishRenderEntity for exactly one frame whenever
+   fishWrapBounds() fires) still kills the transition for that single
+   write so the edge-to-edge wrap stays an instant, invisible jump even
+   when a gap is also being bridged that same tick.
+
+   --fish-scroll-glide is the same decelerating "expo out" curve the
+   glass-fade language already uses everywhere else, so every bridged gap
+   tapers into wherever the tick puts it instead of stopping dead —
+   "settle, don't snap", same as the rest of the app's motion. */
+.fish-particle.fish-gap-bridge:not(.fish-wrap-teleport) {
+  transition: transform var(--fish-scroll-glide), opacity 0.15s ease;
+}
+
+/* Same whole-gesture baseline as body.is-scrolling .fish-particle above,
+   but for the tail/fin sub-elements script.js also writes to every tick.
+   Without this, the body would pick up the tiny microglide above while
+   the tail/fins kept snapping rigidly to their new angle in the same
+   instant — a stiff, disjointed look, same reasoning as the fish-gap-bridge
+   sub-element rule just below. */
+body.is-scrolling .fish-particle:not(.fish-wrap-teleport) .fish-tail,
+body.is-scrolling .fish-particle:not(.fish-wrap-teleport) .fish-body,
+body.is-scrolling .fish-particle:not(.fish-wrap-teleport) .shark-spine-tail,
+body.is-scrolling .fish-particle:not(.fish-wrap-teleport) .shark-tail-seg,
+body.is-scrolling .fish-particle:not(.fish-wrap-teleport) .shark-torso-flex,
+body.is-scrolling .fish-particle:not(.fish-wrap-teleport) .shark-dorsal-flex,
+body.is-scrolling .fish-particle:not(.fish-wrap-teleport) .guppy-tail-panel,
+body.is-scrolling .fish-particle:not(.fish-wrap-teleport) .guppy-dorsal-ribbon,
+body.is-scrolling .fish-particle:not(.fish-wrap-teleport) .guppy-pectoral {
+  transition: transform var(--fish-scroll-microglide);
+}
+
+/* Same gap bridge as above, but for the parts script.js ALSO writes a
+   fresh transform onto every single tick: tail wag, body ripple, shark
+   tail segments/torso flex/dorsal flex, and the guppy's extra fin layers.
+   Without this, a bridged parent (position) would glide smoothly to its
+   next spot while the tail/fins snapped rigidly to theirs in the same
+   instant — a stiff, disjointed look that reads as the fish "hanging"
+   even though its position never actually stopped moving. Every one of
+   these lives inside .fish-particle, whose own transform is already
+   covered above, so this just brings the moving parts into line with the
+   body they're attached to. --spine-bend feeds .shark-spine-tail's static
+   `transform: rotate(var(--spine-bend))`, and transitioning `transform`
+   here still interpolates correctly even though only the custom property
+   changed, since what's transitioned is the computed rotate() value. */
+.fish-particle.fish-gap-bridge:not(.fish-wrap-teleport) .fish-tail,
+.fish-particle.fish-gap-bridge:not(.fish-wrap-teleport) .fish-body,
+.fish-particle.fish-gap-bridge:not(.fish-wrap-teleport) .shark-spine-tail,
+.fish-particle.fish-gap-bridge:not(.fish-wrap-teleport) .shark-tail-seg,
+.fish-particle.fish-gap-bridge:not(.fish-wrap-teleport) .shark-torso-flex,
+.fish-particle.fish-gap-bridge:not(.fish-wrap-teleport) .shark-dorsal-flex,
+.fish-particle.fish-gap-bridge:not(.fish-wrap-teleport) .guppy-tail-panel,
+.fish-particle.fish-gap-bridge:not(.fish-wrap-teleport) .guppy-dorsal-ribbon,
+.fish-particle.fish-gap-bridge:not(.fish-wrap-teleport) .guppy-pectoral {
+  transition: transform var(--fish-scroll-glide);
 }
 
 .fish-particle.shark-particle {
@@ -2612,6 +2762,18 @@ body.bubbly-mode.fish-mode-on .fish-field {
    fishRenderEntity), the same static-transform pattern --spine-bend
    already used successfully below. transform-origin stays here since it's
    layout-independent and never needs to change per frame. */
+.fish-tail,
+.fish-body,
+.shark-particle .shark-spine-tail,
+.shark-particle .shark-tail-seg,
+.shark-particle .shark-torso-flex,
+.shark-particle .shark-dorsal-flex,
+.guppy-tail-panel,
+.guppy-dorsal-ribbon,
+.guppy-pectoral {
+  will-change: transform;
+}
+
 .fish-tail {
   transform-box: fill-box;
   transform-origin: 65% 50%;
@@ -2915,7 +3077,8 @@ body.bubbly-mode .modal-content {
     inset 0 -14px 26px -18px var(--bubble-ring-dark),
     0 14px 34px rgba(22, 63, 99, 0.15);
   border-radius: 26px;
-  transition: background 0.2s ease, backdrop-filter 0.2s ease;
+  will-change: backdrop-filter;
+  transition: background var(--glass-fade-in), backdrop-filter var(--glass-fade-in);
 }
 
 /* ---------- Wallpaper mode: cards go clear, not frosted -----------------
@@ -2943,7 +3106,8 @@ body.bubbly-mode .storage-panel {
     inset 0 1px 0 var(--bubble-ring-bright),
     inset 0 -12px 22px -16px var(--bubble-ring-dark),
     0 16px 34px rgba(22, 63, 99, 0.2);
-  transition: background 0.2s ease, backdrop-filter 0.2s ease;
+  will-change: backdrop-filter;
+  transition: background var(--glass-fade-in), backdrop-filter var(--glass-fade-in);
 }
 
 /* Pronunciation panel: was a hard-coded near-white block (#fbfdff) that
@@ -2985,7 +3149,8 @@ body.bubbly-mode .site-header {
   backdrop-filter: blur(calc(var(--glass-blur) * 0.6));
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.6));
   box-shadow: 0 1px 0 color-mix(in srgb, #fff calc(var(--glass-tint) * 0.4), transparent) inset, 0 8px 26px rgba(16, 41, 66, 0.3);
-  transition: background 0.2s ease, backdrop-filter 0.2s ease;
+  will-change: backdrop-filter;
+  transition: background var(--glass-fade-in), backdrop-filter var(--glass-fade-in);
 }
 
 /* ---------- The small round toolbar buttons: genuine bubbles — mostly
@@ -3127,7 +3292,8 @@ body.bubbly-mode select {
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.4));
   border-color: color-mix(in srgb, var(--border) calc(var(--glass-tint) * 0.6 + 40%), transparent);
   box-shadow: inset 0 1px 4px rgba(22, 63, 99, 0.1), inset 0 -1px 0 var(--bubble-ring-bright);
-  transition: box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  will-change: backdrop-filter;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, background var(--glass-fade-in), backdrop-filter var(--glass-fade-in);
 }
 
 body.bubbly-mode input[type="text"]:focus,
@@ -3164,7 +3330,8 @@ body.bubbly-mode .definition-card {
   backdrop-filter: blur(calc(var(--glass-blur) * 0.35));
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.35));
   box-shadow: inset 0 1px 0 var(--bubble-ring-bright), 0 2px 8px rgba(22, 63, 99, 0.06);
-  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, background 0.2s ease;
+  will-change: backdrop-filter;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, background var(--glass-fade-in), backdrop-filter var(--glass-fade-in);
 }
 
 body.bubbly-mode .definition-card:hover {
@@ -3430,7 +3597,23 @@ body.bubbly-mode .switch-thumb {
    and form fields) where blur still runs by default because there are
    only ever a few of them on screen at once — but re-sampling even those
    during a fast scroll adds up, so we still shed their blur for the
-   ~200ms window script.js marks with body.is-scrolling, same as before. */
+   ~200ms window script.js marks with body.is-scrolling, same as before.
+
+   This no longer forces `transition: none !important`. Each selector's
+   base rule already carries a slow, gentle `--glass-fade-in` for the
+   *return* to frosted glass (the moment worth savoring) — but that same
+   slow curve would look sluggish going the other way, so this rule gives
+   the dismissal its own quicker `--glass-fade-out` instead. Both tokens
+   share the same decelerating curve family (not one accelerating, one
+   decelerating) so neither direction ends in an abrupt cutoff — see the
+   --glass-fade-out/-in comment near :root for why that matters. Because
+   `body.is-scrolling.bubbly-mode` is more specific than the plain
+   `body.bubbly-mode` base rules, this transition value — not the base
+   one — is what's used the instant scrolling starts; when is-scrolling
+   is removed again, the base rule's own (slower) transition takes back
+   over for the return. Net feel: a quick, almost-unnoticed dip to clear
+   right as you start scrolling, then an unhurried, elegant settle back
+   into frosted glass once you stop — instead of a hard snap either way. */
 body.is-scrolling.bubbly-mode .card,
 body.is-scrolling.bubbly-mode .modal-content,
 body.is-scrolling.bubbly-mode .storage-panel,
@@ -3442,9 +3625,9 @@ body.is-scrolling.bubbly-mode input[type="url"],
 body.is-scrolling.bubbly-mode input[type="password"],
 body.is-scrolling.bubbly-mode textarea,
 body.is-scrolling.bubbly-mode select {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  transition: none !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition: background var(--glass-fade-out), backdrop-filter var(--glass-fade-out);
 }
 
 /* The fixed fish/bubble overlays don't need to react to scroll at all —

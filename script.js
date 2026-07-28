@@ -2897,6 +2897,19 @@ const fishEngine = {
     running: false,
     lastTime: 0,
     nextId: 1,
+    // Eased 0-1 "how slow-motion are we right now" value — see the
+    // scroll-slowdown block in fishTick. Starts at 1 (full speed) and
+    // glides toward SCROLL_SLOWMO_FACTOR while body.is-scrolling is set,
+    // then glides back. Kept as smoothed state (not a flag) so entering/
+    // leaving slow-motion is itself a taper, not a speed cut visible as
+    // its own little stutter.
+    scrollSlowFactor: 1,
+    // Set fresh every tick by fishTickCore: true only when THAT tick's own
+    // rawDt shows a genuine rAF gap (see FISH_GAP_THRESHOLD_S below), never
+    // held on for the whole scroll gesture. fishRenderEntity reads this to
+    // decide whether the current write needs the CSS glide bridge at all —
+    // see the "fish-gap-bridge" class handling there.
+    _hadRealGapThisTick: false,
   },
   field: null,
   rafId: null,
@@ -3028,10 +3041,14 @@ function fishLimitVelocityChange(fish, prevVelocity, dt, cfg) {
 
 function fishWrapBounds(fish, w, h, pad) {
   const p = fish.position;
-  if (p.x < -pad) p.x = w + pad;
-  else if (p.x > w + pad) p.x = -pad;
-  if (p.y < -pad) p.y = h + pad;
-  else if (p.y > h + pad) p.y = -pad;
+  // Flagged (not acted on) here — fishRenderEntity is what actually needs
+  // to know a wrap happened this tick, so it can suppress the scroll-only
+  // transition below and keep the edge-to-edge teleport instant instead of
+  // letting it visibly slide across the screen. See fishRenderEntity.
+  if (p.x < -pad) { p.x = w + pad; fish._justWrapped = true; }
+  else if (p.x > w + pad) { p.x = -pad; fish._justWrapped = true; }
+  if (p.y < -pad) { p.y = h + pad; fish._justWrapped = true; }
+  else if (p.y > h + pad) { p.y = -pad; fish._justWrapped = true; }
 }
 
 function fishPerimeterSpawn(w, h) {
@@ -3967,6 +3984,57 @@ function fishUpdateShark(shark, dt) {
 
 function fishRenderEntity(fish) {
   if (!fish.el || fish.removing) return;
+
+  // ---- Scroll-only transform transition: covers gaps from throttled rAF
+  // ticks (see body.is-scrolling .fish-particle in style.css) so a fish
+  // that misses a few frames mid-scroll glides smoothly to its next known
+  // position instead of visibly freezing then snapping. That transition
+  // must never apply to fishWrapBounds()'s edge-to-edge teleport though —
+  // it would turn an invisible off-screen jump into a fish sliding all the
+  // way across the screen. So: when a wrap happened this tick, drop the
+  // "no-transition" escape-hatch class for exactly this one write, then
+  // put it back on the very next tick (no extra reflow — both writes are
+  // already happening every frame regardless, this just reorders which
+  // frame they land on).
+  if (fish._justWrapped) {
+    fish.el.classList.add("fish-wrap-teleport");
+    fish._justWrapped = false;
+    fish._clearWrapClassNextTick = true;
+  } else if (fish._clearWrapClassNextTick) {
+    fish.el.classList.remove("fish-wrap-teleport");
+    fish._clearWrapClassNextTick = false;
+  }
+
+  // ---- Gap-bridge class: only on the specific tick that needs it -------
+  // fishTickCore sets _hadRealGapThisTick fresh every tick, true only when
+  // THAT tick's own rawDt showed a genuine dropped rAF frame. Adding
+  // "fish-gap-bridge" here (before the transform write below) gives that
+  // one write a CSS transition to glide from the last position instead of
+  // snapping; every other tick — including the common no-real-gap case
+  // while scrolling on a fast desktop — writes straight through with no
+  // transition at all, same as when the page isn't scrolling.
+  //
+  // The class used to get removed on the very next tick (~16ms later).
+  // But the transition it enables (--fish-scroll-glide) runs for 0.32s —
+  // stripping the class after one frame doesn't let it finish, it CANCELS
+  // it mid-flight: the next tick's transform write then lands with no
+  // transition active at all, so the fish snaps straight to that position
+  // instead of continuing the glide. That cancel-and-snap, repeating on
+  // every bridged gap through a scroll gesture, is what actually read as
+  // "hanging"/buggy. Keeping the class on for the transition's own
+  // duration (via a timer, re-armed on every fresh gap) lets each glide
+  // actually finish — and if another gap lands before it does, the
+  // transition just smoothly retargets to the newer position instead of
+  // being cut off.
+  if (fishEngine.state._hadRealGapThisTick) {
+    fish.el.classList.add("fish-gap-bridge");
+    clearTimeout(fish._gapBridgeTimer);
+    fish._gapBridgeTimer = setTimeout(() => {
+      fish.el.classList.remove("fish-gap-bridge");
+      fish._gapBridgeTimer = null;
+    }, FISH_GAP_BRIDGE_MS);
+  }
+
   const rot = fish.angle + (fish.extraRot || 0);
   fish.el.style.transform = `translate3d(${fish.position.x.toFixed(1)}px,${fish.position.y.toFixed(1)}px,0) rotate(${rot.toFixed(2)}deg) scale(${fish.scaleX || 1},${fish.scaleY || 1})`;
 
@@ -4046,8 +4114,30 @@ function fishRenderEntity(fish) {
   }
   if (fish.species === "guppy") fishRenderGuppyExtras(fish, phase);
 
-  fish.el.classList.toggle("fish-panic", !!fish.panic);
-  fish.el.dataset.behavior = fish.currentBehavior;
+  // ---- Scroll performance: skip no-op attribute/class writes -----------
+  // data-behavior drives real CSS attribute selectors (shark mouth/brow
+  // state — see .shark-particle[data-behavior="hunting"] etc. in
+  // style.css), so writing it unconditionally every frame forces the
+  // browser to invalidate and recompute style for that element ~60 times
+  // a second, for every fish and shark on screen, even on the (vast
+  // majority of) frames where behavior/panic didn't actually change since
+  // last tick. That's real main-thread cost stacking on top of everything
+  // else fishTickCore does, and — unlike the blur/bubble/dt trims
+  // elsewhere, which only kick in while body.is-scrolling is set — it was
+  // running every single frame regardless of whether the page was
+  // scrolling at all. Caching the last-written value per fish and only
+  // touching the DOM on an actual change removes that cost for every
+  // frame where nothing here changed, freeing up exactly the kind of
+  // main-thread budget that was competing with the browser's scroll
+  // compositing work.
+  if (fish._lastPanic !== !!fish.panic) {
+    fish._lastPanic = !!fish.panic;
+    fish.el.classList.toggle("fish-panic", fish._lastPanic);
+  }
+  if (fish._lastBehaviorAttr !== fish.currentBehavior) {
+    fish._lastBehaviorAttr = fish.currentBehavior;
+    fish.el.dataset.behavior = fish.currentBehavior;
+  }
 }
 
 // ---- Part 3: guppy soft-body tail cloth + trailing fins ------------------
@@ -4125,6 +4215,32 @@ function fishRenderGuppyExtras(fish, phase) {
   }
 }
 
+// How slow "slow-motion while scrolling" is, and how quickly the app eases
+// into/out of it. 0.4 = 40% normal speed — visibly calmer/gliding without
+// looking paused. SCROLL_SLOWMO_EASE is a time constant in seconds (not a
+// duration): larger = lazier ramp. 0.35s is quick enough to be in full
+// effect for a normal scroll gesture, slow enough that the ramp itself is
+// never the thing you notice.
+const SCROLL_SLOWMO_FACTOR = 0.4;
+const SCROLL_SLOWMO_EASE = 0.35;
+
+// How late a tick has to land before it counts as a genuine dropped rAF
+// frame rather than ordinary timing jitter. ~16.7ms is one frame at 60fps;
+// 0.026s gives ~1.5 frames of slack so a normal-cadence tick — the common
+// case even mid-scroll on a fast desktop — is never mistaken for a stall.
+// Only ticks that land past this actually get the CSS glide bridge (see
+// fishRenderEntity's "fish-gap-bridge" handling) — everything else writes
+// its new position with no transition at all, exactly like a non-scrolling
+// frame, so a healthy browser never sees any bridging applied.
+const FISH_GAP_THRESHOLD_S = 0.026;
+
+// How long the "fish-gap-bridge" class stays on an element once a dropped
+// frame triggers it. Must be >= --fish-scroll-glide's transition duration
+// in style.css (currently 0.32s) so the glide it enables actually gets to
+// finish instead of being stripped mid-transition — see fishRenderEntity.
+// A little slack (20ms) covers normal setTimeout scheduling jitter.
+const FISH_GAP_BRIDGE_MS = 340;
+
 function fishClearSharkThreats() {
   fishEngine.state.fishes.forEach((f) => {
     if (f.type !== "prey") return;
@@ -4133,12 +4249,21 @@ function fishClearSharkThreats() {
   });
 }
 
-function fishTick(now) {
-  if (!fishEngine.state.running) return;
-  if (!document.body.classList.contains("bubbly-mode") || !document.body.classList.contains("fish-mode-on")) {
-    fishEngine.rafId = requestAnimationFrame(fishTick);
-    return;
-  }
+// fishTickCore does the actual work and is deliberately rAF-agnostic — it
+// neither reads nor schedules requestAnimationFrame itself. That split
+// exists for one reason: some browsers (notably mobile Safari) deprioritize
+// rAF callbacks on the main thread for the duration of an active touch-
+// scroll gesture, well beyond the odd dropped frame the CSS glide/slow-
+// motion above already smooths over. When that happens rAF can simply stop
+// calling fishTick until the gesture ends — which looks identical to the
+// fish actually hanging, no matter how smooth the transition or how slow
+// the motion, because nothing is running at all. The "scroll" event itself
+// keeps firing throughout the same gesture even in browsers that starve
+// rAF like this, so fishBindListeners' scroll handler calls fishTickCore
+// directly as a supplemental heartbeat. fishTickRunIfDue guards that path
+// so it's a no-op whenever rAF is still ticking normally on its own — it
+// only ever does real work in exactly the gap rAF would otherwise leave.
+function fishTickCore(now) {
   // NOTE: fishTick used to fully skip the update+render pass while
   // "is-scrolling" was set, on the theory that a brief pause mid-swim would
   // be imperceptible. In practice the class stays on body for the entire
@@ -4150,9 +4275,40 @@ function fishTick(now) {
   // body.is-scrolling.bubbly-mode rules in style.css, which drop blur to a
   // flat fill for the duration). Combined with fishGetBubblePositions()
   // reusing last frame's bubble positions instead of a fresh layout read
-  // during scroll, that's enough — fish keep swimming normally here.
-  const dt = Math.min((now - (fishEngine.state.lastTime || now)) / 1000, 0.05);
+  // during scroll, that's enough to keep ticks landing on schedule.
+  //
+  // What's left is a *timing* problem, not a cost problem: rAF is not
+  // guaranteed to fire on a fixed schedule while the compositor is busy
+  // with a scroll, so ticks can land unevenly even when each one is cheap.
+  // .fish-particle's scroll-only transition (style.css) already bridges
+  // those gaps by gliding to wherever the next tick lands — but the wider
+  // the gap, the more distance that glide has to cover, and a big glide
+  // covering a big gap is exactly what reads as a stutter/hang. Slowing
+  // real dt down while scrolling shrinks how far a fish (and its tail
+  // beat — see tailHz*dt below) can travel between two ticks, so whatever
+  // gap does land is a small, easy glide instead of a big one, on top of
+  // just reading as an intentional, calmer "gliding" moment rather than
+  // a glitch. Smoothed via scrollSlowFactor (not snapped straight to the
+  // target) so the speed change itself is never a visible jolt, and it
+  // eases back out the same way once scrolling settles.
+  const rawDt = Math.min((now - (fishEngine.state.lastTime || now)) / 1000, 0.05);
+  // Did THIS tick actually land late? A healthy 60fps display delivers rAF
+  // roughly every 16.7ms; FISH_GAP_THRESHOLD_S gives that comfortable slack
+  // (about 1.5 frames) before calling it a real gap, so ordinary jitter
+  // never trips it. This is checked every tick regardless of is-scrolling —
+  // on a fast desktop, scrolling usually produces zero real gaps at all,
+  // and this is what lets fishRenderEntity skip the CSS bridge entirely in
+  // that (common) case instead of running it for the whole gesture.
+  fishEngine.state._hadRealGapThisTick =
+    fishEngine.state.lastTime > 0 && rawDt > FISH_GAP_THRESHOLD_S;
   fishEngine.state.lastTime = now;
+  const scrollSlowTarget = document.body.classList.contains("is-scrolling") ? SCROLL_SLOWMO_FACTOR : 1;
+  fishEngine.state.scrollSlowFactor = fishLerp(
+    fishEngine.state.scrollSlowFactor,
+    scrollSlowTarget,
+    Math.min(rawDt / SCROLL_SLOWMO_EASE, 1)
+  );
+  const dt = rawDt * fishEngine.state.scrollSlowFactor;
   // width/height are kept current by fishHandleResize (debounced on the
   // "resize" event) rather than re-read every frame — re-reading here on
   // top of that just meant a fish could still be using stale bounds for
@@ -4172,9 +4328,62 @@ function fishTick(now) {
     else if (f.type === "shark") fishUpdateShark(f, dt);
     fishRenderEntity(f);
   });
+}
 
+function fishTick(now) {
+  if (!fishEngine.state.running) return;
+  if (!document.body.classList.contains("bubbly-mode") || !document.body.classList.contains("fish-mode-on")) {
+    fishEngine.rafId = requestAnimationFrame(fishTick);
+    return;
+  }
+  // ---- Scroll performance: no more self-imposed frame-skipping ---------
+  // This used to unconditionally halve fishTick's rate for the entire
+  // scroll gesture (running fishTickCore on only every other rAF callback)
+  // on the theory that it was cheap insurance against the browser's own
+  // scroll-compositing load. In practice that halving ran every time
+  // body.is-scrolling was set — including the normal case on a fast
+  // desktop where the browser never actually drops a single real frame —
+  // so it was manufacturing exactly the frame gaps (and the CSS glide
+  // transitions to bridge them, see fishRenderEntity) that then read as
+  // jitter/hanging, instead of merely reacting to genuine ones. fishTick
+  // now runs fishTickCore on every rAF callback unconditionally, the same
+  // as when the page isn't scrolling at all. Real stalls (the browser
+  // actually skipping rAF for a beat) are still fully covered — they just
+  // show up as a single tick with an unusually large rawDt, which
+  // fishTickCore now detects for itself (FISH_GAP_THRESHOLD_S) and reacts
+  // to on exactly that tick, not for the whole gesture. The heartbeat
+  // paths (fishTickRunIfDue's scroll/touchmove listener and the
+  // setInterval fallback) are untouched by this and still catch true rAF
+  // stalls immediately regardless.
+  fishTickCore(now);
   fishEngine.rafId = requestAnimationFrame(fishTick);
 }
+
+// Supplemental heartbeat for the scroll handler (see fishTickCore's comment
+// above). Only runs fishTickCore itself if a real rAF-driven tick hasn't
+// landed recently — 40ms is a couple of dropped 60fps frames, comfortably
+// past normal frame-to-frame spacing, so this never double-runs a frame
+// rAF is already covering and only fires during an actual rAF stall.
+const SCROLL_HEARTBEAT_GAP = 0.04;
+function fishTickRunIfDue(now) {
+  if (!fishEngine.state.running) return;
+  if (!document.body.classList.contains("bubbly-mode") || !document.body.classList.contains("fish-mode-on")) return;
+  const sinceLast = (now - (fishEngine.state.lastTime || now)) / 1000;
+  if (sinceLast < SCROLL_HEARTBEAT_GAP) return;
+  fishTickCore(now);
+}
+
+// Last-resort safety net, independent of any DOM event. "scroll" and
+// "touchmove" (fishBindListeners below) cover the vast majority of rAF
+// stalls, but during a released-finger momentum/fling scroll some mobile
+// browsers go quiet on BOTH of those for a stretch while still throttling
+// rAF — no event fires at all, so nothing calls fishTickRunIfDue and the
+// fish sit frozen until the fling ends. setInterval runs on its own timer,
+// not tied to rAF or to any scroll-specific event, so it still fires in
+// exactly that gap. 120ms keeps this idle-cheap the rest of the time (one
+// class-list read + one subtraction, no-op whenever rAF is healthy) while
+// never leaving a true stall uncovered for long.
+setInterval(() => fishTickRunIfDue(performance.now()), 120);
 
 function fishStartEngine() {
   if (fishEngine.state.running || PREFERS_REDUCED_MOTION) return;
@@ -4274,13 +4483,58 @@ function fishBindListeners() {
   // scrolling. Toggling "is-scrolling" (see style.css) drops backdrop-filter
   // to a flat, nearly-free fill for the duration of the scroll and restores
   // the real glass look a moment after it settles.
-  window.addEventListener("scroll", () => {
+  const fishHandleScrollActivity = () => {
     document.body.classList.add("is-scrolling");
     clearTimeout(fishEngine.scrollEndTimer);
     fishEngine.scrollEndTimer = setTimeout(() => {
       document.body.classList.remove("is-scrolling");
     }, 200);
-  }, { passive: true });
+    // See fishTickCore's comment: keeps fish moving even on the rare
+    // browser/gesture combo where rAF itself stalls for the scroll's
+    // duration, not just the ones where it's merely uneven.
+    fishTickRunIfDue(performance.now());
+  };
+  window.addEventListener("scroll", fishHandleScrollActivity, { passive: true });
+  // "scrollend" (Chrome/Firefox; not yet in Safari, hence feature-detect)
+  // fires exactly once, right when scrolling actually settles — using it
+  // clears "is-scrolling" immediately there instead of waiting out the
+  // 200ms fallback timer below, so full speed/full blur return a beat
+  // sooner. Purely an enhancement: browsers without it just keep using the
+  // timer, same as before.
+  if ("onscrollend" in window) {
+    window.addEventListener("scrollend", () => {
+      clearTimeout(fishEngine.scrollEndTimer);
+      document.body.classList.remove("is-scrolling");
+    }, { passive: true });
+  }
+  // The page's own scroll is only half the story: .scroll-panel elements
+  // (#definitions-list, #images-gallery, #vaw-definitions) are internally-
+  // scrolling (own overflow-y: auto, see style.css), and a plain "scroll"
+  // event never bubbles up to window — so flicking through a long
+  // definitions or images list fired none of the mitigation above and hit
+  // the exact same backdrop-filter/rAF contention the window listener was
+  // built to avoid, just on a different element. Binding the same handler
+  // directly to each panel closes that gap. Queried once here rather than
+  // cached at module-load time since these panels already exist in the
+  // static markup (index.html) by the time fishBindListeners runs.
+  document.querySelectorAll(".scroll-panel").forEach((panel) => {
+    panel.addEventListener("scroll", fishHandleScrollActivity, { passive: true });
+  });
+
+  // ---- Touch-drag heartbeat: "scroll" alone isn't enough on touch -------
+  // Everything above (slow-motion dt, CSS glide, blur drop, the
+  // fishTickRunIfDue heartbeat) is keyed off the "scroll" event firing
+  // regularly enough to notice a gap and paper over it. On touch devices,
+  // "scroll" only fires once the page's visual position has actually
+  // moved — during the initial finger-down drag (before momentum kicks
+  // in) or a slow, deliberate drag, that can land noticeably less often
+  // than every frame, so a real rAF stall in that window has nothing to
+  // catch it. "touchmove" fires on every raw pointer sample the OS
+  // reports (far denser than "scroll"), so wiring the exact same
+  // heartbeat to it closes that gap without adding a new mitigation path
+  // — it's the same fishHandleScrollActivity, just triggered by a finer-
+  // grained signal during the part of the gesture that needs it most.
+  window.addEventListener("touchmove", fishHandleScrollActivity, { passive: true });
 }
 
 window.addShark = function addShark() {
