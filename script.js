@@ -1669,91 +1669,122 @@ function clampFetchLimit(n, fallback) {
   return Math.min(FETCH_LIMIT_MAX, Math.max(FETCH_LIMIT_MIN, num));
 }
 
+// PERF: these six limits used to be read fresh from localStorage on every
+// call — and getFilteredData() (below) calls all six of them for EVERY
+// row, on EVERY table render. With ~2000+ entries that was 10,000+
+// synchronous localStorage reads per render. Cache each value in memory
+// and only re-read/re-parse when its setter (the Limits panel) changes it.
+const _fetchLimitCache = {};
+
 function getSystemDefLimit() {
-  try {
-    return clampFetchLimit(localStorage.getItem(SYSTEM_DEF_LIMIT_STORAGE), DEFAULT_SYSTEM_DEF_LIMIT);
-  } catch (err) {
-    return DEFAULT_SYSTEM_DEF_LIMIT;
+  if (_fetchLimitCache.systemDef === undefined) {
+    try {
+      _fetchLimitCache.systemDef = clampFetchLimit(localStorage.getItem(SYSTEM_DEF_LIMIT_STORAGE), DEFAULT_SYSTEM_DEF_LIMIT);
+    } catch (err) {
+      _fetchLimitCache.systemDef = DEFAULT_SYSTEM_DEF_LIMIT;
+    }
   }
+  return _fetchLimitCache.systemDef;
 }
 function setSystemDefLimit(n) {
+  _fetchLimitCache.systemDef = clampFetchLimit(n, DEFAULT_SYSTEM_DEF_LIMIT);
   try {
-    localStorage.setItem(SYSTEM_DEF_LIMIT_STORAGE, String(clampFetchLimit(n, DEFAULT_SYSTEM_DEF_LIMIT)));
+    localStorage.setItem(SYSTEM_DEF_LIMIT_STORAGE, String(_fetchLimitCache.systemDef));
   } catch (err) {
     // non-fatal
   }
 }
 
 function getManualDefLimit() {
-  try {
-    return clampFetchLimit(localStorage.getItem(MANUAL_DEF_LIMIT_STORAGE), DEFAULT_MANUAL_DEF_LIMIT);
-  } catch (err) {
-    return DEFAULT_MANUAL_DEF_LIMIT;
+  if (_fetchLimitCache.manualDef === undefined) {
+    try {
+      _fetchLimitCache.manualDef = clampFetchLimit(localStorage.getItem(MANUAL_DEF_LIMIT_STORAGE), DEFAULT_MANUAL_DEF_LIMIT);
+    } catch (err) {
+      _fetchLimitCache.manualDef = DEFAULT_MANUAL_DEF_LIMIT;
+    }
   }
+  return _fetchLimitCache.manualDef;
 }
 function setManualDefLimit(n) {
+  _fetchLimitCache.manualDef = clampFetchLimit(n, DEFAULT_MANUAL_DEF_LIMIT);
   try {
-    localStorage.setItem(MANUAL_DEF_LIMIT_STORAGE, String(clampFetchLimit(n, DEFAULT_MANUAL_DEF_LIMIT)));
+    localStorage.setItem(MANUAL_DEF_LIMIT_STORAGE, String(_fetchLimitCache.manualDef));
   } catch (err) {
     // non-fatal
   }
 }
 
 function getAiDefLimit() {
-  try {
-    return clampFetchLimit(localStorage.getItem(AI_DEF_LIMIT_STORAGE), DEFAULT_AI_DEF_LIMIT);
-  } catch (err) {
-    return DEFAULT_AI_DEF_LIMIT;
+  if (_fetchLimitCache.aiDef === undefined) {
+    try {
+      _fetchLimitCache.aiDef = clampFetchLimit(localStorage.getItem(AI_DEF_LIMIT_STORAGE), DEFAULT_AI_DEF_LIMIT);
+    } catch (err) {
+      _fetchLimitCache.aiDef = DEFAULT_AI_DEF_LIMIT;
+    }
   }
+  return _fetchLimitCache.aiDef;
 }
 function setAiDefLimit(n) {
+  _fetchLimitCache.aiDef = clampFetchLimit(n, DEFAULT_AI_DEF_LIMIT);
   try {
-    localStorage.setItem(AI_DEF_LIMIT_STORAGE, String(clampFetchLimit(n, DEFAULT_AI_DEF_LIMIT)));
+    localStorage.setItem(AI_DEF_LIMIT_STORAGE, String(_fetchLimitCache.aiDef));
   } catch (err) {
     // non-fatal
   }
 }
 
 function getSystemImgLimit() {
-  try {
-    return clampFetchLimit(localStorage.getItem(SYSTEM_IMG_LIMIT_STORAGE), DEFAULT_SYSTEM_IMG_LIMIT);
-  } catch (err) {
-    return DEFAULT_SYSTEM_IMG_LIMIT;
+  if (_fetchLimitCache.systemImg === undefined) {
+    try {
+      _fetchLimitCache.systemImg = clampFetchLimit(localStorage.getItem(SYSTEM_IMG_LIMIT_STORAGE), DEFAULT_SYSTEM_IMG_LIMIT);
+    } catch (err) {
+      _fetchLimitCache.systemImg = DEFAULT_SYSTEM_IMG_LIMIT;
+    }
   }
+  return _fetchLimitCache.systemImg;
 }
 function setSystemImgLimit(n) {
+  _fetchLimitCache.systemImg = clampFetchLimit(n, DEFAULT_SYSTEM_IMG_LIMIT);
   try {
-    localStorage.setItem(SYSTEM_IMG_LIMIT_STORAGE, String(clampFetchLimit(n, DEFAULT_SYSTEM_IMG_LIMIT)));
+    localStorage.setItem(SYSTEM_IMG_LIMIT_STORAGE, String(_fetchLimitCache.systemImg));
   } catch (err) {
     // non-fatal
   }
 }
 
 function getManualImgLimit() {
-  try {
-    return clampFetchLimit(localStorage.getItem(MANUAL_IMG_LIMIT_STORAGE), DEFAULT_MANUAL_IMG_LIMIT);
-  } catch (err) {
-    return DEFAULT_MANUAL_IMG_LIMIT;
+  if (_fetchLimitCache.manualImg === undefined) {
+    try {
+      _fetchLimitCache.manualImg = clampFetchLimit(localStorage.getItem(MANUAL_IMG_LIMIT_STORAGE), DEFAULT_MANUAL_IMG_LIMIT);
+    } catch (err) {
+      _fetchLimitCache.manualImg = DEFAULT_MANUAL_IMG_LIMIT;
+    }
   }
+  return _fetchLimitCache.manualImg;
 }
 function setManualImgLimit(n) {
+  _fetchLimitCache.manualImg = clampFetchLimit(n, DEFAULT_MANUAL_IMG_LIMIT);
   try {
-    localStorage.setItem(MANUAL_IMG_LIMIT_STORAGE, String(clampFetchLimit(n, DEFAULT_MANUAL_IMG_LIMIT)));
+    localStorage.setItem(MANUAL_IMG_LIMIT_STORAGE, String(_fetchLimitCache.manualImg));
   } catch (err) {
     // non-fatal
   }
 }
 
 function getAiImgLimit() {
-  try {
-    return clampFetchLimit(localStorage.getItem(AI_IMG_LIMIT_STORAGE), DEFAULT_AI_IMG_LIMIT);
-  } catch (err) {
-    return DEFAULT_AI_IMG_LIMIT;
+  if (_fetchLimitCache.aiImg === undefined) {
+    try {
+      _fetchLimitCache.aiImg = clampFetchLimit(localStorage.getItem(AI_IMG_LIMIT_STORAGE), DEFAULT_AI_IMG_LIMIT);
+    } catch (err) {
+      _fetchLimitCache.aiImg = DEFAULT_AI_IMG_LIMIT;
+    }
   }
+  return _fetchLimitCache.aiImg;
 }
 function setAiImgLimit(n) {
+  _fetchLimitCache.aiImg = clampFetchLimit(n, DEFAULT_AI_IMG_LIMIT);
   try {
-    localStorage.setItem(AI_IMG_LIMIT_STORAGE, String(clampFetchLimit(n, DEFAULT_AI_IMG_LIMIT)));
+    localStorage.setItem(AI_IMG_LIMIT_STORAGE, String(_fetchLimitCache.aiImg));
   } catch (err) {
     // non-fatal
   }
@@ -7957,16 +7988,41 @@ function renderRowCells(entry, includeBookColumn) {
   `;
 }
 
+// PERF: building ~2000 rows of markup as one giant innerHTML string is
+// fine — string concat is cheap. The part that actually blocks the main
+// thread (and shows up as "lag") is the browser parsing that string and
+// creating/laying out thousands of DOM nodes (plus their <img> elements)
+// in a single synchronous frame. Inserting rows in small batches across
+// requestAnimationFrame lets the browser paint/respond in between chunks
+// instead of freezing for one long stretch. The FIRST chunk still renders
+// immediately (so the page never looks empty), and everything after that
+// streams in over the next few frames — usually finishing well under a
+// second even for the full register.
+function appendRowsHtmlChunk(tbody, htmlChunk) {
+  const tpl = document.createElement("template");
+  tpl.innerHTML = htmlChunk;
+  tbody.appendChild(tpl.content);
+}
+
+function renderRowsIncrementally(tbody, rowHtmlList, chunkSize = 250) {
+  let i = 0;
+  function step() {
+    const chunk = rowHtmlList.slice(i, i + chunkSize);
+    if (!chunk.length) return;
+    appendRowsHtmlChunk(tbody, chunk.join(""));
+    i += chunkSize;
+    if (i < rowHtmlList.length) requestAnimationFrame(step);
+  }
+  step();
+}
+
 function renderFlatTable(list) {
   // Strict chronological/hierarchical sequencing: Book (alphabetical) →
   // Page start (ascending) → seq (order first entered) — the same
   // ordering used for JSON/PDF export, kept consistent everywhere entries
   // are displayed.
   const sorted = list.slice().sort(compareEntriesForExport);
-
-  const rows = sorted
-    .map((entry) => `<tr>${renderRowCells(entry, true)}</tr>`)
-    .join("");
+  const rowHtmlList = sorted.map((entry) => `<tr>${renderRowCells(entry, true)}</tr>`);
 
   tableContainer.innerHTML = `
     <table>
@@ -7980,11 +8036,11 @@ function renderFlatTable(list) {
           <th>Actions</th>
         </tr>
       </thead>
-      <tbody>${rows}</tbody>
+      <tbody></tbody>
     </table>
   `;
 
-  attachRowListeners();
+  renderRowsIncrementally(tableContainer.querySelector("tbody"), rowHtmlList);
 }
 
 function renderGroupedByPage(list) {
@@ -7997,12 +8053,12 @@ function renderGroupedByPage(list) {
 
   const sortedGroups = [...byPage.values()].sort((a, b) => a.pageStart - b.pageStart);
 
-  let rows = "";
+  const rowHtmlList = [];
   sortedGroups.forEach(({ pageStart, pageEnd, entries: pageEntries }) => {
-    rows += `<tr class="page-group-row"><td colspan="4">${formatPageLabel(pageStart, pageEnd)}</td></tr>`;
+    rowHtmlList.push(`<tr class="page-group-row"><td colspan="4">${formatPageLabel(pageStart, pageEnd)}</td></tr>`);
     const wordsOnPage = pageEntries.sort((a, b) => (a.seq ?? a.timestamp) - (b.seq ?? b.timestamp));
     wordsOnPage.forEach((entry) => {
-      rows += `<tr>${renderRowCells(entry, false)}</tr>`;
+      rowHtmlList.push(`<tr>${renderRowCells(entry, false)}</tr>`);
     });
   });
 
@@ -8016,49 +8072,71 @@ function renderGroupedByPage(list) {
           <th>Actions</th>
         </tr>
       </thead>
-      <tbody>${rows}</tbody>
+      <tbody></tbody>
     </table>
   `;
 
-  attachRowListeners();
+  renderRowsIncrementally(tableContainer.querySelector("tbody"), rowHtmlList);
 }
 
-function attachRowListeners() {
-  tableContainer.querySelectorAll(".speak-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const entry = entries.find((e) => e.id === btn.dataset.id);
-      if (entry) playPronunciation(entry, btn.dataset.accent);
-    });
-  });
+// PERF: this used to run after EVERY renderTable() call and attach a
+// fresh set of listeners to every row's buttons/cells/thumbnails —
+// with ~2000+ entries that's 10,000+ new closures created (and the old
+// ones garbage-collected) on every add/edit/delete/keystroke-filter.
+// Replaced with a single delegated listener set (below), bound once.
+// Kept as a no-op so any stray call site elsewhere in the file is safe.
+function attachRowListeners() {}
 
-  tableContainer.querySelectorAll(".edit-btn").forEach((btn) => {
-    btn.addEventListener("click", () => openEditModal(btn.dataset.id));
-  });
-
-  tableContainer.querySelectorAll(".delete-btn").forEach((btn) => {
-    btn.addEventListener("click", () => deleteEntry(btn.dataset.id));
+// Bound once from init(). Handles clicks/dblclicks for every row via
+// event delegation, so rendering a new table body never needs to attach
+// any per-row listeners — it just needs the right data-* attributes,
+// which renderRowCells()/renderImageCell() already write.
+function bindTableRowDelegation() {
+  tableContainer.addEventListener("click", (e) => {
+    const speakBtn = e.target.closest(".speak-btn");
+    if (speakBtn) {
+      const entry = entries.find((en) => en.id === speakBtn.dataset.id);
+      if (entry) playPronunciation(entry, speakBtn.dataset.accent);
+      return;
+    }
+    const editBtn = e.target.closest(".edit-btn");
+    if (editBtn) {
+      openEditModal(editBtn.dataset.id);
+      return;
+    }
+    const deleteBtn = e.target.closest(".delete-btn");
+    if (deleteBtn) {
+      deleteEntry(deleteBtn.dataset.id);
+      return;
+    }
+    const thumb = e.target.closest(".row-thumb");
+    if (thumb) {
+      window.open(thumb.src, "_blank");
+      return;
+    }
   });
 
   // 🎧 Strictly gated double-click trigger for the Vocabulary Audio
   // Window — see the "FLOATING VOCABULARY AUDIO WINDOW" block near the
-  // end of this file. When the master toggle is OFF this listener still
-  // exists (rows get re-rendered constantly), but it bails out
-  // immediately with no side effects at all, per spec.
-  tableContainer.querySelectorAll(".def-cell").forEach((cell) => {
-    cell.addEventListener("dblclick", () => vawHandleDefDblClick(cell.dataset.id));
+  // end of this file. When the master toggle is OFF this still fires but
+  // bails out immediately with no side effects, per spec.
+  tableContainer.addEventListener("dblclick", (e) => {
+    const cell = e.target.closest(".def-cell");
+    if (cell) vawHandleDefDblClick(cell.dataset.id);
   });
 
-  tableContainer.querySelectorAll(".row-thumb").forEach((imgEl) => {
-    imgEl.addEventListener("click", () => window.open(imgEl.src, "_blank"));
-    imgEl.addEventListener(
-      "error",
-      () => {
+  // "error" doesn't bubble, but a capturing listener on an ancestor still
+  // sees it on the way down to the target, so delegation still works here.
+  tableContainer.addEventListener(
+    "error",
+    (e) => {
+      if (e.target.matches?.(".row-thumb")) {
         // Hide dead links in the table rather than showing a broken icon.
-        imgEl.style.display = "none";
-      },
-      { once: true }
-    );
-  });
+        e.target.style.display = "none";
+      }
+    },
+    true
+  );
 }
 
 /* ---------------------------------------------------------------------
@@ -8073,6 +8151,7 @@ async function init() {
   prefillLastBookPage();
   refreshBookFilterOptions();
   refreshBookDatalist();
+  bindTableRowDelegation();
   renderTable();
   initCustomizeLayout();
   initFetchLimitsUI();
