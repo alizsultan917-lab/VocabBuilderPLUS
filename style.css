@@ -1361,6 +1361,19 @@ textarea {
   display: none !important;
 }
 
+.table-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 12px 0 2px;
+}
+
+.table-pager-status {
+  font-size: 13px;
+  color: var(--ink-soft, #666);
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }

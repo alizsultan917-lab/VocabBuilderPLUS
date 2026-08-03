@@ -310,6 +310,15 @@ const pageFilter = document.getElementById("page-filter");
 const searchInput = document.getElementById("search-input");
 const entryCount = document.getElementById("entry-count");
 const tableContainer = document.getElementById("table-container");
+const tablePager = document.getElementById("table-pager");
+
+// PAGINATION: caps how many rows ever get built/inserted into the DOM at
+// once, so performance stays flat no matter how many entries the register
+// holds — 100 entries or 100,000, a render only ever touches one page's
+// worth of rows. This is what actually guarantees "never hangs", as
+// opposed to just rendering faster.
+const TABLE_PAGE_SIZE = 100;
+let currentTablePage = 1;
 const footerTotal = document.getElementById("footer-total");
 
 const exportJsonBtn = document.getElementById("export-json-btn");
@@ -7222,9 +7231,13 @@ function refreshBookDatalist() {
     .join("");
 }
 
-bookFilter.addEventListener("change", renderTable);
-pageFilter.addEventListener("input", debounce(renderTable, 200));
-searchInput.addEventListener("input", debounce(renderTable, 200));
+function resetTablePageAndRender() {
+  currentTablePage = 1;
+  renderTable();
+}
+bookFilter.addEventListener("change", resetTablePageAndRender);
+pageFilter.addEventListener("input", debounce(resetTablePageAndRender, 200));
+searchInput.addEventListener("input", debounce(resetTablePageAndRender, 200));
 
 /* ---------------------------------------------------------------------
    EXPORT / IMPORT
@@ -7873,20 +7886,67 @@ function renderTable() {
   if (entries.length === 0) {
     tableContainer.innerHTML =
       '<p id="empty-state" class="empty-state">No entries yet. Add your first word above to begin your register.</p>';
+    renderTablePager(0, 0);
     return;
   }
 
   if (filtered.length === 0) {
     tableContainer.innerHTML =
       '<p class="empty-state">No entries match your filters/search.</p>';
+    renderTablePager(0, 0);
     return;
   }
 
+  // Sort once here (same ordering used everywhere: Book → Page → seq),
+  // THEN slice to just the current page's ~100 rows. Everything below
+  // this point — HTML building, DOM insertion — only ever sees that one
+  // page, regardless of how many entries exist in total.
+  const sorted = filtered.slice().sort(compareEntriesForExport);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / TABLE_PAGE_SIZE));
+  currentTablePage = Math.min(Math.max(1, currentTablePage), totalPages);
+  const startIdx = (currentTablePage - 1) * TABLE_PAGE_SIZE;
+  const pageSlice = sorted.slice(startIdx, startIdx + TABLE_PAGE_SIZE);
+
   if (selectedBook) {
-    renderGroupedByPage(filtered);
+    renderGroupedByPage(pageSlice);
   } else {
-    renderFlatTable(filtered);
+    renderFlatTable(pageSlice);
   }
+
+  renderTablePager(currentTablePage, totalPages);
+}
+
+function renderTablePager(current, total) {
+  if (!tablePager) return;
+  if (total <= 1) {
+    tablePager.innerHTML = "";
+    tablePager.classList.add("hidden");
+    return;
+  }
+  tablePager.classList.remove("hidden");
+  tablePager.innerHTML = `
+    <button type="button" class="btn btn-secondary btn-small" id="table-pager-prev" ${current <= 1 ? "disabled" : ""}>‹ Prev</button>
+    <span class="table-pager-status">Page ${current} of ${total} (${TABLE_PAGE_SIZE} entries/page)</span>
+    <button type="button" class="btn btn-secondary btn-small" id="table-pager-next" ${current >= total ? "disabled" : ""}>Next ›</button>
+  `;
+}
+
+// Bound once from init() — Prev/Next never need re-binding since the
+// pager bar's own two buttons are recreated each render but this listener
+// lives on their stable parent.
+function bindTablePagerDelegation() {
+  if (!tablePager) return;
+  tablePager.addEventListener("click", (e) => {
+    if (e.target.closest("#table-pager-prev")) {
+      currentTablePage -= 1;
+      renderTable();
+      tableContainer.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else if (e.target.closest("#table-pager-next")) {
+      currentTablePage += 1;
+      renderTable();
+      tableContainer.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
 }
 
 function renderImageCell(entry) {
@@ -8152,6 +8212,7 @@ async function init() {
   refreshBookFilterOptions();
   refreshBookDatalist();
   bindTableRowDelegation();
+  bindTablePagerDelegation();
   renderTable();
   initCustomizeLayout();
   initFetchLimitsUI();
