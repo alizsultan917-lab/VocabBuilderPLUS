@@ -69,6 +69,12 @@ const BUBBLE_MODE_STORAGE = "litVocabBubbleMode";
 const GLASS_TRANSPARENCY_STORAGE = "litVocabGlassTransparency";
 const GLASS_BLUR_STORAGE = "litVocabGlassBlur";
 const GLASS_TINT_STORAGE = "litVocabGlassTint";
+// 🫧 Bubble realism — refraction highlights layered on top of the existing
+// moving-bubbles/bubbly-mode rendering. Kept separate from the three glass
+// keys above since they can be tuned independently of glass opacity/blur/tint.
+const BUBBLE_REFRACTION_STORAGE = "litVocabBubbleRefraction";
+const BUBBLE_TENSION_STORAGE = "litVocabBubbleTension";
+const BUBBLE_SPECULAR_STORAGE = "litVocabBubbleSpecular";
 const FISH_MODE_STORAGE = "litVocabFishMode";
 const FISH_SPECIES_STORAGE = "litVocabFishSpecies";
 // 🖼️ Wallpaper — the image itself is stored as a compressed data: URL
@@ -82,6 +88,10 @@ const WALLPAPER_BLUR_STORAGE = "litVocabWallpaperBlur";
 // the current wallpaper instead of using the app's default blue palette.
 const SMART_ACCENT_STORAGE = "litVocabSmartAccentEnabled";
 const DEFAULT_SMART_ACCENT = false;
+const DEF_LEGIBILITY_STORAGE = "litVocabDefLegibilityOpacity";
+const DEFAULT_DEF_LEGIBILITY_OPACITY = 80; // % — stored/shown as whole percent, applied as a 0-1 decimal
+const DEF_LEGIBILITY_MIN = 30; // below this the row is nearly invisible, not just dimmed
+const DEF_LEGIBILITY_MAX = 100;
 // Wallpapers are sampled at a tiny downscaled size purely to pick a
 // representative color — sampling the full-resolution stored image would
 // cost far more CPU for no better a result.
@@ -100,6 +110,15 @@ const DEFAULT_BUBBLE_MODE = true;
 const DEFAULT_GLASS_TRANSPARENCY = 30; // % — how see-through the glass is (0 = opaque, 100 = fully transparent)
 const DEFAULT_GLASS_BLUR = 20;         // px — backdrop blur radius
 const DEFAULT_GLASS_TINT = 50;         // % — strength of the color tint / glossy highlight
+// Off by default — this is an extra layer on top of Moving bubbles, not a
+// replacement, so existing users don't get a visual change until they opt in.
+const DEFAULT_BUBBLE_REFRACTION = false;
+const DEFAULT_BUBBLE_TENSION = 50;  // % — matches the slider's initial value in index.html
+const DEFAULT_BUBBLE_SPECULAR = 75; // % — matches the slider's initial value in index.html
+const BUBBLE_TENSION_MIN = 0;
+const BUBBLE_TENSION_MAX = 100;
+const BUBBLE_SPECULAR_MIN = 0;
+const BUBBLE_SPECULAR_MAX = 100;
 const DEFAULT_FISH_MODE = true;
 const FISH_SPECIES_IDS = ["clownfish", "betta", "angelfish", "guppy", "pufferfish"];
 const DEFAULT_FISH_SPECIES_PREFS = { clownfish: true, betta: true, angelfish: true, guppy: true, pufferfish: true };
@@ -376,6 +395,11 @@ const glassBlurInput = document.getElementById("glass-blur-input");
 const glassBlurValue = document.getElementById("glass-blur-value");
 const glassTintInput = document.getElementById("glass-tint-input");
 const glassTintValue = document.getElementById("glass-tint-value");
+const bubbleRefractionToggle = document.getElementById("bubble-refraction-toggle");
+const bubbleTensionInput = document.getElementById("bubble-tension-input");
+const bubbleTensionValue = document.getElementById("bubble-tension-value");
+const bubbleSpecularInput = document.getElementById("bubble-specular-input");
+const bubbleSpecularValue = document.getElementById("bubble-specular-value");
 const wallpaperPreview = document.getElementById("wallpaper-preview");
 const wallpaperStatus = document.getElementById("wallpaper-status");
 const wallpaperFileInput = document.getElementById("wallpaper-file-input");
@@ -386,6 +410,8 @@ const wallpaperDimValue = document.getElementById("wallpaper-dim-value");
 const wallpaperBlurInput = document.getElementById("wallpaper-blur-input");
 const wallpaperBlurValue = document.getElementById("wallpaper-blur-value");
 const smartAccentToggle = document.getElementById("smart-accent-toggle");
+const defLegibilityInput = document.getElementById("def-legibility-input");
+const defLegibilityValue = document.getElementById("def-legibility-value");
 const smartAccentStatus = document.getElementById("smart-accent-status");
 const fishModeToggle = document.getElementById("fish-mode-toggle");
 const fishSpeciesControls = document.getElementById("fish-species-controls");
@@ -2012,9 +2038,10 @@ function applyBubblyMode() {
   const on = getBubblyMode();
   document.body.classList.toggle("bubbly-mode", on);
   if (on) {
-    // All three are lazy/guarded internally — cheap to call on every
+    // All four are lazy/guarded internally — cheap to call on every
     // toggle, they only actually do work the first time this fires.
     initBubbleTilt();
+    initBubbleSpecularTracking();
     initBubbleField();
     initFishField();
   }
@@ -2092,6 +2119,95 @@ function initBubbleTilt() {
   });
 }
 
+// ---------- 🫧 Cursor-tracking specular highlight ----------
+// Companion to the 3D tilt above, but re-aims the highlight itself: the
+// glint baked into --bubble-core (see the "INTERACTIVE CONTROLS" and
+// base --bubble-core rules in style.css) is a fixed-position radial
+// gradient by default, so it reads as light hitting the bubble from a
+// constant direction regardless of where the cursor actually is. While
+// Ultra-Realistic Bubble Refraction is on, this re-aims that highlight
+// toward the pointer via --mouse-x/--mouse-y instead.
+//
+// Kept as its own delegated listener/active-element pair (same shape as
+// initBubbleTilt, not merged into it) because it targets a wider set of
+// surfaces — panels and cards, not just the round/pill controls tilt
+// covers — and is gated on a different toggle (Bubble Refraction, not
+// Liquid Interface alone), so the two need to be free to be on/off
+// independently. rAF-throttled so a fast mouse sweep across many
+// surfaces never queues more than one style write per frame.
+const BUBBLE_SPECULAR_SELECTOR =
+  ".btn, .icon-btn, .storage-toggle-btn, .storage-panel, .card, .modal-content, .site-header, .definition-card";
+
+let bubbleSpecularInitDone = false;
+let bubbleSpecularActiveEl = null;
+let bubbleSpecularRafId = null;
+let bubbleSpecularLastEvent = null;
+
+function clearBubbleSpecular(el) {
+  if (!el) return;
+  el.style.removeProperty("--mouse-x");
+  el.style.removeProperty("--mouse-y");
+}
+
+function initBubbleSpecularTracking() {
+  if (bubbleSpecularInitDone || PREFERS_REDUCED_MOTION) return;
+  bubbleSpecularInitDone = true;
+
+  document.addEventListener(
+    "pointermove",
+    (e) => {
+      // Bubbly mode gates whether these surfaces render as glass at
+      // all; Bubble Refraction gates this specific enhancement on top
+      // of that, same relationship the ::after streak on .bubble-particle
+      // already has in style.css.
+      if (
+        !document.body.classList.contains("bubbly-mode") ||
+        !document.body.classList.contains("bubble-refraction-on")
+      ) {
+        return;
+      }
+
+      bubbleSpecularLastEvent = e;
+      if (bubbleSpecularRafId) return;
+
+      bubbleSpecularRafId = requestAnimationFrame(() => {
+        bubbleSpecularRafId = null;
+        const evt = bubbleSpecularLastEvent;
+        if (!evt) return;
+
+        const el = evt.target.closest ? evt.target.closest(BUBBLE_SPECULAR_SELECTOR) : null;
+
+        if (el !== bubbleSpecularActiveEl) {
+          clearBubbleSpecular(bubbleSpecularActiveEl);
+          bubbleSpecularActiveEl = el;
+        }
+        if (!el) return;
+
+        const rect = el.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        // Percent offsets, not px — matches the `at X% Y%` position
+        // syntax the --bubble-core radial-gradients already use, so the
+        // CSS side just swaps a fixed percent for var(--mouse-x/-y).
+        const mx = Math.min(1, Math.max(0, (evt.clientX - rect.left) / rect.width)) * 100;
+        const my = Math.min(1, Math.max(0, (evt.clientY - rect.top) / rect.height)) * 100;
+
+        el.style.setProperty("--mouse-x", `${mx.toFixed(1)}%`);
+        el.style.setProperty("--mouse-y", `${my.toFixed(1)}%`);
+      });
+    },
+    { passive: true }
+  );
+
+  document.addEventListener("pointerleave", () => {
+    if (bubbleSpecularRafId) {
+      cancelAnimationFrame(bubbleSpecularRafId);
+      bubbleSpecularRafId = null;
+    }
+    clearBubbleSpecular(bubbleSpecularActiveEl);
+    bubbleSpecularActiveEl = null;
+  });
+}
+
 // ---------- Ambient bubble field ----------
 // Fills the empty #bubble-field overlay (see index.html) with a set of
 // .bubble-particle divs that then just rise forever on the CSS
@@ -2163,11 +2279,31 @@ function createBubbleParticle(withNegativeDelay) {
   // instead of every bubble launching together from the bottom.
   const delay = withNegativeDelay ? -Math.random() * duration : 0;
   const opacity = 0.25 + Math.random() * 0.4;
+  // Wobble: real bubbles don't rise in a straight line — water drag
+  // nudges them side to side as they climb. Bigger bubbles catch a
+  // touch more drag; sign is randomized per-bubble so the whole field
+  // doesn't lean the same way. --brot is a small paired rotational sway
+  // so the highlight/ring tilts along with the drift instead of sliding
+  // in a perfectly upright body. Both get multiplied by an alternating
+  // per-stage factor in bubble-rise-3d (style.css) to turn these two
+  // numbers into a wandering, organic path.
+  const wobbleSign = Math.random() < 0.5 ? 1 : -1;
+  const wobble = (10 + Math.random() * 22 + size * 0.15) * wobbleSign;
+  const rot = 8 + Math.random() * 14;
+  // Twinkle: the ::after highlight glint pulses on its own independent
+  // timer, desynced per-bubble, so the field sparkles rather than
+  // pulsing in unison — see bubble-twinkle in style.css.
+  const twinkleDur = 1.6 + Math.random() * 2.2;
+  const twinkleDelay = Math.random() * 3;
   particle.style.setProperty("--bsize", `${size.toFixed(0)}px`);
   particle.style.setProperty("--bx", `${left.toFixed(1)}%`);
   particle.style.setProperty("--bdur", `${duration.toFixed(1)}s`);
   particle.style.setProperty("--bdelay", `${delay.toFixed(1)}s`);
   particle.style.setProperty("--bopacity", opacity.toFixed(2));
+  particle.style.setProperty("--bwobble", `${wobble.toFixed(1)}px`);
+  particle.style.setProperty("--brot", `${rot.toFixed(1)}deg`);
+  particle.style.setProperty("--btwinkle-dur", `${twinkleDur.toFixed(2)}s`);
+  particle.style.setProperty("--btwinkle-delay", `${twinkleDelay.toFixed(2)}s`);
   bindBubblePopListeners(particle);
   return particle;
 }
@@ -4762,6 +4898,67 @@ function applyGlassPrefs() {
   glassControls.classList.toggle("hidden", !getBubblyMode());
 }
 
+// 🫧 Bubble realism — refraction/tension/specular, layered on top of the
+// existing --bubble-* highlight variables (see style.css) rather than
+// replacing them, so it works whether or not Moving bubbles is on.
+function getBubbleRefraction() {
+  try {
+    return localStorage.getItem(BUBBLE_REFRACTION_STORAGE) === "true";
+  } catch (err) {
+    return DEFAULT_BUBBLE_REFRACTION;
+  }
+}
+
+function setBubbleRefraction(on) {
+  try {
+    localStorage.setItem(BUBBLE_REFRACTION_STORAGE, String(!!on));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function getBubbleTension() {
+  try {
+    return clampRange(localStorage.getItem(BUBBLE_TENSION_STORAGE), BUBBLE_TENSION_MIN, BUBBLE_TENSION_MAX, DEFAULT_BUBBLE_TENSION);
+  } catch (err) {
+    return DEFAULT_BUBBLE_TENSION;
+  }
+}
+
+function setBubbleTension(n) {
+  try {
+    localStorage.setItem(BUBBLE_TENSION_STORAGE, String(clampRange(n, BUBBLE_TENSION_MIN, BUBBLE_TENSION_MAX, DEFAULT_BUBBLE_TENSION)));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function getBubbleSpecular() {
+  try {
+    return clampRange(localStorage.getItem(BUBBLE_SPECULAR_STORAGE), BUBBLE_SPECULAR_MIN, BUBBLE_SPECULAR_MAX, DEFAULT_BUBBLE_SPECULAR);
+  } catch (err) {
+    return DEFAULT_BUBBLE_SPECULAR;
+  }
+}
+
+function setBubbleSpecular(n) {
+  try {
+    localStorage.setItem(BUBBLE_SPECULAR_STORAGE, String(clampRange(n, BUBBLE_SPECULAR_MIN, BUBBLE_SPECULAR_MAX, DEFAULT_BUBBLE_SPECULAR)));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function applyBubbleRealismPrefs() {
+  const root = document.documentElement.style;
+  // Unitless 0-100, not "N%" — style.css divides these by 100 inside
+  // calc() to scale opacity/transform factors, same pattern as how
+  // --def-text-scale is stored as a ratio rather than a percent string.
+  root.setProperty("--bubble-tension", String(getBubbleTension()));
+  root.setProperty("--bubble-specular", String(getBubbleSpecular()));
+  document.body.classList.toggle("bubble-refraction-on", getBubbleRefraction());
+}
+
 // ---- 🖼️ Wallpaper: storage + apply ------------------------------------
 // The image lives in its own localStorage key as a data: URL (already
 // downscaled/compressed by resizeImageForWallpaper() before it's ever
@@ -5007,6 +5204,35 @@ function setSmartAccentEnabled(enabled) {
   }
 }
 
+// Unselected definition rows dim to opacity: 0.45 (style.css) as an
+// intentional visual cue — but combined with wallpaper mode's now-opaque
+// row background, that flat dimming lets the wallpaper bleed back through
+// and muddies the text. This slider lets the person dial in exactly how
+// dim vs. legible unselected rows look over a wallpaper, rather than a
+// fixed value or an on/off switch.
+function getDefLegibilityOpacity() {
+  try {
+    return clampRange(localStorage.getItem(DEF_LEGIBILITY_STORAGE), DEF_LEGIBILITY_MIN, DEF_LEGIBILITY_MAX, DEFAULT_DEF_LEGIBILITY_OPACITY);
+  } catch (err) {
+    return DEFAULT_DEF_LEGIBILITY_OPACITY;
+  }
+}
+
+function setDefLegibilityOpacity(n) {
+  try {
+    localStorage.setItem(DEF_LEGIBILITY_STORAGE, String(clampRange(n, DEF_LEGIBILITY_MIN, DEF_LEGIBILITY_MAX, DEFAULT_DEF_LEGIBILITY_OPACITY)));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function applyDefLegibilityBoost() {
+  const pct = getDefLegibilityOpacity();
+  document.documentElement.style.setProperty("--unselected-def-opacity", String(pct / 100));
+  if (defLegibilityInput) defLegibilityInput.value = pct;
+  if (defLegibilityValue) defLegibilityValue.textContent = `${pct}%`;
+}
+
 function rgbToHsl(r, g, b) {
   r /= 255; g /= 255; b /= 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
@@ -5213,7 +5439,9 @@ function applyDisplayPrefs() {
   root.setProperty("--def-text-scale", String(getDefTextScale() / 100));
   root.setProperty("--img-thumb-size", `${getImgThumbSize()}px`);
   applyBubblyMode();
+  applyDefLegibilityBoost();
   applyGlassPrefs();
+  applyBubbleRealismPrefs();
   applyFishPrefs();
   applyWallpaperPrefs();
   applySmartAccent();
@@ -5287,9 +5515,32 @@ glassTintInput.addEventListener("input", () => {
   applyGlassPrefs();
 });
 
+bubbleRefractionToggle?.addEventListener("change", () => {
+  setBubbleRefraction(bubbleRefractionToggle.checked);
+  applyBubbleRealismPrefs();
+});
+
+bubbleTensionInput?.addEventListener("input", () => {
+  bubbleTensionValue.textContent = `${bubbleTensionInput.value}%`;
+  setBubbleTension(bubbleTensionInput.value);
+  applyBubbleRealismPrefs();
+});
+
+bubbleSpecularInput?.addEventListener("input", () => {
+  bubbleSpecularValue.textContent = `${bubbleSpecularInput.value}%`;
+  setBubbleSpecular(bubbleSpecularInput.value);
+  applyBubbleRealismPrefs();
+});
+
 smartAccentToggle?.addEventListener("change", () => {
   setSmartAccentEnabled(smartAccentToggle.checked);
   applySmartAccent();
+});
+
+defLegibilityInput?.addEventListener("input", () => {
+  defLegibilityValue.textContent = `${defLegibilityInput.value}%`;
+  setDefLegibilityOpacity(defLegibilityInput.value);
+  applyDefLegibilityBoost();
 });
 
 chooseWallpaperBtn?.addEventListener("click", () => wallpaperFileInput.click());
@@ -5373,6 +5624,9 @@ resetDisplayBtn.addEventListener("click", () => {
   setGlassTransparency(DEFAULT_GLASS_TRANSPARENCY);
   setGlassBlur(DEFAULT_GLASS_BLUR);
   setGlassTint(DEFAULT_GLASS_TINT);
+  setBubbleRefraction(DEFAULT_BUBBLE_REFRACTION);
+  setBubbleTension(DEFAULT_BUBBLE_TENSION);
+  setBubbleSpecular(DEFAULT_BUBBLE_SPECULAR);
   setWallpaperDim(DEFAULT_WALLPAPER_DIM);
   setWallpaperBlur(DEFAULT_WALLPAPER_BLUR);
   // Deliberately NOT clearing the wallpaper image itself here — that's
@@ -5404,6 +5658,17 @@ function initDisplayUI() {
   glassBlurValue.textContent = `${gb}px`;
   glassTintInput.value = gtint;
   glassTintValue.textContent = `${gtint}%`;
+  if (bubbleRefractionToggle) bubbleRefractionToggle.checked = getBubbleRefraction();
+  if (bubbleTensionInput) {
+    const bt = getBubbleTension();
+    bubbleTensionInput.value = bt;
+    bubbleTensionValue.textContent = `${bt}%`;
+  }
+  if (bubbleSpecularInput) {
+    const bs = getBubbleSpecular();
+    bubbleSpecularInput.value = bs;
+    bubbleSpecularValue.textContent = `${bs}%`;
+  }
   if (wallpaperDimInput) {
     wallpaperDimInput.value = wd;
     wallpaperDimValue.textContent = `${wd}%`;
@@ -9952,3 +10217,43 @@ definitionsList.addEventListener("click", (e) => {
   applyShortcutTitles();
   syncTabSwitchKeysToExtension();
 })();
+
+// --- Part 6: Fluid click ripple ---------------------------------------
+// The membrane-compression half of this effect already exists as
+// bubble-wobble-press, fired on :active in style.css for .btn/.icon-btn/
+// .storage-toggle-btn — this only adds the expanding ripple at the exact
+// pointer coordinates, so the two don't animate the same properties at
+// once. Gated to body.bubbly-mode like every other bubble effect (see
+// e.g. the bubble-field / fish-mode guards above), and scoped to those
+// same three selectors, since .storage-widget/.storage-panel are a
+// dropdown wrapper + panel, not "bubble" surfaces, and don't have the
+// overflow:hidden needed to contain a ripple without other side effects.
+function initBubbleClickRipple() {
+  const selector = ".btn, .icon-btn, .storage-toggle-btn";
+
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (!document.body.classList.contains("bubbly-mode")) return;
+
+      const target = e.target.closest(selector);
+      if (!target) return;
+
+      const rect = target.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const ripple = document.createElement("span");
+      ripple.className = "bubble-click-ripple";
+      ripple.style.left = `${x}px`;
+      ripple.style.top = `${y}px`;
+      target.appendChild(ripple);
+
+      // Matches the 0.6s bubbleRippleExpand animation in style.css.
+      setTimeout(() => ripple.remove(), 600);
+    },
+    { passive: true }
+  );
+}
+
+initBubbleClickRipple();

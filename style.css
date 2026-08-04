@@ -30,6 +30,13 @@
   --glass-blur: 20px;
   --glass-tint: 50%;
 
+  /* 🫧 Bubble realism — Surface Tension Elasticity & Specular Reflection
+     Intensity (set via the 🔍 Display panel). Stored unitless 0-100 so
+     they can scale opacity/transform factors directly inside calc()
+     below, rather than as percentages like --glass-alpha/--glass-tint. */
+  --bubble-tension: 50;
+  --bubble-specular: 75;
+
   /* 🖼️ Wallpaper (set via the 🔍 Display panel; JS overrides these on
      :root once a saved image/dimming preference is loaded). No image by
      default — body only picks up .has-wallpaper once one is set, so
@@ -2304,6 +2311,59 @@ body.bubbly-mode {
     0 10px 20px -10px rgba(22, 63, 99, 0.4);
 }
 
+/* 🫧 Ultra-Realistic Bubble Refraction (Display panel toggle) — layers a
+   tight, bright specular streak on top of the existing moving-bubble
+   core/rim above, plus a subtle squash-and-stretch so each bubble reads
+   as an elastic film rather than a rigid circle. Both effects scale off
+   the Surface Tension Elasticity and Specular Reflection Intensity
+   sliders (--bubble-tension / --bubble-specular, unitless 0-100, set on
+   :root from script.js) so dragging either updates live. Scoped to
+   .bubble-particle only — the ambient moving bubbles — so it doesn't
+   affect the unrelated button/control "bubbly" surfaces above. */
+body.bubble-refraction-on .bubble-particle {
+  /* Higher tension = a tauter, rounder film that resists stretching;
+     lower tension = a looser film that squashes more visibly as it
+     drifts. 0.88-1 keeps the distortion subtle at any setting. */
+  transform: scaleY(calc(0.88 + var(--bubble-tension) * 0.0012));
+}
+
+body.bubble-refraction-on .bubble-particle::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  /* A tight, bright highlight standing in for a refracted light streak,
+     independent of the diffuse --bubble-hl1/--bubble-hl2 glow already
+     painted by --bubble-core. Its opacity tracks the specular slider. */
+  background: radial-gradient(16% 22% at 30% 22%,
+    color-mix(in srgb, #fff calc(var(--bubble-specular) * 1%), transparent) 0%,
+    transparent 70%);
+  opacity: calc(var(--bubble-specular) / 100);
+  mix-blend-mode: screen;
+}
+
+/* 🖱️ Cursor-tracking specular highlight — while Bubble Refraction is on,
+   re-aim the PRIMARY highlight dot inside --bubble-core toward the
+   pointer instead of leaving it at its fixed upper-left spot. The
+   secondary dot stays put as a fixed ambient glint (real bubbles catch
+   more than one light source), so the effect reads as "the highlight
+   nearest the cursor moves" rather than the whole surface swimming.
+   --mouse-x/--mouse-y are set live by initBubbleSpecularTracking() in
+   script.js, in the same `at X% Y%` units the gradients already use;
+   var()'s fallback is each rule's original fixed coordinate, so a
+   surface nobody has pointed at yet (or ever, if JS hasn't run) just
+   renders exactly as it did before this was added. Overrides the base
+   --bubble-core definitions above via ordinary cascade (one more class
+   on body = higher specificity), no !important needed. */
+body.bubbly-mode.bubble-refraction-on {
+  --bubble-core:
+    radial-gradient(38% 30% at var(--mouse-x, 27%) var(--mouse-y, 24%), var(--bubble-hl1) 0%, var(--bubble-hl1-mid) 45%, transparent 75%),
+    radial-gradient(28% 24% at 71% 20%, var(--bubble-hl2) 0%, transparent 78%),
+    radial-gradient(90% 55% at 50% 100%, var(--bubble-ambient) 0%, transparent 60%),
+    var(--bubble-base);
+}
+
 /* The crisp glass rim: a thin conic-gradient ring drawn only across the
    border band via the padding+mask-composite "double background,
    xor'd" trick, so the crescent is sharp the way a real glass edge is —
@@ -2334,6 +2394,22 @@ body.bubbly-mode .storage-toggle-btn {
 
   --bubble-core:
     radial-gradient(circle 15px at 24% 30%, var(--bubble-hl1) 0%, var(--bubble-hl1-mid) 55%, transparent 100%),
+    radial-gradient(circle 11px at 60% 24%, var(--bubble-hl2) 0%, transparent 100%),
+    linear-gradient(180deg, var(--bubble-cap) 0%, transparent 24%),
+    linear-gradient(0deg, var(--bubble-ambient) 0%, transparent 30%),
+    linear-gradient(180deg, transparent 60%, var(--bubble-shade) 100%),
+    var(--bubble-base);
+}
+
+/* Cursor-tracking variant of the block above — see the shared comment
+   on the generic body.bubbly-mode.bubble-refraction-on rule near the
+   Bubble Refraction tokens. Re-aims only the larger of the two round
+   highlight dots; the smaller one stays fixed as a secondary glint. */
+body.bubbly-mode.bubble-refraction-on .btn,
+body.bubbly-mode.bubble-refraction-on .icon-btn,
+body.bubbly-mode.bubble-refraction-on .storage-toggle-btn {
+  --bubble-core:
+    radial-gradient(circle 15px at var(--mouse-x, 24%) var(--mouse-y, 30%), var(--bubble-hl1) 0%, var(--bubble-hl1-mid) 55%, transparent 100%),
     radial-gradient(circle 11px at 60% 24%, var(--bubble-hl2) 0%, transparent 100%),
     linear-gradient(180deg, var(--bubble-cap) 0%, transparent 24%),
     linear-gradient(0deg, var(--bubble-ambient) 0%, transparent 30%),
@@ -2388,7 +2464,12 @@ body.bubbly-mode .storage-toggle-btn {
   overflow: hidden;
   z-index: 5;
   opacity: 0;
-  perspective: 900px;
+  /* Shorter perspective than a "neutral" 900px+ exaggerates how much a
+     bubble scales up per pixel of translateZ travel — that exaggeration
+     is exactly what reads as "coming toward the viewer" rather than
+     "just a CSS zoom". Tuned down alongside the wider Z travel in
+     bubble-rise-3d below. */
+  perspective: 820px;
   transition: opacity 0.5s ease;
   /* Full layout+paint+size containment: this box's dimensions come purely
      from `inset:0` (never from its children), and it already clips
@@ -2418,6 +2499,12 @@ body.bubbly-mode.bubble-mode-on .bubble-field {
   box-shadow: var(--bubble-shell);
   opacity: 0;
   transform-style: preserve-3d;
+  /* Per-bubble sway amount/direction and twinkle timing, randomized in
+     script.js (createBubbleParticle). Defaulted here so the rule is a
+     harmless no-op — a bubble sitting dead-still with no sparkle — if
+     this ever renders before JS sets them. */
+  --bwobble: 0px;
+  --brot: 0deg;
   animation: bubble-rise-3d var(--bdur, 14s) linear var(--bdelay, 0s) infinite;
   /* Bubbles stay non-interactive (inherit pointer-events:none from the
      .bubble-field container) until Liquid Interface is actually on —
@@ -2517,29 +2604,86 @@ body.bubbly-mode.bubble-mode-on .bubble-particle {
   mask-composite: exclude;
 }
 
+/* A small round "catch-light" sparkle sitting over the same spot as the
+   brighter of the two --bubble-core highlight blooms, pulsing on its
+   own independent timer (--btwinkle-dur/--btwinkle-delay, randomized
+   per-bubble in script.js). Real soap/water bubbles constantly flicker
+   as their film thickness shifts and catches the light differently —
+   a static highlight reads as glass, this small live twinkle is what
+   pushes it toward "cute". Kept tiny and off-center rather than
+   centered so it reads as a glint, not a second nucleus. */
+.bubble-particle::after {
+  content: "";
+  position: absolute;
+  top: 20%;
+  left: 24%;
+  width: 24%;
+  height: 24%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.35) 55%, transparent 80%);
+  opacity: 0.4;
+  animation: bubble-twinkle var(--btwinkle-dur, 2.4s) ease-in-out var(--btwinkle-delay, 0s) infinite;
+}
+
+@keyframes bubble-twinkle {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
+/* "Coming out of the screen" 3D rise, now with an organic side-to-side
+   wobble and gentle rotational sway layered on top of the original
+   straight-up rise — real bubbles never travel in a perfectly straight
+   vertical line, water drag nudges them side to side as they climb.
+   --bwobble/--brot (randomized per-bubble in script.js) are multiplied
+   by an alternating, shrinking-then-growing factor at each stage below,
+   which turns a single sway amount into a wandering path rather than a
+   simple back-and-forth metronome.
+
+   The depth/scale journey itself now runs deeper-to-nearer than before
+   (-270px to 160px, inside the field's shorter 820px perspective) and
+   pairs with a filter:blur pass — soft while still "deep" behind the
+   focal plane, crisp through the middle of its rise, exactly the way a
+   real object looks as it passes through a camera's focus on its way
+   toward the lens. That combination (deeper Z range + tighter
+   perspective + focus pull), on top of the wobble, is what sells "this
+   bubble is floating up and OUT toward you", not just floating up. */
 @keyframes bubble-rise-3d {
   0% {
-    transform: translateY(0) translateZ(-260px) scale(0.35);
+    transform: translate(0, 0) translateZ(-270px) scale(0.32) rotate(0deg);
+    filter: blur(3px);
     opacity: 0;
   }
-  10% {
+  8% {
     opacity: var(--bopacity, 0.55);
+    filter: blur(2px);
+  }
+  22% {
+    transform: translate(calc(var(--bwobble) * 0.5), -21vh) translateZ(-175px) scale(0.6) rotate(calc(var(--brot) * -0.6));
+    filter: blur(1px);
+  }
+  40% {
+    transform: translate(calc(var(--bwobble) * -0.9), -43vh) translateZ(-70px) scale(0.9) rotate(calc(var(--brot) * 0.8));
+    filter: blur(0px);
+  }
+  58% {
+    transform: translate(calc(var(--bwobble) * 0.75), -65vh) translateZ(35px) scale(1.18) rotate(calc(var(--brot) * -0.9));
+  }
+  76% {
+    transform: translate(calc(var(--bwobble) * -0.5), -87vh) translateZ(95px) scale(1.45) rotate(calc(var(--brot) * 0.55));
   }
   80% {
     opacity: var(--bopacity, 0.55);
   }
   100% {
-    /* translateZ walks from deep behind the page (-260px) to well in
-       front of it (140px) while rising, inside the field's own
-       perspective(900px) — that Z travel is what makes the scale-up
-       feel like genuine depth motion rather than a plain CSS zoom. */
-    transform: translateY(-118vh) translateZ(140px) scale(1.6);
+    transform: translate(calc(var(--bwobble) * 0.3), -118vh) translateZ(160px) scale(1.78) rotate(calc(var(--brot) * -0.3));
+    filter: blur(0px);
     opacity: 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bubble-particle {
+  .bubble-particle,
+  .bubble-particle::after {
     animation: none;
     opacity: 0;
   }
@@ -3091,7 +3235,20 @@ body.bubbly-mode .modal-content {
     0 14px 34px rgba(22, 63, 99, 0.15);
   border-radius: 26px;
   will-change: backdrop-filter;
-  transition: background var(--glass-fade-in), backdrop-filter var(--glass-fade-in);
+  transition: background var(--glass-fade-in), backdrop-filter var(--glass-fade-in), border-radius 0.6s ease;
+}
+
+/* Large flat surfaces get the soft (low-amplitude) wobble on hover only
+   — no :active variant, since a card is a content container people
+   click into, not a button people press. */
+body.bubbly-mode .card:hover,
+body.bubbly-mode .modal-content:hover {
+  /* will-change scoped to :hover, not the base .card/.modal-content rule —
+     these sit still most of the time, so promoting a GPU layer only while
+     the wobble animation is actually running (instead of permanently)
+     avoids leaving extra composited layers resident in memory. */
+  will-change: transform;
+  animation: bubble-wobble-soft 3.2s ease-in-out infinite;
 }
 
 /* ---------- Wallpaper mode: cards go clear, not frosted -----------------
@@ -3120,7 +3277,11 @@ body.bubbly-mode .storage-panel {
     inset 0 -12px 22px -16px var(--bubble-ring-dark),
     0 16px 34px rgba(22, 63, 99, 0.2);
   will-change: backdrop-filter;
-  transition: background var(--glass-fade-in), backdrop-filter var(--glass-fade-in);
+  transition: background var(--glass-fade-in), backdrop-filter var(--glass-fade-in), border-radius 0.6s ease;
+}
+
+body.bubbly-mode .storage-panel:hover {
+  animation: bubble-wobble-soft 3s ease-in-out infinite;
 }
 
 /* Pronunciation panel: was a hard-coded near-white block (#fbfdff) that
@@ -3166,6 +3327,40 @@ body.bubbly-mode .site-header {
   transition: background var(--glass-fade-in), backdrop-filter var(--glass-fade-in);
 }
 
+/* ---------- Part 7: SVG liquid distortion — layers the #bubble-distortion
+   feTurbulence/feDisplacementMap filter (hidden SVG markup injected right
+   after <body> in index.html) on top of the blur/saturate backdrop-filter
+   values above, so background content bends through each glass surface
+   like real water instead of just blurring flat. Kept as a separate
+   bubble-refraction-on-gated layer rather than folded into the base
+   .bubbly-mode rules above: engine support for SVG filter functions inside
+   backdrop-filter is much patchier than plain blur()/saturate(), and
+   combining an unsupported function into one backdrop-filter value can
+   invalidate the whole declaration — @supports keeps unsupporting engines
+   on the existing blur-only rule instead of losing backdrop-filter
+   entirely. :not(.has-wallpaper) matches the wallpaper-mode overrides
+   further up, which turn backdrop-filter off for .card/.modal-content/
+   .pronunciation-panel so the photo behind them reads crisp — refraction
+   has nothing to distort in that mode either, so it stays off there too. */
+@supports (backdrop-filter: url(#bubble-distortion)) {
+  body.bubbly-mode.bubble-refraction-on:not(.has-wallpaper) .card,
+  body.bubbly-mode.bubble-refraction-on:not(.has-wallpaper) .modal-content,
+  body.bubbly-mode.bubble-refraction-on:not(.has-wallpaper) .pronunciation-panel {
+    backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2)) url(#bubble-distortion);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2)) url(#bubble-distortion);
+  }
+
+  body.bubbly-mode.bubble-refraction-on .storage-panel {
+    backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2)) url(#bubble-distortion);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2)) url(#bubble-distortion);
+  }
+
+  body.bubbly-mode.bubble-refraction-on .site-header {
+    backdrop-filter: blur(calc(var(--glass-blur) * 0.6)) url(#bubble-distortion);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.6)) url(#bubble-distortion);
+  }
+}
+
 /* ---------- The small round toolbar buttons: genuine bubbles — mostly
    transparent core, refraction-ring shell, top-left gloss + bottom-right
    bounce from the shared pseudo-elements above ---------- */
@@ -3175,17 +3370,155 @@ body.bubbly-mode .storage-toggle-btn {
   isolation: isolate;
   background: var(--bubble-core);
   box-shadow: var(--bubble-shell);
-  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s ease, box-shadow 0.15s ease, border-radius 0.4s ease;
 }
 
 body.bubbly-mode .storage-toggle-btn:hover {
   transform: perspective(700px) rotateX(var(--tilt-rx)) rotateY(var(--tilt-ry))
     translateZ(var(--tilt-tz)) translateY(-1px) scale(1.06);
   box-shadow: var(--bubble-shell), 0 calc(6px + var(--tilt-tz)) 18px -6px rgba(22, 63, 99, 0.35);
+  animation: bubble-wobble 2.2s ease-in-out infinite;
 }
 
 body.bubbly-mode .storage-toggle-btn:active {
   transform: perspective(700px) scale(0.92);
+  animation: bubble-wobble-press 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* =========================================================================
+   🫧 SURFACE TENSION — liquid wobble keyframes layered on top of the
+   scale/tilt transforms above. border-radius is animated independently
+   of `transform`, so this coexists with the JS-driven tilt custom
+   properties without fighting them for the same property.
+
+   `bubble-wobble` (hover): a slow, continuous membrane sway — the
+   corners never settle, drifting between lopsided ellipse states like
+   a droplet held together by surface tension. 0%/100% are intentionally
+   omitted so the browser uses each element's OWN resting border-radius
+   (999px pill, 50% circle, or a panel's fixed px radius) as the
+   implicit start/end keyframe — one animation works for every shape.
+
+   `bubble-wobble-press` (active/click): a fast compress-then-overshoot
+   — the membrane flattens under the "finger", then briefly bulges past
+   its resting shape before settling, mimicking elastic rebound. Short
+   enough that most of it plays out even on a quick tap.
+
+   `bubble-wobble-soft`: same idea at a fraction of the amplitude, for
+   large flat surfaces (cards/panels) where a full blob deformation
+   would look like a rendering glitch rather than glass flexing. ---- */
+@keyframes bubble-wobble {
+  22% { border-radius: 42% 58% 65% 35% / 45% 40% 60% 55%; }
+  48% { border-radius: 63% 37% 40% 60% / 52% 62% 38% 48%; }
+  74% { border-radius: 38% 62% 55% 45% / 60% 42% 58% 40%; }
+}
+
+@keyframes bubble-wobble-press {
+  35% { border-radius: 60% 40% 45% 55% / 65% 55% 45% 35%; }
+  65% { border-radius: 38% 62% 58% 42% / 35% 45% 55% 65%; }
+}
+
+@keyframes bubble-wobble-soft {
+  25% { border-radius: 27% 24% 26% 25% / 25% 27% 24% 26%; }
+  50% { border-radius: 24% 27% 25% 26% / 27% 25% 26% 24%; }
+  75% { border-radius: 26% 25% 27% 24% / 24% 26% 25% 27%; }
+}
+
+/* ---------- Part 5b: text follows the membrane. bubble-wobble/-press
+   above only animate border-radius, which reshapes the button's outline
+   but never touches document flow — so a label sitting dead-center never
+   actually moves, and the wobbling shell reads as a separate layer
+   pasted behind static text rather than one soft object. script.js wraps
+   every .btn/.icon-btn/.storage-toggle-btn's content (icon + label
+   together, so they flex as one unit, not independently) in a single
+   `.bubble-text-wobble` span the first time bubbly mode turns on, and
+   re-wraps it on the fly if a button's textContent gets reset later
+   (see initBubbleTextWobble). These keyframes are the content-side
+   counterpart: same keyframe stops (22/48/74% and 35/65%) and the exact
+   same animation-duration as the matching border-radius wobble on each
+   element below, so the two stay phase-locked — the text visibly
+   stretches and compresses in step with the shell's give, instead of
+   floating rigidly inside it. Amplitude is kept tiny (well under 2%
+   scale, ~1° skew) since this is legibility-critical text, not a free
+   blob — enough to read as "attached to the membrane," not enough to
+   blur or judder the letterforms. ---------- */
+.bubble-text-wobble {
+  display: inline-block;
+}
+
+@keyframes bubble-text-wobble {
+  22% { transform: skew(-0.6deg, 0.35deg) scale(1.012, 0.99); }
+  48% { transform: skew(0.55deg, -0.3deg) scale(0.99, 1.012); }
+  74% { transform: skew(-0.4deg, 0.25deg) scale(1.006, 0.996); }
+}
+
+@keyframes bubble-text-wobble-press {
+  35% { transform: scale(0.945, 1.045) skew(0.4deg, 0deg); }
+  65% { transform: scale(1.035, 0.965) skew(-0.3deg, 0deg); }
+}
+
+body.bubbly-mode .storage-toggle-btn:hover .bubble-text-wobble {
+  will-change: transform;
+  animation: bubble-text-wobble 2.2s ease-in-out infinite;
+}
+
+body.bubbly-mode .storage-toggle-btn:active .bubble-text-wobble {
+  animation: bubble-text-wobble-press 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+body.bubbly-mode .btn:hover .bubble-text-wobble {
+  will-change: transform;
+  animation: bubble-text-wobble 2.6s ease-in-out infinite;
+}
+
+body.bubbly-mode .btn:active .bubble-text-wobble {
+  animation: bubble-text-wobble-press 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+body.bubbly-mode .icon-btn:hover .bubble-text-wobble {
+  will-change: transform;
+  animation: bubble-text-wobble 2.4s ease-in-out infinite;
+}
+
+body.bubbly-mode .icon-btn:active .bubble-text-wobble {
+  animation: bubble-text-wobble-press 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ---------- Part 6: click ripple. Pairs with bubble-wobble-press above,
+   which already handles the "membrane compression" on :active — this
+   only adds the expanding ripple at the exact pointer coordinates, so
+   there's no second animation fighting it for border-radius/transform.
+   Scoped to body.bubbly-mode and to .btn/.icon-btn/.storage-toggle-btn
+   specifically, because those are the only elements that get
+   position:relative + overflow:hidden in that mode (see the bubble-core
+   block earlier in this file) — anything else, notably .storage-widget/
+   .storage-panel (a 26px wrapper with a 270px dropdown absolutely
+   positioned inside it), would have its overflow clipped instead of
+   just containing a ripple. */
+body.bubbly-mode .bubble-click-ripple {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.2) 70%, transparent 100%);
+  /* Short-lived (0.6s, removed after), so promoting a composite layer for
+     its whole life is cheap — translate3d keeps the scale-up on the GPU
+     instead of triggering layout/paint on every frame. */
+  will-change: transform, opacity;
+  transform: translate3d(-50%, -50%, 0) scale(0);
+  pointer-events: none;
+  animation: bubbleRippleExpand 0.6s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  z-index: 1;
+}
+
+@keyframes bubbleRippleExpand {
+  0% {
+    transform: translate3d(-50%, -50%, 0) scale(0);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate3d(-50%, -50%, 0) scale(25);
+    opacity: 0;
+  }
 }
 
 /* ---------- Buttons: full pill shape, genuinely see-through core, real
@@ -3197,7 +3530,7 @@ body.bubbly-mode .btn {
   overflow: hidden;
   isolation: isolate;
   box-shadow: var(--bubble-shell);
-  transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, background 0.15s ease, filter 0.15s ease;
+  transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, background 0.15s ease, filter 0.15s ease, border-radius 0.4s ease;
 }
 
 body.bubbly-mode .btn:hover {
@@ -3205,11 +3538,13 @@ body.bubbly-mode .btn:hover {
     translateZ(var(--tilt-tz)) translateY(-2px) scale(1.02);
   filter: brightness(1.04);
   box-shadow: var(--bubble-shell), 0 calc(8px + var(--tilt-tz)) 22px -8px rgba(22, 63, 99, 0.4);
+  animation: bubble-wobble 2.6s ease-in-out infinite;
 }
 
 body.bubbly-mode .btn:active {
   transform: perspective(700px) scale(0.94);
   filter: brightness(0.98);
+  animation: bubble-wobble-press 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
 /* Variant colors now sit UNDER the transparent bubble core rather than
@@ -3277,17 +3612,19 @@ body.bubbly-mode .icon-btn {
   border-radius: 50%;
   background: var(--bubble-core);
   box-shadow: var(--bubble-shell);
-  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, border-radius 0.4s ease;
 }
 
 body.bubbly-mode .icon-btn:hover {
   transform: perspective(700px) rotateX(var(--tilt-rx)) rotateY(var(--tilt-ry))
     translateZ(var(--tilt-tz)) scale(1.08);
   box-shadow: var(--bubble-shell), 0 calc(6px + var(--tilt-tz)) 16px -6px rgba(22, 63, 99, 0.35);
+  animation: bubble-wobble 2.4s ease-in-out infinite;
 }
 
 body.bubbly-mode .icon-btn:active {
   transform: perspective(700px) scale(0.9);
+  animation: bubble-wobble-press 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
 /* ---------- Inputs: soft rounded "pebble" fields — a transparent glass
@@ -3402,6 +3739,21 @@ body.bubbly-mode .switch-thumb {
   body.bubbly-mode .definition-card,
   .switch-thumb {
     transition-duration: 0.01ms !important;
+  }
+
+  /* The membrane wobble is motion for motion's sake — cut it entirely
+     rather than just speeding it up, same as the rise/tilt animations
+     elsewhere in Liquid Interface already do. */
+  body.bubbly-mode .btn:hover,
+  body.bubbly-mode .btn:active,
+  body.bubbly-mode .icon-btn:hover,
+  body.bubbly-mode .icon-btn:active,
+  body.bubbly-mode .storage-toggle-btn:hover,
+  body.bubbly-mode .storage-toggle-btn:active,
+  body.bubbly-mode .card:hover,
+  body.bubbly-mode .modal-content:hover,
+  body.bubbly-mode .storage-panel:hover {
+    animation: none !important;
   }
 }
 

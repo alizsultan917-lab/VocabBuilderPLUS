@@ -146,6 +146,173 @@ body.has-wallpaper .glass-card {
   white-space: nowrap;
 }
 
+/* ---- Text legibility over a transparent glass panel ----------------------
+   Attempt 1 raised the whole panel's background opacity — fixed
+   legibility but killed the see-through look. Reverted.
+
+   Attempt 2 used one global text-shadow halo (fixed light/dark glow).
+   Fails on a busy photo where bright foam and dark water sit right next
+   to each other — one shadow color can't read against both.
+
+   Attempt 3 added a backdrop-filter "chip" behind each text run — fixed
+   contrast, but on the heading/labels it read as an unwanted UI box.
+
+   The actual fix (wallpaper-adaptive-text.js, loaded alongside this file)
+   samples the real wallpaper pixels sitting directly behind EACH text
+   element and sets that element's color to whichever of dark-ink or
+   light reads best against that exact spot — same idea as attempt 3's
+   chip, but adjusting the *text color itself* instead of painting a box
+   behind it, so headings and labels get the contrast fix with zero
+   visual box, and busy multi-tone photos are handled correctly because
+   every element is measured individually rather than against one
+   average.
+
+   This block is only the fallback for the brief window before that
+   script finishes its first pass (or the rare case it can't run at all —
+   e.g. a cross-origin wallpaper image without CORS headers): a global
+   tone-based shadow, cheap and always-on, so text is never left
+   completely bare while waiting for the precise version. */
+/* A wide 8px blurred glow reads as "the text is blurry" on a busy photo —
+   the halo itself becomes visible haze rather than an invisible contrast
+   aid. Four tight 1px-blur offsets (a near-outline) plus one small,
+   low-blur lift shadow give the same edge-against-any-background
+   contrast without the fog: each individual shadow is sharp, so the
+   letterforms stay crisp even where they cross a light/dark boundary in
+   the photo. */
+html[data-wallpaper-tone="dark"] body.has-wallpaper .card h2,
+html[data-wallpaper-tone="dark"] body.has-wallpaper .card label,
+html[data-wallpaper-tone="dark"] body.has-wallpaper .link-btn,
+html[data-wallpaper-tone="dark"] body.has-wallpaper .definition-text,
+html[data-wallpaper-tone="dark"] body.has-wallpaper .pron-text,
+html[data-wallpaper-tone="dark"] body.has-wallpaper #vaw-pending-tag {
+  text-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.85),
+    0 -1px 1px rgba(0, 0, 0, 0.85),
+    1px 0 1px rgba(0, 0, 0, 0.85),
+    -1px 0 1px rgba(0, 0, 0, 0.85),
+    0 1px 3px rgba(0, 0, 0, 0.5);
+}
+html[data-wallpaper-tone="light"] body.has-wallpaper .card h2,
+html[data-wallpaper-tone="light"] body.has-wallpaper .card label,
+html[data-wallpaper-tone="light"] body.has-wallpaper .link-btn,
+html[data-wallpaper-tone="light"] body.has-wallpaper .definition-text,
+html[data-wallpaper-tone="light"] body.has-wallpaper .pron-text,
+html[data-wallpaper-tone="light"] body.has-wallpaper #vaw-pending-tag {
+  text-shadow:
+    0 1px 1px rgba(255, 255, 255, 0.9),
+    0 -1px 1px rgba(255, 255, 255, 0.9),
+    1px 0 1px rgba(255, 255, 255, 0.9),
+    -1px 0 1px rgba(255, 255, 255, 0.9),
+    0 1px 3px rgba(255, 255, 255, 0.55);
+}
+
+/* ---- Pronunciation panel: a boundary, not a fill --------------------------
+   Same gap .card/.modal-content already had fixed two sections up:
+   body.bubbly-mode .pronunciation-panel (style.css) keeps its ~38% white
+   wash + blur even once a wallpaper is active. Drop both, keep only an
+   outline (via --wallpaper-border-alpha, same signal driving adaptive
+   borders elsewhere) so the panel reads as distinct without adding
+   opacity — the sampled wallpaper is what's actually behind the text. */
+body.has-wallpaper.bubbly-mode .pronunciation-panel {
+  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.04 + 1%), transparent);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid color-mix(in srgb, #fff calc(var(--wallpaper-border-alpha, 0.6) * 100%), transparent);
+}
+
+/* ---- Definition rows: thin glass, same as every other panel -------------
+   Earlier passes here pushed this row to a 90–97% opaque white plate to
+   guarantee legibility, then hard-coded --ink so wallpaper-adaptive-text.js
+   didn't need to guess a per-element color. That solved contrast but broke
+   consistency: .card/.modal-content and .pronunciation-panel both go
+   near-fully-clear under a wallpaper (see the "cards go clear, not frosted"
+   rule in style.css and the matching .pronunciation-panel override just
+   above), so a solid white pill around each definition row read as a
+   pasted-on sticker against every other panel showing the photo straight
+   through. It also stacked badly with the tone-based text-shadow halo
+   below: that halo is a hard 4-direction 1px outline, sized for reading
+   against a busy, detailed photo. Outlining glyphs that are already sitting
+   on flat, near-opaque white doesn't add legibility (ink-on-white is
+   already high contrast) — it just reads as extra stroke weight, i.e. the
+   text looking artificially bold/"fat".
+
+   Fix: match the same near-clear glass every other panel already uses, and
+   let wallpaper-adaptive-text.js pick each row's text color/halo per
+   element again (re-added to its TEXT_SELECTORS) instead of forcing --ink.
+   Per-element sampling can't win an entire busy row with one flat color,
+   but neither could the old fixed --ink once the row stopped being opaque
+   — the halo is what actually carries legibility on a mixed patch, the
+   same way it already does for every other card heading/label. */
+body.has-wallpaper.bubbly-mode .definition-card {
+  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.05 + 1%), transparent);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-color: color-mix(in srgb, #fff calc(var(--wallpaper-border-alpha) * 100%), transparent);
+}
+
+/* ---- Unselected definitions: adjustable legibility ------------------------
+   .definition-card.unselected (style.css) sets opacity: 0.45 on the whole
+   row. `opacity` composites the entire element — background AND children —
+   as one layer, so fading the row itself would fade the checkbox, text, and
+   remove button all together rather than dimming just the content.
+
+   Fix: keep the row's own opacity at 1 (wallpaper mode only) and dim just
+   its direct children instead, so the fade reads as "this definition is
+   deselected" rather than "this whole row got fainter, glass and all".
+   --unselected-def-opacity is written by the "Unselected definition
+   legibility" slider in Display settings (def-legibility-input in
+   script.js); falls back to 0.45 to match style.css's original value if
+   the variable is ever unset. */
+body.has-wallpaper .definition-card.unselected {
+  opacity: 1;
+}
+body.has-wallpaper .definition-card.unselected > * {
+  opacity: var(--unselected-def-opacity, 0.45);
+}
+
+
+/* The source badge (DICTIONARY/AI/MANUAL) already has its own solid
+   color, so it doesn't need a chip — just a small shadow so it lifts off
+   the water instead of visually merging with a pale patch of it. */
+body.has-wallpaper .definition-source {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+/* Form fields (word/page inputs, the definition/image-url text boxes)
+   already sit inside their own bordered box, so raising just their
+   background — not the surrounding card — doesn't read as "losing the
+   glass look"; it reads as the field being legible, which it needs to be
+   since you're actively typing in it. */
+body.has-wallpaper.bubbly-mode input[type="text"],
+body.has-wallpaper.bubbly-mode input[type="number"],
+body.has-wallpaper.bubbly-mode input[type="url"],
+body.has-wallpaper.bubbly-mode textarea,
+body.has-wallpaper.bubbly-mode select {
+  background: color-mix(in srgb, #fff 72%, transparent);
+}
+
+/* ---- Selection controls: small opaque chips, not full-panel opacity -----
+   Checkboxes and remove buttons are where "hard to see" usually means
+   "can I tell if this is checked / where do I click" rather than a
+   reading-contrast problem — a tiny solid backing plate fixes that
+   without touching the surrounding panel's transparency at all. */
+body.has-wallpaper .image-select-checkbox {
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+body.has-wallpaper .definition-checkbox-wrap .definition-checkbox,
+body.has-wallpaper .definitions-list .definition-checkbox {
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.3);
+}
+
+body.has-wallpaper .definition-remove-btn {
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+}
+
 /* ---- Focal-point picker ------------------------------------------------
    Click anywhere on #wallpaper-preview to set --wallpaper-focal-x/-y
    (JS listener not included here — a few lines on the preview element's
