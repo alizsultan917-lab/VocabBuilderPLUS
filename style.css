@@ -1143,8 +1143,10 @@ body.customize-mode .customizable .resize-handle {
 /* ---------- Layout ---------- */
 .container {
   max-width: 900px;
+  width: 100%;
   margin: 0 auto;
   padding: 1.6rem 1rem 3rem;
+  overflow-x: hidden;
 }
 
 .card {
@@ -1154,6 +1156,8 @@ body.customize-mode .customizable .resize-handle {
   box-shadow: var(--shadow);
   padding: 1.5rem 1.6rem;
   margin-bottom: 1.4rem;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .card h2 {
@@ -1492,12 +1496,16 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .pron-row {
   display: flex;
   align-items: center;
   gap: 0.55rem;
+  min-width: 0;
 }
 
 .pron-accent {
@@ -1513,12 +1521,14 @@ textarea {
 
 .pron-text {
   flex: 1;
+  min-width: 0;
   font-size: 0.88rem;
   color: var(--ink-soft);
   font-style: italic;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* Gemini-supplied phonetic respelling (approximate, no verified audio) —

@@ -8540,6 +8540,24 @@ function addImageWithFallback(url, fallbackQuery) {
   probe.src = url;
 }
 
+// Defends against malformed Gemini-bridge payloads where the scrape glued
+// several citation URLs (or any other text) together with no spaces at
+// all — that produces one unbroken "word" with a huge intrinsic width
+// that CSS truncation/ellipsis can't safely be relied on alone to contain.
+// Any run of non-whitespace longer than maxRunLength gets a zero-width
+// space inserted every maxRunLength characters, giving the browser a
+// legal line-break point without changing what's visibly rendered.
+function sanitizeScrapedText(text, maxRunLength = 40) {
+  if (typeof text !== "string" || !text) return text;
+  return text.replace(new RegExp(`\\S{${maxRunLength},}`, "g"), (run) => {
+    const chunks = [];
+    for (let i = 0; i < run.length; i += maxRunLength) {
+      chunks.push(run.slice(i, i + maxRunLength));
+    }
+    return chunks.join("\u200B");
+  });
+}
+
 // Receives a scraped Gemini entry relayed by the extension's app-side
 // content script (the Scrape-Back flow). Wrapped in try/catch so a
 // malformed or unexpected message can never break the rest of the app.
@@ -8554,10 +8572,10 @@ window.addEventListener("message", (event) => {
     // content-gemini.js already parses Gemini's reply into these fields
     // (DEF: / US: / UK: labeled lines, plus whatever <img> it attached)
     // before it ever leaves the extension — nothing left to split here.
-    const definition = typeof payload.definition === "string" ? payload.definition.trim() : "";
+    const definition = typeof payload.definition === "string" ? sanitizeScrapedText(payload.definition.trim()) : "";
     const imageUrl = typeof payload.imageUrl === "string" ? payload.imageUrl.trim() : "";
-    const usPronunciation = typeof payload.usPronunciation === "string" ? payload.usPronunciation.trim() : "";
-    const ukPronunciation = typeof payload.ukPronunciation === "string" ? payload.ukPronunciation.trim() : "";
+    const usPronunciation = typeof payload.usPronunciation === "string" ? sanitizeScrapedText(payload.usPronunciation.trim()) : "";
+    const ukPronunciation = typeof payload.ukPronunciation === "string" ? sanitizeScrapedText(payload.ukPronunciation.trim()) : "";
     const wordForFallback = wordInput.value.trim();
 
     // Clear any stale pending definitions/images/tags before injecting
