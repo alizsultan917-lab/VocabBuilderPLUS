@@ -1183,11 +1183,24 @@ body.customize-mode .customizable .resize-handle {
   box-shadow: var(--shadow);
   padding: 1.5rem 1.6rem;
   margin-bottom: 1.4rem;
-  max-width: 100%;
   /* Same Free Placement issue as .container above — every draggable
      control in the "Add a Word", filter, and register cards lives inside
      one of these, so hidden overflow here clipped left/right drags too. */
   overflow-x: visible;
+  /* Was also max-width: 100% — harmless normally (a block element with no
+     explicit width is already ≤100% of its container by default), but
+     form-card/filter-card/table-card are themselves Free Placement
+     targets (see CUSTOMIZABLE_IDS in script.js), and for those three the
+     .card *is* the element script.js resizes directly (no wrapper). The
+     moment a resize tried to make one wider than its container, this cap
+     silently clamped the computed width straight back down to 100% on
+     every single drag tick — max-width always wins the final used-width
+     calculation regardless of the inline width script.js had just set, so
+     no matter how far you dragged the resize handle, the card snapped
+     right back to container width. clampOffsetToViewport()'s own
+     maxW (window.innerWidth-based) is the intended ceiling here, so this
+     extra, tighter one has to go. */
+  max-width: none;
 }
 
 .card h2 {
