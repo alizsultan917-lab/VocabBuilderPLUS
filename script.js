@@ -752,8 +752,74 @@ const CUSTOMIZABLE_IDS = [
 // `height` alone can't grow them past that cap, so resizing needs to lift
 // the cap too. Everything else in CUSTOMIZABLE_IDS is unaffected by this.
 const SCROLL_CAPPED_IDS = new Set(["definitions-list", "images-gallery"]);
+
+// Small circular header icon buttons (26px) that sit in a flex row
+// (.header-widgets) with no wrap and no overflow safeguard. Resizing any
+// one of them larger pushes every widget after it in the row off the right
+// edge of the screen with no way to recover except Reset Layout — and
+// resizing a tiny icon circle isn't a meaningful action anyway (dragging
+// its position is). Excluded from resize in initCustomizeLayout(); also
+// skipped here so an already-saved bad size from before this fix
+// self-heals on the next load instead of staying broken.
+const NO_RESIZE_IDS = new Set([
+  "limits-widget",
+  "display-widget",
+  "customize-widget",
+  "storage-widget",
+]);
 const MIN_ELEMENT_WIDTH = 32;
 const MIN_ELEMENT_HEIGHT = 24;
+
+// How much of a dragged element must always stay inside the viewport, on
+// every side, so it can never become fully invisible/unreachable — this
+// is what stops a Free Placement drag (or a stale saved position from a
+// since-resized window) from "losing" a control off-screen the way the
+// Word/Book/Add Entry controls did.
+const OFFSCREEN_VISIBLE_MARGIN = 40;
+
+// Reconstructs an element's box as if no drag transform were currently
+// applied, given the transform in effect right now is translate(curX, curY).
+// Used both for live dragging (curX/curY = the offset before this drag
+// started) and for applying saved layout on page load (curX/curY = 0,
+// since nothing has been transformed yet at that point).
+function getNaturalRect(el, curX, curY) {
+  const rect = el.getBoundingClientRect();
+  return {
+    left: rect.left - curX,
+    top: rect.top - curY,
+    right: rect.right - curX,
+    bottom: rect.bottom - curY,
+  };
+}
+
+// Clamps a proposed (x, y) translate offset so the element's box — computed
+// from its natural (untransformed) position — always keeps at least
+// OFFSCREEN_VISIBLE_MARGIN px inside the viewport on every side.
+//
+// The header bar (#site-header-bar) gets one extra restriction: it can
+// never be dragged upward past its natural top. It sits flush at the very
+// top of the page with nothing above it in normal flow, so unlike every
+// other draggable element, moving it up doesn't reveal anything new — it
+// only pushes its own title/icons off the top of the viewport, and because
+// there's no space above to scroll into, that content becomes permanently
+// unreachable until "Reset Layout" is used. This also self-heals any
+// already-saved bad offset, since applySavedLayout() runs this same clamp
+// unconditionally on every page load, whether or not Free Placement is on.
+function clampOffsetToViewport(naturalRect, x, y, id) {
+  const maxX = window.innerWidth - OFFSCREEN_VISIBLE_MARGIN - naturalRect.left;
+  const minX = OFFSCREEN_VISIBLE_MARGIN - naturalRect.right;
+  const maxY = window.innerHeight - OFFSCREEN_VISIBLE_MARGIN - naturalRect.top;
+  let minY = OFFSCREEN_VISIBLE_MARGIN - naturalRect.bottom;
+  if (id === "site-header-bar") {
+    minY = Math.max(minY, -naturalRect.top);
+  }
+  return {
+    // minX can exceed maxX for elements wider than the viewport — Math.min
+    // first keeps us from collapsing the range into nothing in that case.
+    x: Math.min(Math.max(x, minX), maxX),
+    y: Math.min(Math.max(y, minY), maxY),
+  };
+}
 
 // Native <input>/<select>/<textarea> elements can't render child nodes
 // (browsers never draw content inside a form control), so a drag/resize
@@ -802,13 +868,20 @@ function applySavedLayout() {
     const el = getCustomizableTarget(id);
     const pos = offsets[id];
     if (!el || !pos) return;
-    el.style.transform = `translate(${pos.x || 0}px, ${pos.y || 0}px)`;
-    if (pos.w) el.style.width = `${pos.w}px`;
-    if (pos.h) {
-      el.style.height = `${pos.h}px`;
-      const inner = getScrollCappedInner(id);
-      if (inner) inner.style.maxHeight = `${pos.h}px`;
+    if (!NO_RESIZE_IDS.has(id)) {
+      if (pos.w) el.style.width = `${pos.w}px`;
+      if (pos.h) {
+        el.style.height = `${pos.h}px`;
+        const inner = getScrollCappedInner(id);
+        if (inner) inner.style.maxHeight = `${pos.h}px`;
+      }
     }
+    // Measure AFTER width/height are applied (they affect the box) but
+    // BEFORE any transform (none has been set yet at load time), so this
+    // is the element's true natural, untransformed position.
+    const natural = getNaturalRect(el, 0, 0);
+    const clamped = clampOffsetToViewport(natural, pos.x || 0, pos.y || 0, id);
+    el.style.transform = `translate(${clamped.x}px, ${clamped.y}px)`;
   });
 }
 
@@ -873,21 +946,24 @@ function makeDraggable(el, handle, id) {
     const pos = offsets[id] || { x: 0, y: 0 };
     baseX = pos.x || 0;
     baseY = pos.y || 0;
+    const naturalRect = getNaturalRect(el, baseX, baseY);
     handle.setPointerCapture?.(e.pointerId);
     el.classList.add("is-lifted");
 
     function onMove(ev) {
       if (!dragging) return;
-      const x = baseX + (ev.clientX - startX);
-      const y = baseY + (ev.clientY - startY);
+      const rawX = baseX + (ev.clientX - startX);
+      const rawY = baseY + (ev.clientY - startY);
+      const { x, y } = clampOffsetToViewport(naturalRect, rawX, rawY, id);
       el.style.transform = `translate(${x}px, ${y}px)`;
     }
 
     function onUp(ev) {
       if (!dragging) return;
       dragging = false;
-      const x = baseX + (ev.clientX - startX);
-      const y = baseY + (ev.clientY - startY);
+      const rawX = baseX + (ev.clientX - startX);
+      const rawY = baseY + (ev.clientY - startY);
+      const { x, y } = clampOffsetToViewport(naturalRect, rawX, rawY, id);
       saveLayoutEntry(id, { x, y });
       el.classList.remove("is-lifted");
       handle.removeEventListener("pointermove", onMove);
@@ -925,8 +1001,10 @@ function makeResizable(el, handle, id) {
 
     function onMove(ev) {
       if (!resizing) return;
-      const w = Math.max(MIN_ELEMENT_WIDTH, baseW + (ev.clientX - startX));
-      const h = Math.max(MIN_ELEMENT_HEIGHT, baseH + (ev.clientY - startY));
+      const maxW = window.innerWidth - OFFSCREEN_VISIBLE_MARGIN;
+      const maxH = window.innerHeight - OFFSCREEN_VISIBLE_MARGIN;
+      const w = Math.min(maxW, Math.max(MIN_ELEMENT_WIDTH, baseW + (ev.clientX - startX)));
+      const h = Math.min(maxH, Math.max(MIN_ELEMENT_HEIGHT, baseH + (ev.clientY - startY)));
       el.style.width = `${w}px`;
       el.style.height = `${h}px`;
       if (inner) inner.style.maxHeight = `${h}px`;
@@ -935,8 +1013,10 @@ function makeResizable(el, handle, id) {
     function onUp(ev) {
       if (!resizing) return;
       resizing = false;
-      const w = Math.max(MIN_ELEMENT_WIDTH, baseW + (ev.clientX - startX));
-      const h = Math.max(MIN_ELEMENT_HEIGHT, baseH + (ev.clientY - startY));
+      const maxW = window.innerWidth - OFFSCREEN_VISIBLE_MARGIN;
+      const maxH = window.innerHeight - OFFSCREEN_VISIBLE_MARGIN;
+      const w = Math.min(maxW, Math.max(MIN_ELEMENT_WIDTH, baseW + (ev.clientX - startX)));
+      const h = Math.min(maxH, Math.max(MIN_ELEMENT_HEIGHT, baseH + (ev.clientY - startY)));
       saveLayoutEntry(id, { w, h });
       el.classList.remove("is-lifted");
       handle.removeEventListener("pointermove", onMove);
@@ -1020,11 +1100,13 @@ function initCustomizeLayout() {
     target.appendChild(dragHandle);
     makeDraggable(target, dragHandle, id);
 
-    const resizeHandle = document.createElement("span");
-    resizeHandle.className = "resize-handle";
-    resizeHandle.title = "Drag to resize";
-    target.appendChild(resizeHandle);
-    makeResizable(target, resizeHandle, id);
+    if (!NO_RESIZE_IDS.has(id)) {
+      const resizeHandle = document.createElement("span");
+      resizeHandle.className = "resize-handle";
+      resizeHandle.title = "Drag to resize";
+      target.appendChild(resizeHandle);
+      makeResizable(target, resizeHandle, id);
+    }
   });
   applySavedLayout();
   setCustomizeMode(customizeModeOn);

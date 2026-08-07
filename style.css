@@ -223,6 +223,9 @@ h1, h2, h3 {
      being covered by them — but still below .modal (100). */
   z-index: 60;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: calc(100vw - 1.4rem);
   gap: 0.4rem;
 }
 
@@ -961,6 +964,21 @@ body.customize-mode .customizable {
   transition: outline-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+/* The header bar (#site-header-bar) is a .customizable target too, but it
+   sits flush at the very top of the page with nothing above it in normal
+   flow (the SVG filter, bubble-field and fish-field are all position:fixed/
+   absolute and take up no layout space). Its dashed outline (outline-offset
+   4px above) and its own "⠿ Drag" handle badge (top: -13px, see .drag-handle
+   below) both render a bit above the header's top edge — which, with
+   nothing above it, means above y:0. There's no scroll room to reveal that
+   sliver, so it rendered off-screen and looked like the header/icon row was
+   being "cut off" the moment Free Placement turned on, before any drag even
+   happened. Push the whole page down slightly, only while customize mode is
+   active, so the outline and handle have room to render in full. */
+body.customize-mode {
+  padding-top: 24px;
+}
+
 body.customize-mode .customizable:hover {
   outline-color: var(--ai);
 }
@@ -1146,7 +1164,16 @@ body.customize-mode .customizable .resize-handle {
   width: 100%;
   margin: 0 auto;
   padding: 1.6rem 1rem 3rem;
-  overflow-x: hidden;
+  /* Was overflow-x: hidden — but "hidden" (like "clip") still clips any
+     descendant that's been moved outside this box, including a Free
+     Placement drag. Since most customizable elements live inside
+     .container, directly or via a .card, that clipped every left/right
+     drag the instant it crossed this box's edge — even though
+     clampOffsetToViewport() in script.js already keeps the dragged
+     element safely inside the *browser viewport*. The JS clamp is what
+     actually prevents an element from going off-screen, so this ancestor
+     doesn't need to clip too. */
+  overflow-x: visible;
 }
 
 .card {
@@ -1157,7 +1184,10 @@ body.customize-mode .customizable .resize-handle {
   padding: 1.5rem 1.6rem;
   margin-bottom: 1.4rem;
   max-width: 100%;
-  overflow-x: hidden;
+  /* Same Free Placement issue as .container above — every draggable
+     control in the "Add a Word", filter, and register cards lives inside
+     one of these, so hidden overflow here clipped left/right drags too. */
+  overflow-x: visible;
 }
 
 .card h2 {
@@ -1181,6 +1211,7 @@ body.customize-mode .customizable .resize-handle {
 
 .form-left {
   flex: 0 1 280px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
@@ -1196,7 +1227,10 @@ body.customize-mode .customizable .resize-handle {
 }
 
 .form-left .form-row .form-group-narrow {
-  flex: 0 0 78px;
+  /* 78px fit the old single "PAGE" label, but Dual-Bar Mode's "FROM PAGE" /
+     "TO PAGE" labels (see .page-dual-field below) need more room or they
+     wrap to two lines and look clipped. Widened to fit both modes. */
+  flex: 0 0 108px;
 }
 
 .form-right {
@@ -1235,6 +1269,8 @@ body.customize-mode .customizable .resize-handle {
 
 .page-dual-field label {
   margin-bottom: 0.2rem;
+  font-size: 0.68rem;
+  white-space: nowrap;
 }
 
 .page-pending-tag {
