@@ -821,6 +821,26 @@ function clampOffsetToViewport(naturalRect, x, y, id) {
   };
 }
 
+// Clamps a proposed (w, h) size the same way clampOffsetToViewport clamps
+// position — used both live, while dragging the resize handle, and
+// whenever the *browser window itself* is resized (see the "resize"
+// listener below applySavedLayout). Without that second use, a panel
+// sized close to the old window's height/width would simply keep its old
+// pixel size after the window shrank, spilling past the new edge with no
+// way to reach its own resize handle to fix it — which is what made the
+// interface look like it was "ignoring" a window resize instead of
+// adapting to it.
+function clampSizeToViewport(w, h) {
+  const maxW = window.innerWidth - OFFSCREEN_VISIBLE_MARGIN;
+  // No vertical ceiling: height is allowed to grow past the viewport,
+  // so panels can be resized arbitrarily tall (they'll extend below the
+  // fold rather than being capped at window height).
+  return {
+    w: Math.min(maxW, Math.max(MIN_ELEMENT_WIDTH, w)),
+    h: Math.max(MIN_ELEMENT_HEIGHT, h),
+  };
+}
+
 // Native <input>/<select>/<textarea> elements can't render child nodes
 // (browsers never draw content inside a form control), so a drag/resize
 // handle appended directly to one would be invisible. For those, we wrap
@@ -868,12 +888,17 @@ function applySavedLayout() {
     const el = getCustomizableTarget(id);
     const pos = offsets[id];
     if (!el || !pos) return;
-    if (!NO_RESIZE_IDS.has(id)) {
-      if (pos.w) el.style.width = `${pos.w}px`;
+    if (!NO_RESIZE_IDS.has(id) && (pos.w || pos.h)) {
+      // Re-clamp against the CURRENT viewport, not whatever viewport was
+      // in effect when this size was saved — otherwise a panel sized near
+      // the edge of a larger window stays that size forever, spilling
+      // past a smaller one instead of adapting to it.
+      const clampedSize = clampSizeToViewport(pos.w || 0, pos.h || 0);
+      if (pos.w) el.style.width = `${clampedSize.w}px`;
       if (pos.h) {
-        el.style.height = `${pos.h}px`;
+        el.style.height = `${clampedSize.h}px`;
         const inner = getScrollCappedInner(id);
-        if (inner) inner.style.maxHeight = `${pos.h}px`;
+        if (inner) inner.style.maxHeight = `${clampedSize.h}px`;
       }
     }
     // Measure AFTER width/height are applied (they affect the box) but
@@ -884,6 +909,21 @@ function applySavedLayout() {
     el.style.transform = `translate(${clamped.x}px, ${clamped.y}px)`;
   });
 }
+
+// Free Placement offsets/sizes are only ever clamped to the viewport at
+// the moment of a drag/resize (or once, on page load). If the person
+// resizes the actual BROWSER WINDOW afterward — the most natural way to
+// "resize the interface" — nothing previously re-checked those saved
+// pixel values, so a panel positioned or sized near the edge of a larger
+// window would keep its old numbers and spill past the new, smaller
+// window instead of adapting to it. Debounced the same way fish-field
+// resizing is (see fishHandleResize) since "resize" fires continuously
+// while a window edge is being dragged.
+let layoutResizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(layoutResizeTimer);
+  layoutResizeTimer = setTimeout(applySavedLayout, 120);
+});
 
 function resetLayout() {
   try {
@@ -1001,10 +1041,7 @@ function makeResizable(el, handle, id) {
 
     function onMove(ev) {
       if (!resizing) return;
-      const maxW = window.innerWidth - OFFSCREEN_VISIBLE_MARGIN;
-      const maxH = window.innerHeight - OFFSCREEN_VISIBLE_MARGIN;
-      const w = Math.min(maxW, Math.max(MIN_ELEMENT_WIDTH, baseW + (ev.clientX - startX)));
-      const h = Math.min(maxH, Math.max(MIN_ELEMENT_HEIGHT, baseH + (ev.clientY - startY)));
+      const { w, h } = clampSizeToViewport(baseW + (ev.clientX - startX), baseH + (ev.clientY - startY));
       el.style.width = `${w}px`;
       el.style.height = `${h}px`;
       if (inner) inner.style.maxHeight = `${h}px`;
@@ -1013,10 +1050,7 @@ function makeResizable(el, handle, id) {
     function onUp(ev) {
       if (!resizing) return;
       resizing = false;
-      const maxW = window.innerWidth - OFFSCREEN_VISIBLE_MARGIN;
-      const maxH = window.innerHeight - OFFSCREEN_VISIBLE_MARGIN;
-      const w = Math.min(maxW, Math.max(MIN_ELEMENT_WIDTH, baseW + (ev.clientX - startX)));
-      const h = Math.min(maxH, Math.max(MIN_ELEMENT_HEIGHT, baseH + (ev.clientY - startY)));
+      const { w, h } = clampSizeToViewport(baseW + (ev.clientX - startX), baseH + (ev.clientY - startY));
       saveLayoutEntry(id, { w, h });
       el.classList.remove("is-lifted");
       handle.removeEventListener("pointermove", onMove);
