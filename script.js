@@ -6312,7 +6312,27 @@ async function enhanceVocabulary(word, book) {
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
-  return div.innerHTML;
+  // textContent → innerHTML escapes & < > for us, but NOT quote characters
+  // (quotes aren't special in a text node). Since this helper's output is
+  // routinely dropped inside double-quoted HTML attributes (alt="...",
+  // title="...", src="..."), an unescaped " lets a value close the
+  // attribute early and inject new attributes (e.g. onerror=...) even
+  // though < and > are already blocked. Escape them explicitly.
+  return div.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// Only allow schemes that can't execute script when dropped into an <img
+// src>. Blocks javascript:, vbscript:, and bare unsafe strings; allows
+// normal http(s) links and inline data:image/* URIs (e.g. pasted images),
+// but not other data: subtypes such as data:text/html. Returns "" for
+// anything else, and callers should treat "" as "no image".
+function sanitizeImageUrl(url) {
+  if (typeof url !== "string") return "";
+  const trimmed = url.trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^data:image\/(png|jpe?g|gif|webp|svg\+xml|bmp);base64,/i.test(trimmed)) return trimmed;
+  return "";
 }
 
 function sourceLabel(source) {
@@ -6398,7 +6418,7 @@ function renderImages(list, containerEl, onRemove, onToggle) {
         <label class="image-select-checkbox">
           <input type="checkbox" class="image-checkbox" data-id="${img.id}" ${isSelected ? "checked" : ""} title="Include this image in the entry">
         </label>
-        <img src="${img.url}" alt="Related visual" loading="lazy" decoding="async">
+        <img src="${escapeHtml(sanitizeImageUrl(img.url))}" alt="Related visual" loading="lazy" decoding="async">
         <button type="button" class="image-remove-btn" data-id="${img.id}" title="Remove this image">✕</button>
       </div>`;
     })
@@ -6499,8 +6519,10 @@ function togglePendingDefinition(id, selected) {
 
 function addPendingImage(url, source, selected = false) {
   if (!url) return;
-  if (pendingImages.some((img) => img.url === url)) return;
-  pendingImages.push({ id: generateId(), url, source, selected });
+  const safeUrl = sanitizeImageUrl(url);
+  if (!safeUrl) return; // reject javascript:/vbscript:/malformed URLs at the source
+  if (pendingImages.some((img) => img.url === safeUrl)) return;
+  pendingImages.push({ id: generateId(), url: safeUrl, source, selected });
   renderImages(pendingImages, imagesGallery, removePendingImage, togglePendingImage);
 }
 
@@ -6593,6 +6615,15 @@ async function runWordLookup(word) {
   }
   pendingPhonetics = defResult.phonetics || { us: null, uk: null };
   renderPhoneticPreview(pendingPhonetics);
+  // Start fetching the dictionary clip's bytes now, while the person is
+  // still filling out the rest of the form, instead of waiting for the
+  // pronounce button click. `pendingPhonetics.us/uk.audio` stays a plain
+  // URL string here (playPendingPronunciation() and normalizeAudioUrl()
+  // both depend on that) — this only warms the browser's HTTP cache for
+  // that same URL, so when tryPlayAudio() later does `new Audio(url)` for
+  // the real click, the bytes are already local and playback is instant.
+  preloadAudioUrl(pendingPhonetics.us?.audio);
+  preloadAudioUrl(pendingPhonetics.uk?.audio);
 
   if (imgResult.ok) {
     imgResult.images.forEach((url) => addPendingImage(url, "auto"));
@@ -7332,12 +7363,17 @@ editAddDefinitionBtn.addEventListener("click", () => {
 editAddImageBtn.addEventListener("click", () => {
   const url = editImageUrlInput.value.trim();
   if (!url) return;
+  const safeUrl = sanitizeImageUrl(url);
+  if (!safeUrl) {
+    alert("That doesn't look like a valid image URL (only http(s) links and pasted images are allowed).");
+    return;
+  }
   const manualCount = editPendingImages.filter((img) => bucketOf(img.source) === "manual").length;
   if (manualCount >= getManualImgLimit()) {
     alert(`Limit Reached: you can only keep ${getManualImgLimit()} manual image(s) for this word. Raise the limit in Settings (⚙️) if you need more.`);
     return;
   }
-  editPendingImages.push({ id: generateId(), url, source: "manual", selected: true });
+  editPendingImages.push({ id: generateId(), url: safeUrl, source: "manual", selected: true });
   renderImages(editPendingImages, editImagesGallery, removeEditPendingImage, toggleEditPendingImage);
   editImageUrlInput.value = "";
 });
@@ -7529,6 +7565,21 @@ function googleTranslateTtsUrl(word) {
 // after AUDIO_LOAD_TIMEOUT_MS the promise rejects and playAudioChain()
 // moves on immediately to the next fallback.
 const AUDIO_LOAD_TIMEOUT_MS = 1500;
+
+// Cache of URLs we've already kicked off a background fetch for, so
+// re-running the auto-lookup (e.g. the person edits the word slightly
+// and the debounce fires again) doesn't start a duplicate download of
+// clips already in flight or already cached.
+const preloadedAudioUrls = new Set();
+
+function preloadAudioUrl(url) {
+  const normalized = normalizeAudioUrl(url);
+  if (!normalized || preloadedAudioUrls.has(normalized)) return;
+  preloadedAudioUrls.add(normalized);
+  const audio = new Audio();
+  audio.preload = "auto";
+  audio.src = normalized; // browser starts fetching immediately
+}
 
 function tryPlayAudio(url) {
   return new Promise((resolve, reject) => {
@@ -8232,7 +8283,9 @@ importFileInput.addEventListener("change", () => {
           text: d.text,
           source: d.source || "manual",
         }));
-        const importedImages = (raw.images || []).map((url) => ({ id: generateId(), url, source: "manual" }));
+        const importedImages = (raw.images || [])
+          .map((url) => ({ id: generateId(), url: sanitizeImageUrl(url), source: "manual" }))
+          .filter((img) => img.url); // drop any image whose URL didn't pass sanitization
 
         entries.push({
           id: generateId(),
@@ -8407,10 +8460,14 @@ function renderImageCell(entry) {
   }
   const bucketTitle = { system: "Dictionary/Auto", ai: "AI Context", manual: "Manual" };
   const imgs = all
-    .map(
-      (img) =>
-        `<img class="row-thumb" data-img-id="${img.id}" data-bucket="${img.bucket}" src="${img.url}" alt="${escapeHtml(entry.word)}" title="${bucketTitle[img.bucket]}" loading="lazy" decoding="async">`
-    )
+    .map((img) => {
+      const safeUrl = sanitizeImageUrl(img.url);
+      // A URL that fails sanitization (bad scheme, or came from a hand-edited
+      // import file) isn't safe to put in a src attribute at all — skip
+      // rendering that thumbnail rather than risk it.
+      if (!safeUrl) return "";
+      return `<img class="row-thumb" data-img-id="${img.id}" data-bucket="${img.bucket}" src="${escapeHtml(safeUrl)}" alt="${escapeHtml(entry.word)}" title="${bucketTitle[img.bucket]}" loading="lazy" decoding="async">`;
+    })
     .join("");
   return `<td data-label="Images"><div class="row-images-gallery">${imgs}</div></td>`;
 }
