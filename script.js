@@ -7422,6 +7422,25 @@ function loadVoices() {
 if ("speechSynthesis" in window) {
   loadVoices();
   window.speechSynthesis.onvoiceschanged = loadVoices;
+
+  // On Chrome/Edge (and mobile browsers), getVoices() often returns an
+  // empty list right at page load — the voice list only populates once
+  // the "voiceschanged" event fires, and the underlying synthesis
+  // service itself can be idle/asleep until first used. If someone
+  // clicks a pronunciation button in that window, pickVoice() finds
+  // nothing, so playAudioChain() skips straight to the Google Translate
+  // network fallback (or the default-voice synthesis, which also has to
+  // wake the engine cold) — both of which are slower than a warm,
+  // voice-matched call. Speaking a silent, empty utterance right away
+  // wakes the engine and nudges the voice list to populate before the
+  // person has had a chance to click anything.
+  try {
+    const warmUp = new SpeechSynthesisUtterance("");
+    warmUp.volume = 0;
+    window.speechSynthesis.speak(warmUp);
+  } catch (err) {
+    console.warn("Speech engine warm-up failed:", err);
+  }
 }
 
 // Given several voices that all technically match, prefer Chrome's own
@@ -7499,11 +7518,36 @@ function googleTranslateTtsUrl(word) {
   return `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&q=${encodeURIComponent(word)}&tl=en`;
 }
 
+// Remote clips (dictionary audio, Google Translate TTS) have no built-in
+// timeout: if the request stalls — slow network, a dead-but-not-erroring
+// URL, a host that never responds — the browser's "error" event simply
+// never fires, so the returned promise hangs forever and playAudioChain()
+// sits there waiting on it before it can fall through to the next option
+// (a matched system voice, then on-device speech synthesis). That silent
+// hang is what actually produces the "sometimes there's a big delay
+// before any sound plays" behavior. Capping how long we wait fixes it:
+// after AUDIO_LOAD_TIMEOUT_MS the promise rejects and playAudioChain()
+// moves on immediately to the next fallback.
+const AUDIO_LOAD_TIMEOUT_MS = 1500;
+
 function tryPlayAudio(url) {
   return new Promise((resolve, reject) => {
     const audio = new Audio(url);
-    audio.addEventListener("error", () => reject(new Error("load error")), { once: true });
-    audio.play().then(resolve).catch(reject);
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      audio.src = ""; // abort the pending load/request
+      reject(new Error("timed out"));
+    }, AUDIO_LOAD_TIMEOUT_MS);
+    const finish = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(arg);
+    };
+    audio.addEventListener("error", () => finish(reject, new Error("load error")), { once: true });
+    audio.play().then(() => finish(resolve)).catch((err) => finish(reject, err));
   });
 }
 
@@ -7548,12 +7592,32 @@ function cleanRespellingForSpeech(text) {
 // identically. `respellingText`, if supplied, is what's spoken there
 // instead, purely to make the two buttons sound different from each
 // other when nothing better is available.
+//
+// Clicking US then UK (or the same button twice) in quick succession
+// used to be able to leave TWO playback chains running at once — an
+// older click's dictionary-clip fetch could still be in flight (or
+// timing out) after a newer click had already started its own chain,
+// so the stale one would eventually fall through to a voice/TTS
+// fallback and speak *after* the new word had already played, which is
+// exactly the "delay" people notice when double-clicking or switching
+// accents fast. `pronunciationPlaybackToken` tags every call; a chain
+// that's no longer the latest one silently stops instead of continuing
+// down the fallback list.
+let pronunciationPlaybackToken = 0;
+
 async function playAudioChain(word, accent, dictionaryAudioUrl, respellingText = "") {
+  const myToken = ++pronunciationPlaybackToken;
+  // A new click always wins immediately — stop whatever the previous
+  // click was doing (system-voice speech in particular can otherwise
+  // keep talking over/before the new word).
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+
   if (dictionaryAudioUrl) {
     try {
       await tryPlayAudio(dictionaryAudioUrl);
       return;
     } catch (err) {
+      if (myToken !== pronunciationPlaybackToken) return; // superseded by a newer click
       console.warn(`${accent.toUpperCase()} dictionary clip failed (${err.message}) — trying next option.`, dictionaryAudioUrl);
     }
   }
@@ -7569,6 +7633,7 @@ async function playAudioChain(word, accent, dictionaryAudioUrl, respellingText =
     await tryPlayAudio(googleTranslateTtsUrl(fallbackText));
     return;
   } catch (err) {
+    if (myToken !== pronunciationPlaybackToken) return; // superseded by a newer click
     console.warn(`Google Translate voice failed (${err.message}) — falling back to on-device speech synthesis.`);
   }
   speakWithBrowserTTS(fallbackText, accent);
