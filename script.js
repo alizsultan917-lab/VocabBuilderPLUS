@@ -52,6 +52,21 @@ const DEFAULT_SYSTEM_IMG_LIMIT = 1;
 const DEFAULT_AI_IMG_LIMIT = 2;
 const DEFAULT_MANUAL_IMG_LIMIT = 5;
 
+// ---------------------------------------------------------------------
+// Hooks for the optional performance monitor (perf-monitor.js, loaded
+// right after this file). Kept as two tiny pass-through helpers so every
+// instrumented call site below reads the same either way, and so this
+// file never breaks if perf-monitor.js is ever removed — they just
+// become no-ops.
+function perfTime(category, fn) {
+  if (window.PerfMonitor) return window.PerfMonitor.time(category, fn);
+  return fn();
+}
+function perfTimeAsync(category, fn) {
+  if (window.PerfMonitor) return window.PerfMonitor.timeAsync(category, fn);
+  return fn();
+}
+
 // Which stream a given item's `source` belongs to.
 function bucketOf(source) {
   if (source === "ai" || (source && source.startsWith("context"))) return "ai";
@@ -740,6 +755,7 @@ const CUSTOMIZABLE_IDS = [
   "display-widget",
   "customize-widget",
   "storage-widget",
+  "performance-widget",
   "word-input",
   "page-input-wrap",
   "book-input",
@@ -792,6 +808,7 @@ const NO_RESIZE_IDS = new Set([
   "display-widget",
   "customize-widget",
   "storage-widget",
+  "performance-widget",
 ]);
 const MIN_ELEMENT_WIDTH = 32;
 const MIN_ELEMENT_HEIGHT = 24;
@@ -1621,15 +1638,15 @@ async function loadEntries() {
   const restored = await tryRestoreFolderConnection();
 
   if (restored) {
-    entries = await readEntriesFromDisk();
+    entries = await perfTimeAsync("Folder / Drive Sync", () => readEntriesFromDisk());
     // First time this folder is used, it'll be empty — bring over
     // anything already sitting in browser storage so nothing is lost.
     if (entries.length === 0) {
-      loadEntriesFromLocalStorage();
-      if (entries.length > 0) await writeEntriesToDisk(entries);
+      perfTime("Local Storage I/O", loadEntriesFromLocalStorage);
+      if (entries.length > 0) await perfTimeAsync("Folder / Drive Sync", () => writeEntriesToDisk(entries));
     }
   } else {
-    loadEntriesFromLocalStorage();
+    perfTime("Local Storage I/O", loadEntriesFromLocalStorage);
   }
 
   // MIGRATION 1: entries saved before the dual-stream (manual/AI bucket)
@@ -1747,8 +1764,8 @@ function saveEntries() {
   const saveLocal = usingDiskStorage && vocabDirHandle && prefs.local;
   const saveCloud = usingCloudStorage && prefs.cloud;
 
-  if (saveLocal) queueDiskSave(entries); // fire-and-forget; errors handled inside
-  if (saveCloud) queueDriveSave(entries); // fire-and-forget; errors handled inside
+  if (saveLocal) perfTimeAsync("Folder / Drive Sync", () => queueDiskSave(entries)); // fire-and-forget; errors handled inside
+  if (saveCloud) perfTimeAsync("Folder / Drive Sync", () => queueDriveSave(entries)); // fire-and-forget; errors handled inside
 
   // ALWAYS keep a fresh browser-storage mirror in sync, even while a
   // folder or Drive is the primary store. This used to be skipped
@@ -1760,7 +1777,7 @@ function saveEntries() {
   // all), loadEntries() fell back to that frozen copy — resurrecting
   // long-deleted entries and losing anything added since. Keeping this
   // mirror current at all times closes that gap for good.
-  saveEntriesToLocalStorage();
+  perfTime("Local Storage I/O", saveEntriesToLocalStorage);
 }
 
 function loadLastBookPage() {
@@ -4703,7 +4720,7 @@ function fishTick(now) {
   // paths (fishTickRunIfDue's scroll/touchmove listener and the
   // setInterval fallback) are untouched by this and still catch true rAF
   // stalls immediately regardless.
-  fishTickCore(now);
+  perfTime("Fish & Bubble Animation", () => fishTickCore(now));
   fishEngine.rafId = requestAnimationFrame(fishTick);
 }
 
@@ -4718,7 +4735,7 @@ function fishTickRunIfDue(now) {
   if (!document.body.classList.contains("bubbly-mode") || !document.body.classList.contains("fish-mode-on")) return;
   const sinceLast = (now - (fishEngine.state.lastTime || now)) / 1000;
   if (sinceLast < SCROLL_HEARTBEAT_GAP) return;
-  fishTickCore(now);
+  perfTime("Fish & Bubble Animation", () => fishTickCore(now));
 }
 
 // Last-resort safety net, independent of any DOM event. "scroll" and
@@ -6654,8 +6671,10 @@ async function runWordLookup(word) {
 
   const systemImgLimit = getSystemImgLimit();
   const [defResult, imgResult] = await Promise.all([
-    fetchDefinitions(word),
-    systemImgLimit > 0 ? fetchImages(word, systemImgLimit) : Promise.resolve({ ok: false, reason: "limit-zero", images: [] }),
+    perfTimeAsync("Dictionary Lookups", () => fetchDefinitions(word)),
+    systemImgLimit > 0
+      ? perfTimeAsync("Image Search", () => fetchImages(word, systemImgLimit))
+      : Promise.resolve({ ok: false, reason: "limit-zero", images: [] }),
   ]);
 
   aiLoadingTag.classList.add("hidden");
@@ -6780,7 +6799,7 @@ aiFetchBtn.addEventListener("click", async () => {
   // something or exhausted every fallback query), not just once the
   // LLM has replied.
   try {
-    const result = await enhanceVocabulary(word, book);
+    const result = await perfTimeAsync("AI Enhancement", () => enhanceVocabulary(word, book));
 
     if (!result.ok) {
       const messages = {
@@ -6820,7 +6839,7 @@ aiFetchBtn.addEventListener("click", async () => {
     if (aiImgLimit > 0) {
       aiFetchBtnLabel.textContent = "Fetching images…";
       contextLoadingTag.textContent = "Fetching images…";
-      const { images } = await fetchAiImages(word, book, result.imageQueries, aiImgLimit);
+      const { images } = await perfTimeAsync("Image Search", () => fetchAiImages(word, book, result.imageQueries, aiImgLimit));
       images.forEach((url) => addPendingImage(url, "ai"));
       imagesAdded = images.length;
     }
@@ -7969,7 +7988,7 @@ exportPdfBtn.addEventListener("click", async () => {
   exportPdfBtn.disabled = true;
   exportPdfBtn.textContent = "Building PDF…";
   try {
-    const blob = await buildPdfBlob(payload);
+    const blob = await perfTimeAsync("PDF Export", () => buildPdfBlob(payload));
     await deliverExport(blob, `${chosenName || defaultName}.pdf`, "application/pdf");
   } catch (err) {
     console.error("PDF export failed:", err);
@@ -8445,6 +8464,10 @@ function hasActiveFilters() {
 }
 
 function renderTable() {
+  perfTime("Table Rendering", renderTableInner);
+}
+
+function renderTableInner() {
   const selectedBook = bookFilter.value;
   const filtersActive = hasActiveFilters();
 

@@ -560,6 +560,147 @@ body.has-wallpaper .vaw-header {
   margin: 0.7rem 0;
 }
 
+/* ---------- 📊 Performance monitor panel ---------- */
+.perf-panel {
+  width: 340px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.perf-score-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 0.7rem;
+}
+
+.perf-score-ring {
+  --perf-score-deg: 0deg;
+  --tone-color: #3f8ae0;
+  position: relative;
+  width: 52px;
+  height: 52px;
+  flex: none;
+  border-radius: 50%;
+  background: conic-gradient(var(--tone-color) var(--perf-score-deg), rgba(0, 0, 0, 0.08) 0deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.4s ease;
+}
+
+.perf-score-ring::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background: var(--paper);
+}
+
+.perf-score-ring span {
+  position: relative;
+  z-index: 1;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+
+.perf-score-ring[data-tone="great"] { --tone-color: #2e9e5b; }
+.perf-score-ring[data-tone="good"] { --tone-color: #3f8ae0; }
+.perf-score-ring[data-tone="fair"] { --tone-color: #d99a2b; }
+.perf-score-ring[data-tone="poor"] { --tone-color: #d64545; }
+
+.perf-score-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.perf-score-label {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.perf-score-hint {
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+  line-height: 1.3;
+}
+
+.perf-simple-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+}
+
+.perf-simple-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  background: rgba(0, 0, 0, 0.035);
+  border-radius: 8px;
+  padding: 0.45rem 0.3rem;
+}
+
+.perf-simple-value {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.perf-simple-key {
+  font-size: 0.64rem;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.perf-detail-toggle {
+  display: block;
+  margin: -0.1rem 0 0.5rem;
+}
+
+.perf-detail-body {
+  margin-top: 0.2rem;
+}
+
+.perf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.76rem;
+  margin-bottom: 0.7rem;
+}
+
+.perf-table th,
+.perf-table td {
+  text-align: left;
+  padding: 0.28rem 0.3rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.perf-table th {
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.perf-empty {
+  color: var(--ink-soft);
+  font-style: italic;
+  padding: 0.5rem 0.3rem !important;
+}
+
+.perf-detail-lines p {
+  font-size: 0.76rem;
+  margin: 0.15rem 0;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
 /* ---------- Fish tank species checkboxes (Display panel, nested under
    Liquid Interface) ---------- */
 .fish-species-controls {

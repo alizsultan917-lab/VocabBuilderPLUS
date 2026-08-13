@@ -433,6 +433,69 @@
       </div>
     </div>
 
+    <div id="performance-widget" class="storage-widget">
+      <button type="button" id="performance-toggle-btn" class="storage-toggle-btn" title="App performance">
+        <span class="storage-icon">📊</span>
+      </button>
+      <div id="performance-panel" class="storage-panel perf-panel hidden">
+        <div class="perf-score-row">
+          <div id="perf-score-ring" class="perf-score-ring" data-tone="good">
+            <span id="perf-score-value">--</span>
+          </div>
+          <div class="perf-score-info">
+            <span id="perf-score-label" class="perf-score-label">Checking…</span>
+            <span class="perf-score-hint">Overall app health, updated live</span>
+          </div>
+        </div>
+
+        <div class="perf-simple-grid">
+          <div class="perf-simple-stat">
+            <span id="perf-fps-value" class="perf-simple-value">--</span>
+            <span class="perf-simple-key">FPS</span>
+          </div>
+          <div class="perf-simple-stat">
+            <span id="perf-mem-value" class="perf-simple-value">--</span>
+            <span class="perf-simple-key">Memory</span>
+          </div>
+          <div class="perf-simple-stat">
+            <span id="perf-storage-value" class="perf-simple-value">--</span>
+            <span class="perf-simple-key">Storage</span>
+          </div>
+          <div class="perf-simple-stat">
+            <span id="perf-uptime-value" class="perf-simple-value">--</span>
+            <span class="perf-simple-key">Session</span>
+          </div>
+        </div>
+
+        <hr class="storage-divider">
+
+        <button type="button" id="perf-detail-toggle-btn" class="link-btn perf-detail-toggle">Show Detailed Report ▾</button>
+
+        <div id="perf-detail-body" class="perf-detail-body hidden">
+          <p class="storage-status">Real, measured processing time — not an estimate — broken down by feature, over the last ~20 seconds.</p>
+
+          <h4 class="limits-group-title">Time by Feature</h4>
+          <table class="perf-table" id="perf-feature-table">
+            <thead><tr><th>Feature</th><th>Calls</th><th>Avg</th><th>Share</th></tr></thead>
+            <tbody id="perf-feature-tbody"></tbody>
+          </table>
+
+          <h4 class="limits-group-title">Frame Timing</h4>
+          <div id="perf-frame-detail" class="perf-detail-lines"></div>
+
+          <h4 class="limits-group-title">Network</h4>
+          <div id="perf-network-detail" class="perf-detail-lines"></div>
+
+          <h4 class="limits-group-title">System</h4>
+          <div id="perf-system-detail" class="perf-detail-lines"></div>
+
+          <div class="storage-panel-actions">
+            <button type="button" id="perf-reset-btn" class="btn btn-secondary btn-small">Reset Stats</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </header>
 
@@ -783,5 +846,6 @@
 <script src="wallpaper-tone-contrast.js"></script>
 <script src="wallpaper-adaptive-text.js"></script>
 <script src="script.js"></script>
+<script src="perf-monitor.js"></script>
 </body>
 </html>
