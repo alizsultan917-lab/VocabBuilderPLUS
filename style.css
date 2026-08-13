@@ -1912,6 +1912,13 @@ tbody tr:hover {
   font-size: 0.78rem;
 }
 
+.ai-settings-key-warning {
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+  line-height: 1.4;
+  margin: 0.35rem 0 0;
+}
+
 /* ---------- Modal ---------- */
 .modal {
   position: fixed;

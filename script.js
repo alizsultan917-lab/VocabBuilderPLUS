@@ -180,10 +180,14 @@ const STORAGE_KEY = "litVocabEntries";
 const LAST_BOOK_PAGE_KEY = "litVocabLastBookPage";
 
 // User-configured AI integration (local by default, cloud-compatible).
-// Settings are stored as a single JSON object under AI_SETTINGS_STORAGE;
-// AI_CONFIG below supplies the defaults used whenever a given field hasn't
-// been set (or storage is empty/corrupt).
+// apiUrl/modelName are stored as a JSON object under AI_SETTINGS_STORAGE
+// (localStorage — not sensitive, fine to persist across visits). apiKey is
+// a credential, so it lives separately under AI_SETTINGS_KEY_STORAGE in
+// sessionStorage — scoped to this tab and gone once it's closed. AI_CONFIG
+// below supplies the defaults used whenever a given field hasn't been set
+// (or storage is empty/corrupt).
 const AI_SETTINGS_STORAGE = "litVocabAiSettings";
+const AI_SETTINGS_KEY_STORAGE = "litVocabAiApiKey";
 const AI_CONFIG = {
   apiUrl: "http://localhost:11434",
   modelName: "llama3.2:3b",
@@ -1755,48 +1759,78 @@ function saveLastBookPage(book, page) {
 }
 
 /* ---------------------------------------------------------------------
-   SETTINGS MANAGER — reads/writes the user-configured AI connection
-   (apiUrl, modelName, apiKey) as a single JSON object in localStorage.
-   Any field missing/blank/corrupt falls back to AI_CONFIG's defaults, so
-   the app always has a usable configuration even before the person has
-   opened "AI Settings" for the first time.
+   SETTINGS MANAGER — reads/writes the user-configured AI connection.
+   apiUrl/modelName aren't sensitive, so they're kept in localStorage for
+   convenience across visits. apiKey is different: it's a credential, so
+   it's kept in sessionStorage instead — scoped to this tab and cleared
+   automatically when the tab/browser closes, rather than sitting on disk
+   indefinitely where any future XSS bug, malicious extension, or shared-
+   computer situation could read it. Any field missing/blank/corrupt falls
+   back to AI_CONFIG's defaults, so the app always has a usable
+   configuration even before the person has opened "AI Settings".
 --------------------------------------------------------------------- */
 const SettingsManager = {
   getSettings() {
+    let apiUrl = AI_CONFIG.apiUrl;
+    let modelName = AI_CONFIG.modelName;
+    let apiKey = AI_CONFIG.apiKey;
+
     try {
       const raw = localStorage.getItem(AI_SETTINGS_STORAGE);
-      if (!raw) return { ...AI_CONFIG };
-      const parsed = JSON.parse(raw);
-      return {
-        apiUrl: (parsed.apiUrl && parsed.apiUrl.trim()) || AI_CONFIG.apiUrl,
-        modelName: (parsed.modelName && parsed.modelName.trim()) || AI_CONFIG.modelName,
-        apiKey: typeof parsed.apiKey === "string" ? parsed.apiKey : AI_CONFIG.apiKey,
-      };
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        apiUrl = (parsed.apiUrl && parsed.apiUrl.trim()) || AI_CONFIG.apiUrl;
+        modelName = (parsed.modelName && parsed.modelName.trim()) || AI_CONFIG.modelName;
+      }
     } catch (err) {
       // Corrupt/blocked storage — fall back to defaults rather than crash.
       console.warn("AI settings couldn't be read, using defaults:", err);
-      return { ...AI_CONFIG };
     }
+
+    try {
+      const rawKey = sessionStorage.getItem(AI_SETTINGS_KEY_STORAGE);
+      if (typeof rawKey === "string") apiKey = rawKey;
+    } catch (err) {
+      // non-fatal — key just falls back to the default (empty)
+    }
+
+    return { apiUrl, modelName, apiKey };
   },
 
   saveSettings(settings) {
+    let ok = true;
+
     try {
       const toSave = {
         apiUrl: (settings.apiUrl && settings.apiUrl.trim()) || AI_CONFIG.apiUrl,
         modelName: (settings.modelName && settings.modelName.trim()) || AI_CONFIG.modelName,
-        apiKey: (settings.apiKey || "").trim(),
       };
       localStorage.setItem(AI_SETTINGS_STORAGE, JSON.stringify(toSave));
-      return true;
     } catch (err) {
       console.warn("AI settings couldn't be saved:", err);
-      return false;
+      ok = false;
     }
+
+    try {
+      const apiKey = (settings.apiKey || "").trim();
+      if (apiKey) sessionStorage.setItem(AI_SETTINGS_KEY_STORAGE, apiKey);
+      else sessionStorage.removeItem(AI_SETTINGS_KEY_STORAGE);
+    } catch (err) {
+      console.warn("AI API key couldn't be saved:", err);
+      ok = false;
+    }
+
+    return ok;
   },
 
   resetSettings() {
     try {
       localStorage.removeItem(AI_SETTINGS_STORAGE);
+    } catch (err) {
+      // non-fatal
+    }
+    try {
+      sessionStorage.removeItem(AI_SETTINGS_KEY_STORAGE);
     } catch (err) {
       // non-fatal
     }
@@ -8674,7 +8708,11 @@ function bindTableRowDelegation() {
     }
     const thumb = e.target.closest(".row-thumb");
     if (thumb) {
-      window.open(thumb.src, "_blank");
+      // noopener/noreferrer: thumb.src is already restricted to http(s)/
+      // data:image by sanitizeImageUrl, but the opened tab would otherwise
+      // still get a window.opener back to this app — no reason to hand
+      // that out for what's supposed to be "view this image full-size".
+      window.open(thumb.src, "_blank", "noopener,noreferrer");
       return;
     }
   });
@@ -8800,7 +8838,16 @@ function sanitizeScrapedText(text, maxRunLength = 40) {
 // content script (the Scrape-Back flow). Wrapped in try/catch so a
 // malformed or unexpected message can never break the rest of the app.
 window.addEventListener("message", (event) => {
+  // Both checks matter: event.source !== window rules out other frames/
+  // tabs, and event.origin !== our own origin rules out anything that
+  // isn't really running on this page. Neither check alone verifies WHO
+  // posted the message (any script sharing this page's window — e.g.
+  // another extension's content script — could still forge one), but
+  // together they're the strongest signal available to a page-side
+  // listener, and everything below still runs the payload through
+  // sanitizeScrapedText()/sanitizeImageUrl() before it touches the DOM.
   if (event.source !== window) return;
+  if (event.origin !== window.location.origin) return;
   if (!event.data || event.data.type !== "GEMINI_ENTRY_SCRAPED") return;
 
   console.log("[VocabBridge] script.js received GEMINI_ENTRY_SCRAPED:", event.data.payload);
@@ -8856,6 +8903,7 @@ window.addEventListener("message", (event) => {
 // content script. A page refresh reconnects it.
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
+  if (event.origin !== window.location.origin) return;
   if (!event.data || event.data.type !== "GEMINI_BRIDGE_DISCONNECTED") return;
   alert(
     "The Gemini Bridge extension isn't responding — this usually happens right after it's been " +
@@ -8898,6 +8946,7 @@ const appReadyInterval = setInterval(() => {
 
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
+  if (event.origin !== window.location.origin) return;
   if (!event.data || event.data.type !== "APP_READY_ACK") return;
   appReadyAckReceived = true;
   clearInterval(appReadyInterval);
