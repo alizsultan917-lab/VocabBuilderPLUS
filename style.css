@@ -30,6 +30,21 @@
   --glass-blur: 20px;
   --glass-tint: 50%;
 
+  /* 🤍 Panel Whiteness (set via the 🔍 Display panel) — an extra flat
+     white wash layered ONLY on top of panels/cards, independent of
+     --glass-alpha above. --glass-alpha thins/thickens every glass surface
+     at once (buttons included); this only exists to rescue text
+     legibility on panels sitting over a busy wallpaper without washing
+     out the whole Liquid Interface look. Unitless 0-100, used directly
+     as a percent inside calc() below. 0 = no change from the existing
+     glass formula. Split into two independent controls so the two tiers
+     of panel can be tuned separately:
+       --panel-whiteness-main → top-level containers (.card, .modal-content)
+       --panel-whiteness-sub  → nested panels within a card
+                                 (.storage-panel, .pronunciation-panel) */
+  --panel-whiteness-main: 0;
+  --panel-whiteness-sub: 0;
+
   /* 🫧 Bubble realism — Surface Tension Elasticity & Specular Reflection
      Intensity (set via the 🔍 Display panel). Stored unitless 0-100 so
      they can scale opacity/transform factors directly inside calc()
@@ -3465,7 +3480,10 @@ body.bubbly-mode .modal-content {
      tint instead: mostly transparent, just enough wash/blur to keep text
      legible over a busy photo, so the wallpaper reads through the panel
      the same way it does behind the header widgets. */
-  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.16 + 3%), transparent);
+  background:
+    linear-gradient(color-mix(in srgb, #fff calc(var(--panel-whiteness-main) * 1%), transparent),
+      color-mix(in srgb, #fff calc(var(--panel-whiteness-main) * 1%), transparent)),
+    color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.16 + 3%), transparent);
   backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2));
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2));
   border: 1px solid color-mix(in srgb, #fff calc(var(--glass-tint) * 0.6 + 12%), transparent);
@@ -3481,8 +3499,8 @@ body.bubbly-mode .modal-content {
 /* Large flat surfaces get the soft (low-amplitude) wobble on hover only
    — no :active variant, since a card is a content container people
    click into, not a button people press. */
-body.bubbly-mode .card:hover,
-body.bubbly-mode .modal-content:hover {
+body.bubbly-mode.panel-wiggle-on .card:hover,
+body.bubbly-mode.panel-wiggle-on .modal-content:hover {
   /* will-change scoped to :hover, not the base .card/.modal-content rule —
      these sit still most of the time, so promoting a GPU layer only while
      the wobble animation is actually running (instead of permanently)
@@ -3501,13 +3519,19 @@ body.bubbly-mode .modal-content:hover {
    wallpaper showing through crisp, instead of a foggy frosted panel. */
 body.has-wallpaper.bubbly-mode .card,
 body.has-wallpaper.bubbly-mode .modal-content {
-  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.04 + 1%), transparent);
+  background:
+    linear-gradient(color-mix(in srgb, #fff calc(var(--panel-whiteness-main) * 1%), transparent),
+      color-mix(in srgb, #fff calc(var(--panel-whiteness-main) * 1%), transparent)),
+    color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.04 + 1%), transparent);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 
 body.bubbly-mode .storage-panel {
-  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.16 + 3%), transparent);
+  background:
+    linear-gradient(color-mix(in srgb, #fff calc(var(--panel-whiteness-sub) * 1%), transparent),
+      color-mix(in srgb, #fff calc(var(--panel-whiteness-sub) * 1%), transparent)),
+    color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.16 + 3%), transparent);
   backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2));
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2));
   border: 1px solid color-mix(in srgb, #fff calc(var(--glass-tint) * 0.7 + 20%), transparent);
@@ -3520,7 +3544,7 @@ body.bubbly-mode .storage-panel {
   transition: background var(--glass-fade-in), backdrop-filter var(--glass-fade-in), border-radius 0.6s ease;
 }
 
-body.bubbly-mode .storage-panel:hover {
+body.bubbly-mode.panel-wiggle-on .storage-panel:hover {
   animation: bubble-wobble-soft 3s ease-in-out infinite;
 }
 
@@ -3531,7 +3555,10 @@ body.bubbly-mode .storage-panel:hover {
    kept at its original smaller radius since it's a compact nested
    panel, not a top-level card. */
 body.bubbly-mode .pronunciation-panel {
-  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.16 + 3%), transparent);
+  background:
+    linear-gradient(color-mix(in srgb, #fff calc(var(--panel-whiteness-sub) * 1%), transparent),
+      color-mix(in srgb, #fff calc(var(--panel-whiteness-sub) * 1%), transparent)),
+    color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.16 + 3%), transparent);
   backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2));
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.3)) saturate(calc(120% + var(--glass-tint) * 0.2));
   border-color: color-mix(in srgb, #fff calc(var(--glass-tint) * 0.7 + 20%), transparent);
@@ -3546,7 +3573,10 @@ body.bubbly-mode .pronunciation-panel {
    glass with an adaptive border, rather than a frosted rectangle sitting
    in the middle of an otherwise-clear card. */
 body.has-wallpaper.bubbly-mode .pronunciation-panel {
-  background: color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.05 + 1%), transparent);
+  background:
+    linear-gradient(color-mix(in srgb, #fff calc(var(--panel-whiteness-sub) * 1%), transparent),
+      color-mix(in srgb, #fff calc(var(--panel-whiteness-sub) * 1%), transparent)),
+    color-mix(in srgb, #fff calc(var(--glass-alpha) * 0.05 + 1%), transparent);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   border-color: color-mix(in srgb, #fff calc(var(--wallpaper-border-alpha) * 100%), transparent);
@@ -3617,11 +3647,17 @@ body.bubbly-mode .storage-toggle-btn:hover {
   transform: perspective(700px) rotateX(var(--tilt-rx)) rotateY(var(--tilt-ry))
     translateZ(var(--tilt-tz)) translateY(-1px) scale(1.06);
   box-shadow: var(--bubble-shell), 0 calc(6px + var(--tilt-tz)) 18px -6px rgba(22, 63, 99, 0.35);
+}
+
+body.bubbly-mode.button-wiggle-on .storage-toggle-btn:hover {
   animation: bubble-wobble 2.2s ease-in-out infinite;
 }
 
 body.bubbly-mode .storage-toggle-btn:active {
   transform: perspective(700px) scale(0.92);
+}
+
+body.bubbly-mode.button-wiggle-on .storage-toggle-btn:active {
   animation: bubble-wobble-press 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
@@ -3645,7 +3681,16 @@ body.bubbly-mode .storage-toggle-btn:active {
 
    `bubble-wobble-soft`: same idea at a fraction of the amplitude, for
    large flat surfaces (cards/panels) where a full blob deformation
-   would look like a rendering glitch rather than glass flexing. ---- */
+   would look like a rendering glitch rather than glass flexing.
+
+   Two independent opt-outs, each its own body class set from the 🔍
+   Display panel (Button Wiggle / Panel Wiggle): `.button-wiggle-on`
+   gates bubble-wobble/-press on .btn/.icon-btn/.storage-toggle-btn (and
+   the matching .bubble-text-wobble rules below), `.panel-wiggle-on`
+   gates bubble-wobble-soft on .card/.modal-content/.storage-panel. The
+   rest of Liquid Interface (glass tint/blur, bubble shape, refraction)
+   stays on either way — these two only ever touch the wobble
+   animation itself, never the base hover/press transform or shadow. ---- */
 @keyframes bubble-wobble {
   22% { border-radius: 42% 58% 65% 35% / 45% 40% 60% 55%; }
   48% { border-radius: 63% 37% 40% 60% / 52% 62% 38% 48%; }
@@ -3696,30 +3741,30 @@ body.bubbly-mode .storage-toggle-btn:active {
   65% { transform: scale(1.035, 0.965) skew(-0.3deg, 0deg); }
 }
 
-body.bubbly-mode .storage-toggle-btn:hover .bubble-text-wobble {
+body.bubbly-mode.button-wiggle-on .storage-toggle-btn:hover .bubble-text-wobble {
   will-change: transform;
   animation: bubble-text-wobble 2.2s ease-in-out infinite;
 }
 
-body.bubbly-mode .storage-toggle-btn:active .bubble-text-wobble {
+body.bubbly-mode.button-wiggle-on .storage-toggle-btn:active .bubble-text-wobble {
   animation: bubble-text-wobble-press 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
-body.bubbly-mode .btn:hover .bubble-text-wobble {
+body.bubbly-mode.button-wiggle-on .btn:hover .bubble-text-wobble {
   will-change: transform;
   animation: bubble-text-wobble 2.6s ease-in-out infinite;
 }
 
-body.bubbly-mode .btn:active .bubble-text-wobble {
+body.bubbly-mode.button-wiggle-on .btn:active .bubble-text-wobble {
   animation: bubble-text-wobble-press 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
-body.bubbly-mode .icon-btn:hover .bubble-text-wobble {
+body.bubbly-mode.button-wiggle-on .icon-btn:hover .bubble-text-wobble {
   will-change: transform;
   animation: bubble-text-wobble 2.4s ease-in-out infinite;
 }
 
-body.bubbly-mode .icon-btn:active .bubble-text-wobble {
+body.bubbly-mode.button-wiggle-on .icon-btn:active .bubble-text-wobble {
   animation: bubble-text-wobble-press 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
@@ -3778,12 +3823,18 @@ body.bubbly-mode .btn:hover {
     translateZ(var(--tilt-tz)) translateY(-2px) scale(1.02);
   filter: brightness(1.04);
   box-shadow: var(--bubble-shell), 0 calc(8px + var(--tilt-tz)) 22px -8px rgba(22, 63, 99, 0.4);
+}
+
+body.bubbly-mode.button-wiggle-on .btn:hover {
   animation: bubble-wobble 2.6s ease-in-out infinite;
 }
 
 body.bubbly-mode .btn:active {
   transform: perspective(700px) scale(0.94);
   filter: brightness(0.98);
+}
+
+body.bubbly-mode.button-wiggle-on .btn:active {
   animation: bubble-wobble-press 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
@@ -3859,11 +3910,17 @@ body.bubbly-mode .icon-btn:hover {
   transform: perspective(700px) rotateX(var(--tilt-rx)) rotateY(var(--tilt-ry))
     translateZ(var(--tilt-tz)) scale(1.08);
   box-shadow: var(--bubble-shell), 0 calc(6px + var(--tilt-tz)) 16px -6px rgba(22, 63, 99, 0.35);
+}
+
+body.bubbly-mode.button-wiggle-on .icon-btn:hover {
   animation: bubble-wobble 2.4s ease-in-out infinite;
 }
 
 body.bubbly-mode .icon-btn:active {
   transform: perspective(700px) scale(0.9);
+}
+
+body.bubbly-mode.button-wiggle-on .icon-btn:active {
   animation: bubble-wobble-press 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 

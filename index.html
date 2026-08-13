@@ -194,6 +194,24 @@
             <input type="range" id="glass-tint-input" min="0" max="100" step="5">
           </div>
 
+          <div class="slider-field-row">
+            <div class="slider-field-label">
+              <label for="panel-whiteness-main-input">Main panel whiteness</label>
+              <span id="panel-whiteness-main-value" class="slider-value">0%</span>
+            </div>
+            <input type="range" id="panel-whiteness-main-input" min="0" max="100" step="5">
+            <p class="storage-sync-hint">Adds a white backing behind text on top-level panels (like the Add a Word card) so it stays readable over busy wallpapers — doesn't affect buttons.</p>
+          </div>
+
+          <div class="slider-field-row">
+            <div class="slider-field-label">
+              <label for="panel-whiteness-sub-input">Sub-panel whiteness</label>
+              <span id="panel-whiteness-sub-value" class="slider-value">0%</span>
+            </div>
+            <input type="range" id="panel-whiteness-sub-input" min="0" max="100" step="5">
+            <p class="storage-sync-hint">Same, but for the smaller panels nested inside a card (like the pronunciation box).</p>
+          </div>
+
           <hr class="storage-divider">
 
           <div class="bubbly-toggle-row">
@@ -203,6 +221,28 @@
             </div>
             <label class="switch" for="bubble-refraction-toggle">
               <input type="checkbox" id="bubble-refraction-toggle">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+
+          <div class="bubbly-toggle-row">
+            <div class="bubbly-toggle-label">
+              <span class="bubbly-toggle-title">🔘 Button Wiggle</span>
+              <span class="bubbly-toggle-hint">Membrane sway on buttons when hovered/pressed</span>
+            </div>
+            <label class="switch" for="button-wiggle-toggle">
+              <input type="checkbox" id="button-wiggle-toggle">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+
+          <div class="bubbly-toggle-row">
+            <div class="bubbly-toggle-label">
+              <span class="bubbly-toggle-title">🪟 Panel Wiggle</span>
+              <span class="bubbly-toggle-hint">Membrane sway on cards &amp; panels when hovered</span>
+            </div>
+            <label class="switch" for="panel-wiggle-toggle">
+              <input type="checkbox" id="panel-wiggle-toggle">
               <span class="switch-track"><span class="switch-thumb"></span></span>
             </label>
           </div>

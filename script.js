@@ -84,12 +84,29 @@ const BUBBLE_MODE_STORAGE = "litVocabBubbleMode";
 const GLASS_TRANSPARENCY_STORAGE = "litVocabGlassTransparency";
 const GLASS_BLUR_STORAGE = "litVocabGlassBlur";
 const GLASS_TINT_STORAGE = "litVocabGlassTint";
+// 🤍 Panel Whiteness — extra white backing layered only on panels/cards
+// (see the --panel-whiteness-main/--panel-whiteness-sub rules in
+// style.css), independent of the three glass keys above so it can
+// rescue legibility over a busy wallpaper without thickening
+// buttons/pills too. Split into two independent keys matching the two
+// tiers of panel: top-level containers (.card, .modal-content) vs.
+// nested panels within a card (.storage-panel, .pronunciation-panel).
+const PANEL_WHITENESS_MAIN_STORAGE = "litVocabPanelWhitenessMain";
+const PANEL_WHITENESS_SUB_STORAGE = "litVocabPanelWhitenessSub";
 // 🫧 Bubble realism — refraction highlights layered on top of the existing
 // moving-bubbles/bubbly-mode rendering. Kept separate from the three glass
 // keys above since they can be tuned independently of glass opacity/blur/tint.
 const BUBBLE_REFRACTION_STORAGE = "litVocabBubbleRefraction";
 const BUBBLE_TENSION_STORAGE = "litVocabBubbleTension";
 const BUBBLE_SPECULAR_STORAGE = "litVocabBubbleSpecular";
+// 🫨 Wiggle opt-outs — independent on/off switches for the bubble-wobble
+// membrane-sway animation (see style.css), split the same way the user
+// sees them: buttons (.btn/.icon-btn/.storage-toggle-btn) vs. panels
+// (.card/.modal-content/.storage-panel). Default true so existing users
+// see no change until they actively turn one off — same "on unless you
+// opt out" pattern as DEFAULT_BUBBLE_MODE.
+const BUTTON_WIGGLE_STORAGE = "litVocabButtonWiggle";
+const PANEL_WIGGLE_STORAGE = "litVocabPanelWiggle";
 const FISH_MODE_STORAGE = "litVocabFishMode";
 const FISH_SPECIES_STORAGE = "litVocabFishSpecies";
 // 🖼️ Wallpaper — the image itself is stored as a compressed data: URL
@@ -125,9 +142,18 @@ const DEFAULT_BUBBLE_MODE = true;
 const DEFAULT_GLASS_TRANSPARENCY = 30; // % — how see-through the glass is (0 = opaque, 100 = fully transparent)
 const DEFAULT_GLASS_BLUR = 20;         // px — backdrop blur radius
 const DEFAULT_GLASS_TINT = 50;         // % — strength of the color tint / glossy highlight
+const DEFAULT_PANEL_WHITENESS = 0;     // % — extra white wash on panels, off by default
+const PANEL_WHITENESS_MIN = 0;
+const PANEL_WHITENESS_MAX = 100;
+// Legacy single-slider key, kept only so existing users' saved value
+// carries over as the starting point for both new sliders the first
+// time getPanelWhitenessMain/Sub run (see below) — never written to again.
+const PANEL_WHITENESS_LEGACY_STORAGE = "litVocabPanelWhiteness";
 // Off by default — this is an extra layer on top of Moving bubbles, not a
 // replacement, so existing users don't get a visual change until they opt in.
 const DEFAULT_BUBBLE_REFRACTION = false;
+const DEFAULT_BUTTON_WIGGLE = true;
+const DEFAULT_PANEL_WIGGLE = true;
 const DEFAULT_BUBBLE_TENSION = 50;  // % — matches the slider's initial value in index.html
 const DEFAULT_BUBBLE_SPECULAR = 75; // % — matches the slider's initial value in index.html
 const BUBBLE_TENSION_MIN = 0;
@@ -436,7 +462,13 @@ const glassBlurInput = document.getElementById("glass-blur-input");
 const glassBlurValue = document.getElementById("glass-blur-value");
 const glassTintInput = document.getElementById("glass-tint-input");
 const glassTintValue = document.getElementById("glass-tint-value");
+const panelWhitenessMainInput = document.getElementById("panel-whiteness-main-input");
+const panelWhitenessMainValue = document.getElementById("panel-whiteness-main-value");
+const panelWhitenessSubInput = document.getElementById("panel-whiteness-sub-input");
+const panelWhitenessSubValue = document.getElementById("panel-whiteness-sub-value");
 const bubbleRefractionToggle = document.getElementById("bubble-refraction-toggle");
+const buttonWiggleToggle = document.getElementById("button-wiggle-toggle");
+const panelWiggleToggle = document.getElementById("panel-wiggle-toggle");
 const bubbleTensionInput = document.getElementById("bubble-tension-input");
 const bubbleTensionValue = document.getElementById("bubble-tension-value");
 const bubbleSpecularInput = document.getElementById("bubble-specular-input");
@@ -5076,6 +5108,56 @@ function setGlassTint(n) {
   }
 }
 
+// Shared by both tiers: falls back to the old single-slider value (if a
+// returning user has one saved) so upgrading doesn't silently reset their
+// whiteness to 0, then falls back to the default.
+function getLegacyPanelWhiteness() {
+  try {
+    const v = parseInt(localStorage.getItem(PANEL_WHITENESS_LEGACY_STORAGE), 10);
+    return Number.isFinite(v) ? clampRange(v, PANEL_WHITENESS_MIN, PANEL_WHITENESS_MAX, DEFAULT_PANEL_WHITENESS) : DEFAULT_PANEL_WHITENESS;
+  } catch (err) {
+    return DEFAULT_PANEL_WHITENESS;
+  }
+}
+
+function getPanelWhitenessMain() {
+  try {
+    const stored = localStorage.getItem(PANEL_WHITENESS_MAIN_STORAGE);
+    if (stored === null) return getLegacyPanelWhiteness();
+    const v = parseInt(stored, 10);
+    return Number.isFinite(v) ? clampRange(v, PANEL_WHITENESS_MIN, PANEL_WHITENESS_MAX, DEFAULT_PANEL_WHITENESS) : DEFAULT_PANEL_WHITENESS;
+  } catch (err) {
+    return DEFAULT_PANEL_WHITENESS;
+  }
+}
+
+function setPanelWhitenessMain(n) {
+  try {
+    localStorage.setItem(PANEL_WHITENESS_MAIN_STORAGE, String(clampRange(n, PANEL_WHITENESS_MIN, PANEL_WHITENESS_MAX, DEFAULT_PANEL_WHITENESS)));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function getPanelWhitenessSub() {
+  try {
+    const stored = localStorage.getItem(PANEL_WHITENESS_SUB_STORAGE);
+    if (stored === null) return getLegacyPanelWhiteness();
+    const v = parseInt(stored, 10);
+    return Number.isFinite(v) ? clampRange(v, PANEL_WHITENESS_MIN, PANEL_WHITENESS_MAX, DEFAULT_PANEL_WHITENESS) : DEFAULT_PANEL_WHITENESS;
+  } catch (err) {
+    return DEFAULT_PANEL_WHITENESS;
+  }
+}
+
+function setPanelWhitenessSub(n) {
+  try {
+    localStorage.setItem(PANEL_WHITENESS_SUB_STORAGE, String(clampRange(n, PANEL_WHITENESS_MIN, PANEL_WHITENESS_MAX, DEFAULT_PANEL_WHITENESS)));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
 // Transparency is stored/shown as "how see-through", but the CSS consumes
 // it as an alpha percentage (how opaque the glass is), so it's inverted
 // here — dragging the slider up makes the interface more transparent.
@@ -5084,6 +5166,8 @@ function applyGlassPrefs() {
   root.setProperty("--glass-alpha", `${100 - getGlassTransparency()}%`);
   root.setProperty("--glass-blur", `${getGlassBlur()}px`);
   root.setProperty("--glass-tint", `${getGlassTint()}%`);
+  root.setProperty("--panel-whiteness-main", String(getPanelWhitenessMain()));
+  root.setProperty("--panel-whiteness-sub", String(getPanelWhitenessSub()));
   glassControls.classList.toggle("hidden", !getBubblyMode());
 }
 
@@ -5101,6 +5185,40 @@ function getBubbleRefraction() {
 function setBubbleRefraction(on) {
   try {
     localStorage.setItem(BUBBLE_REFRACTION_STORAGE, String(!!on));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function getButtonWiggle() {
+  try {
+    const raw = localStorage.getItem(BUTTON_WIGGLE_STORAGE);
+    return raw === null ? DEFAULT_BUTTON_WIGGLE : raw === "true";
+  } catch (err) {
+    return DEFAULT_BUTTON_WIGGLE;
+  }
+}
+
+function setButtonWiggle(on) {
+  try {
+    localStorage.setItem(BUTTON_WIGGLE_STORAGE, String(!!on));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function getPanelWiggle() {
+  try {
+    const raw = localStorage.getItem(PANEL_WIGGLE_STORAGE);
+    return raw === null ? DEFAULT_PANEL_WIGGLE : raw === "true";
+  } catch (err) {
+    return DEFAULT_PANEL_WIGGLE;
+  }
+}
+
+function setPanelWiggle(on) {
+  try {
+    localStorage.setItem(PANEL_WIGGLE_STORAGE, String(!!on));
   } catch (err) {
     // non-fatal
   }
@@ -5146,6 +5264,8 @@ function applyBubbleRealismPrefs() {
   root.setProperty("--bubble-tension", String(getBubbleTension()));
   root.setProperty("--bubble-specular", String(getBubbleSpecular()));
   document.body.classList.toggle("bubble-refraction-on", getBubbleRefraction());
+  document.body.classList.toggle("button-wiggle-on", getButtonWiggle());
+  document.body.classList.toggle("panel-wiggle-on", getPanelWiggle());
 }
 
 // ---- 🖼️ Wallpaper: storage + apply ------------------------------------
@@ -5704,8 +5824,30 @@ glassTintInput.addEventListener("input", () => {
   applyGlassPrefs();
 });
 
+panelWhitenessMainInput?.addEventListener("input", () => {
+  panelWhitenessMainValue.textContent = `${panelWhitenessMainInput.value}%`;
+  setPanelWhitenessMain(panelWhitenessMainInput.value);
+  applyGlassPrefs();
+});
+
+panelWhitenessSubInput?.addEventListener("input", () => {
+  panelWhitenessSubValue.textContent = `${panelWhitenessSubInput.value}%`;
+  setPanelWhitenessSub(panelWhitenessSubInput.value);
+  applyGlassPrefs();
+});
+
 bubbleRefractionToggle?.addEventListener("change", () => {
   setBubbleRefraction(bubbleRefractionToggle.checked);
+  applyBubbleRealismPrefs();
+});
+
+buttonWiggleToggle?.addEventListener("change", () => {
+  setButtonWiggle(buttonWiggleToggle.checked);
+  applyBubbleRealismPrefs();
+});
+
+panelWiggleToggle?.addEventListener("change", () => {
+  setPanelWiggle(panelWiggleToggle.checked);
   applyBubbleRealismPrefs();
 });
 
@@ -5813,9 +5955,13 @@ resetDisplayBtn.addEventListener("click", () => {
   setGlassTransparency(DEFAULT_GLASS_TRANSPARENCY);
   setGlassBlur(DEFAULT_GLASS_BLUR);
   setGlassTint(DEFAULT_GLASS_TINT);
+  setPanelWhitenessMain(DEFAULT_PANEL_WHITENESS);
+  setPanelWhitenessSub(DEFAULT_PANEL_WHITENESS);
   setBubbleRefraction(DEFAULT_BUBBLE_REFRACTION);
   setBubbleTension(DEFAULT_BUBBLE_TENSION);
   setBubbleSpecular(DEFAULT_BUBBLE_SPECULAR);
+  setButtonWiggle(DEFAULT_BUTTON_WIGGLE);
+  setPanelWiggle(DEFAULT_PANEL_WIGGLE);
   setWallpaperDim(DEFAULT_WALLPAPER_DIM);
   setWallpaperBlur(DEFAULT_WALLPAPER_BLUR);
   // Deliberately NOT clearing the wallpaper image itself here — that's
@@ -5847,7 +5993,19 @@ function initDisplayUI() {
   glassBlurValue.textContent = `${gb}px`;
   glassTintInput.value = gtint;
   glassTintValue.textContent = `${gtint}%`;
+  if (panelWhitenessMainInput) {
+    const pwm = getPanelWhitenessMain();
+    panelWhitenessMainInput.value = pwm;
+    panelWhitenessMainValue.textContent = `${pwm}%`;
+  }
+  if (panelWhitenessSubInput) {
+    const pws = getPanelWhitenessSub();
+    panelWhitenessSubInput.value = pws;
+    panelWhitenessSubValue.textContent = `${pws}%`;
+  }
   if (bubbleRefractionToggle) bubbleRefractionToggle.checked = getBubbleRefraction();
+  if (buttonWiggleToggle) buttonWiggleToggle.checked = getButtonWiggle();
+  if (panelWiggleToggle) panelWiggleToggle.checked = getPanelWiggle();
   if (bubbleTensionInput) {
     const bt = getBubbleTension();
     bubbleTensionInput.value = bt;
