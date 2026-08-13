@@ -6238,7 +6238,7 @@ function debounce(fn, delay) {
    DEFINITION + PHONETICS LOOKUP (Free Dictionary API — no auth)
    Returns MULTIPLE distinct definitions (one per part of speech, capped).
 --------------------------------------------------------------------- */
-async function fetchDefinitions(word) {
+async function fetchDefinitions(word, _isRetry = false) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), LOOKUP_TIMEOUT_MS);
 
@@ -6254,6 +6254,13 @@ async function fetchDefinitions(word) {
       return { ok: false, reason: "not-found" };
     }
     if (!response.ok) {
+      // The free dictionary API occasionally 5xx's transiently (e.g. a
+      // momentary 502 from its own gateway) — same class of hiccup
+      // fetchImages() already retries once for. A genuine 4xx (other
+      // than 404, handled above) isn't worth retrying.
+      if (response.status >= 500 && !_isRetry) {
+        return fetchDefinitions(word, true);
+      }
       return { ok: false, reason: `http-${response.status}` };
     }
 
@@ -6354,6 +6361,11 @@ async function fetchDefinitions(word) {
     clearTimeout(timeoutId);
     const reason = err.name === "AbortError" ? "timeout" : "network-error";
     console.warn(`Dictionary lookup failed (${reason}):`, err);
+    // One quiet retry for transient hiccups (flaky network, momentary
+    // timeout, or a 5xx response missing CORS headers that surfaces as a
+    // generic failed-fetch) before actually giving up — mirrors the
+    // retry fetchImages() already does for the same class of errors.
+    if (!_isRetry) return fetchDefinitions(word, true);
     return { ok: false, reason };
   }
 }
