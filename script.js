@@ -939,9 +939,68 @@ function getScrollCappedInner(id) {
   return SCROLL_CAPPED_IDS.has(id) ? document.getElementById(id) : null;
 }
 
+// ---------------------------------------------------------------------
+// Saved x/y position is stored as a PERCENTAGE of the viewport's current
+// width/height, not a raw pixel amount. Raw pixels were the root cause of
+// the "buttons jump on F11" bug: applySavedLayout() has to re-measure
+// each element's natural (untransformed, in-flow) position every time it
+// runs, and that natural position shifts whenever the viewport size
+// changes (F11 hides/shows the browser chrome and, in turn, the vertical
+// scrollbar — see the `scrollbar-gutter: stable` rule in style.css for
+// the other half of this fix). Replaying a fixed pixel delta on top of a
+// shifted natural position lands the element somewhere different than
+// where it was dragged to. Storing the delta as a fraction of the
+// viewport and re-deriving the pixel amount from the CURRENT viewport
+// size at apply-time keeps the element anchored to a stable, scalable
+// reference instead of a one-off pixel snapshot.
+// ---------------------------------------------------------------------
+function pxOffsetToViewportPct(x, y) {
+  return {
+    xPct: window.innerWidth ? x / window.innerWidth : 0,
+    yPct: window.innerHeight ? y / window.innerHeight : 0,
+  };
+}
+
+function viewportPctToPxOffset(xPct, yPct) {
+  return {
+    x: (xPct || 0) * window.innerWidth,
+    y: (yPct || 0) * window.innerHeight,
+  };
+}
+
+// One-time migration for layouts saved before this fix, which stored a
+// raw pixel {x, y} directly (no xPct/yPct). That raw pixel value is
+// exactly the thing that used to drift on F11, so on first read we
+// convert it into the new percentage format — anchored to whatever the
+// viewport happens to be right now — and persist the converted entry so
+// it doesn't need re-migrating on every subsequent load.
+function migrateLegacyOffsets(offsets) {
+  let changed = false;
+  Object.keys(offsets).forEach((id) => {
+    const entry = offsets[id];
+    if (entry && entry.xPct === undefined && entry.yPct === undefined && (entry.x || entry.y)) {
+      const { xPct, yPct } = pxOffsetToViewportPct(entry.x || 0, entry.y || 0);
+      entry.xPct = xPct;
+      entry.yPct = yPct;
+      delete entry.x;
+      delete entry.y;
+      changed = true;
+    }
+  });
+  if (changed) {
+    try {
+      localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(offsets));
+    } catch (err) {
+      // non-fatal
+    }
+  }
+  return offsets;
+}
+
 function getLayoutOffsets() {
   try {
-    return JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) || "{}");
+    const offsets = JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) || "{}");
+    return migrateLegacyOffsets(offsets);
   } catch (err) {
     return {};
   }
@@ -949,7 +1008,7 @@ function getLayoutOffsets() {
 
 function saveLayoutEntry(id, patch) {
   const offsets = getLayoutOffsets();
-  offsets[id] = { x: 0, y: 0, ...offsets[id], ...patch };
+  offsets[id] = { xPct: 0, yPct: 0, ...offsets[id], ...patch };
   try {
     localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(offsets));
   } catch (err) {
@@ -969,8 +1028,8 @@ function applySavedLayout() {
     // browsers fire the instant F11 fullscreen is toggled) — without this
     // reset, the getBoundingClientRect() read inside getNaturalRect() below
     // would reflect the offset already applied last time, so the saved
-    // (pos.x, pos.y) offset gets stacked on top of itself instead of
-    // measured from the element's true untransformed position. That
+    // offset gets stacked on top of itself instead of measured from the
+    // element's true untransformed position. That
     // compounding is what made buttons visibly jump further every time
     // fullscreen was toggled.
     el.style.transform = "";
@@ -991,7 +1050,13 @@ function applySavedLayout() {
     // BEFORE any transform (none has been set yet at load time), so this
     // is the element's true natural, untransformed position.
     const natural = getNaturalRect(el, 0, 0);
-    const clamped = clampOffsetToViewport(natural, pos.x || 0, pos.y || 0, id);
+    // Re-derive the pixel offset from the saved viewport PERCENTAGE using
+    // the CURRENT viewport size, instead of replaying a fixed pixel
+    // amount left over from whatever viewport it was dragged in. This is
+    // the actual fix for the F11 jump — the offset now scales with the
+    // viewport instead of staying a stale absolute delta.
+    const { x: rawX, y: rawY } = viewportPctToPxOffset(pos.xPct, pos.yPct);
+    const clamped = clampOffsetToViewport(natural, rawX, rawY, id);
     el.style.transform = `translate(${clamped.x}px, ${clamped.y}px)`;
   });
 }
@@ -1079,9 +1144,15 @@ function makeDraggable(el, handle, id) {
     startX = e.clientX;
     startY = e.clientY;
     const offsets = getLayoutOffsets();
-    const pos = offsets[id] || { x: 0, y: 0 };
-    baseX = pos.x || 0;
-    baseY = pos.y || 0;
+    const pos = offsets[id] || { xPct: 0, yPct: 0 };
+    // Start the drag from wherever the element is CURRENTLY sitting,
+    // derived from the saved percentage against the CURRENT viewport —
+    // not from a stale pixel amount left over from a different viewport
+    // size (which is what let the element already be "wrong" the moment
+    // you grabbed it after an F11 toggle).
+    const startPx = viewportPctToPxOffset(pos.xPct, pos.yPct);
+    baseX = startPx.x;
+    baseY = startPx.y;
     const naturalRect = getNaturalRect(el, baseX, baseY);
     handle.setPointerCapture?.(e.pointerId);
     el.classList.add("is-lifted");
@@ -1100,7 +1171,12 @@ function makeDraggable(el, handle, id) {
       const rawX = baseX + (ev.clientX - startX);
       const rawY = baseY + (ev.clientY - startY);
       const { x, y } = clampOffsetToViewport(naturalRect, rawX, rawY, id);
-      saveLayoutEntry(id, { x, y });
+      // Persist as a percentage of the CURRENT viewport, not the raw
+      // pixel amount, so this position survives a later viewport-size
+      // change instead of drifting (see applySavedLayout / the comment
+      // above getLayoutOffsets for the full explanation).
+      const { xPct, yPct } = pxOffsetToViewportPct(x, y);
+      saveLayoutEntry(id, { xPct, yPct });
       el.classList.remove("is-lifted");
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onUp);

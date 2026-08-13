@@ -117,6 +117,20 @@
   box-sizing: border-box;
 }
 
+/* Reserves the vertical scrollbar's width permanently, whether or not a
+   scrollbar is actually needed right now. Without this, toggling F11
+   fullscreen changes how much vertical space is available, which changes
+   whether the page needs to scroll, which makes the scrollbar appear or
+   disappear — silently changing the page's usable WIDTH by ~15-17px each
+   time. That width change is enough to flip flex-wrap rows (like the
+   "Fetch with AI" / "AI Settings" row) between wrapped and unwrapped,
+   which is the single biggest cause of controls visibly jumping on F11.
+   See LAYOUT_STORAGE_KEY / applySavedLayout() in script.js for the other
+   half of this fix (percentage-based saved offsets). */
+html {
+  scrollbar-gutter: stable;
+}
+
 :focus-visible {
   outline: 2px solid var(--accent-color);
   outline-offset: 2px;
