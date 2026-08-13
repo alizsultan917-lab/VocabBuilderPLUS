@@ -964,13 +964,15 @@ function applySavedLayout() {
     const pos = offsets[id];
     if (!el || !pos) return;
     // Clear any transform left over from a PREVIOUS call to this function
-    // before measuring. applySavedLayout() runs on page load AND on every
-    // window "resize" event (including the resize Chrome fires the instant
-    // F11 fullscreen is toggled) — without this reset, getBoundingClientRect()
-    // below would reflect the offset already applied last time, so the saved
-    // (pos.x, pos.y) offset would get stacked on top of itself instead of
+    // before measuring anything below. applySavedLayout() runs on page
+    // load AND on every window "resize" event (including the resize most
+    // browsers fire the instant F11 fullscreen is toggled) — without this
+    // reset, the getBoundingClientRect() read inside getNaturalRect() below
+    // would reflect the offset already applied last time, so the saved
+    // (pos.x, pos.y) offset gets stacked on top of itself instead of
     // measured from the element's true untransformed position. That
-    // compounding is what made buttons visibly jump on every resize/F11.
+    // compounding is what made buttons visibly jump further every time
+    // fullscreen was toggled.
     el.style.transform = "";
     if (!NO_RESIZE_IDS.has(id) && (pos.w || pos.h)) {
       // Re-clamp against the CURRENT viewport, not whatever viewport was
@@ -1005,6 +1007,16 @@ function applySavedLayout() {
 // while a window edge is being dragged.
 let layoutResizeTimer = null;
 window.addEventListener("resize", () => {
+  clearTimeout(layoutResizeTimer);
+  layoutResizeTimer = setTimeout(applySavedLayout, 120);
+});
+
+// Belt-and-suspenders for F11 / the browser's own fullscreen button: on
+// most browsers toggling fullscreen also fires "resize" (handled above),
+// but "fullscreenchange" is the event actually guaranteed to fire for a
+// fullscreen toggle specifically, so this covers any browser/OS
+// combination where "resize" doesn't reliably follow it.
+document.addEventListener("fullscreenchange", () => {
   clearTimeout(layoutResizeTimer);
   layoutResizeTimer = setTimeout(applySavedLayout, 120);
 });
