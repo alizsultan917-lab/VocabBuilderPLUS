@@ -334,6 +334,7 @@ const searchInput = document.getElementById("search-input");
 const entryCount = document.getElementById("entry-count");
 const tableContainer = document.getElementById("table-container");
 const tablePager = document.getElementById("table-pager");
+const showEntriesToggle = document.getElementById("show-entries-toggle");
 
 // PAGINATION: caps how many rows ever get built/inserted into the DOM at
 // once, so performance stays flat no matter how many entries the register
@@ -343,6 +344,27 @@ const tablePager = document.getElementById("table-pager");
 const TABLE_PAGE_SIZE = 100;
 let currentTablePage = 1;
 const footerTotal = document.getElementById("footer-total");
+
+// SHOW ENTRIES TOGGLE: with a large register, building/laying out even
+// one 100-row page on every add/edit/keystroke-filter is real, visible
+// work. This toggle lets the person skip that entirely when they're just
+// using the register as storage rather than browsing it — the table is
+// replaced with a lightweight placeholder and renderTable() bails out
+// before sorting/slicing/building any row HTML. It only ever suppresses
+// the *unfiltered* view: the moment a book/page/search filter narrows
+// things down, results always render regardless of this setting, since
+// at that point the person is explicitly asking to see something.
+const SHOW_ENTRIES_STORAGE = "litVocabShowEntries";
+let showEntriesOn = localStorage.getItem(SHOW_ENTRIES_STORAGE) !== "off";
+
+function setShowEntriesPref(on) {
+  showEntriesOn = on;
+  try {
+    localStorage.setItem(SHOW_ENTRIES_STORAGE, on ? "on" : "off");
+  } catch (err) {
+    // non-fatal
+  }
+}
 
 const exportJsonBtn = document.getElementById("export-json-btn");
 const exportPdfBtn = document.getElementById("export-pdf-btn");
@@ -7770,6 +7792,14 @@ bookFilter.addEventListener("change", resetTablePageAndRender);
 pageFilter.addEventListener("input", debounce(resetTablePageAndRender, 200));
 searchInput.addEventListener("input", debounce(resetTablePageAndRender, 200));
 
+if (showEntriesToggle) {
+  showEntriesToggle.checked = showEntriesOn;
+  showEntriesToggle.addEventListener("change", () => {
+    setShowEntriesPref(showEntriesToggle.checked);
+    resetTablePageAndRender();
+  });
+}
+
 /* ---------------------------------------------------------------------
    EXPORT / IMPORT
 --------------------------------------------------------------------- */
@@ -8407,21 +8437,42 @@ function getFilteredEntries() {
   });
 }
 
+// True when Book / Page / Search actually narrow the register down —
+// used by renderTable() to decide whether the "Show entries" toggle is
+// allowed to suppress the table (it never suppresses filtered results).
+function hasActiveFilters() {
+  return Boolean(bookFilter.value || pageFilter.value.trim() || searchInput.value.trim());
+}
+
 function renderTable() {
   const selectedBook = bookFilter.value;
-  const filtered = getFilteredEntries();
+  const filtersActive = hasActiveFilters();
 
   footerTotal.textContent = entries.length;
-  entryCount.textContent = filtered.length
-    ? `${filtered.length} ${filtered.length === 1 ? "entry" : "entries"}`
-    : "";
 
   if (entries.length === 0) {
+    entryCount.textContent = "";
     tableContainer.innerHTML =
       '<p id="empty-state" class="empty-state">No entries yet. Add your first word above to begin your register.</p>';
     renderTablePager(0, 0);
     return;
   }
+
+  // Toggled off and nothing to search for: skip filtering/sorting/row-
+  // building entirely (that's the whole point — save the processing, not
+  // just hide the result), and show a lightweight placeholder instead.
+  if (!showEntriesOn && !filtersActive) {
+    entryCount.textContent = "";
+    tableContainer.innerHTML =
+      '<p class="empty-state">Entries hidden — toggle "Show entries" on above to browse, or search/filter to view results.</p>';
+    renderTablePager(0, 0);
+    return;
+  }
+
+  const filtered = getFilteredEntries();
+  entryCount.textContent = filtered.length
+    ? `${filtered.length} ${filtered.length === 1 ? "entry" : "entries"}`
+    : "";
 
   if (filtered.length === 0) {
     tableContainer.innerHTML =

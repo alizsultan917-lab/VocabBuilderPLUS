@@ -598,6 +598,13 @@
         <label for="search-input">Search word / definition</label>
         <input type="text" id="search-input" placeholder="Type to search…">
       </div>
+      <div class="entries-toggle-group" id="entries-toggle-group" title="Turn off to skip rendering the table below when you're not searching — saves processing on large registers. Any active filter/search still shows results regardless of this setting.">
+        <label class="switch entries-toggle-switch" for="show-entries-toggle">
+          <input type="checkbox" id="show-entries-toggle" checked>
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+        </label>
+        <span class="entries-toggle-label">Show entries</span>
+      </div>
       <span id="entry-count" class="entry-count"></span>
     </div>
     <div class="export-import-row" id="export-import-row">

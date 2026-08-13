@@ -1746,6 +1746,39 @@ textarea {
   color: var(--ink-soft);
 }
 
+.entries-toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+/* When the entry-count text is also present, it should sit right after
+   the toggle rather than each fighting for the row's auto margin. */
+.entries-toggle-group + .entry-count {
+  margin-left: 0;
+}
+
+.entries-toggle-switch {
+  width: 38px;
+  height: 22px;
+}
+
+.entries-toggle-switch .switch-thumb {
+  width: 18px;
+  height: 18px;
+}
+
+.entries-toggle-switch input:checked ~ .switch-track .switch-thumb {
+  transform: translateX(16px);
+}
+
+.entries-toggle-label {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
 .filter-field {
   display: flex;
   flex-direction: column;
