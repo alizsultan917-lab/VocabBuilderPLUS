@@ -121,6 +121,37 @@ const WALLPAPER_BLUR_STORAGE = "litVocabWallpaperBlur";
 const SMART_ACCENT_STORAGE = "litVocabSmartAccentEnabled";
 const DEFAULT_SMART_ACCENT = false;
 const DEF_LEGIBILITY_STORAGE = "litVocabDefLegibilityOpacity";
+const CUSTOM_ACCENT_ENABLED_STORAGE = "litVocabCustomAccentEnabled";
+const CUSTOM_ACCENT_HUE_STORAGE = "litVocabCustomAccentHue";
+const CUSTOM_ACCENT_SAT_STORAGE = "litVocabCustomAccentSat";
+const CUSTOM_ACCENT_LIGHT_STORAGE = "litVocabCustomAccentLight";
+const DEFAULT_CUSTOM_ACCENT_HUE = 210;   // matches the app's default --blue hue
+const DEFAULT_CUSTOM_ACCENT_SAT = 60;
+const DEFAULT_CUSTOM_ACCENT_LIGHT = 42;
+const CUSTOM_ACCENT_LIGHT_MIN = 10;
+const CUSTOM_ACCENT_LIGHT_MAX = 90;
+
+// ---- 🖌️ Accent Color Scopes ----------------------------------------------
+// Which parts of the app pick up --accent-color (Custom or Smart) rather
+// than staying on the app's static --blue* palette. Each id maps 1:1 to
+// an `accent-scope-<id>-toggle` checkbox in the Display panel and a
+// `html[data-accent-scope-<id>="on|off"]` rule in style.css (search
+// "Accent Color Scopes" there) — this array is the single source of
+// truth both read from. "buttons" ships true because .btn-primary
+// already followed --accent-color before this feature existed; every
+// other scope ships false so nothing changes until it's explicitly
+// ticked.
+const ACCENT_SCOPES_STORAGE = "litVocabAccentScopes";
+const ACCENT_SCOPES = [
+  { id: "header", defaultOn: false },
+  { id: "headings", defaultOn: false },
+  { id: "labels", defaultOn: false },
+  { id: "links", defaultOn: false },
+  { id: "badges", defaultOn: false },
+  { id: "buttons", defaultOn: true },
+  { id: "ai-button", defaultOn: false },
+  { id: "add-buttons", defaultOn: false },
+];
 const DEFAULT_DEF_LEGIBILITY_OPACITY = 80; // % — stored/shown as whole percent, applied as a 0-1 decimal
 const DEF_LEGIBILITY_MIN = 30; // below this the row is nearly invisible, not just dimmed
 const DEF_LEGIBILITY_MAX = 100;
@@ -328,6 +359,7 @@ const pageEndInput = document.getElementById("page-end-input");
 const pageSingleGroup = document.getElementById("page-single-group");
 const pageDualGroup = document.getElementById("page-dual-group");
 const mergePageBarsToggle = document.getElementById("merge-page-bars-toggle");
+const showScrollbarToggle = document.getElementById("show-scrollbar-toggle");
 
 const topageConfirmModal = document.getElementById("topage-confirm-modal");
 const topageConfirmOkBtn = document.getElementById("topage-confirm-ok-btn");
@@ -486,6 +518,15 @@ const smartAccentToggle = document.getElementById("smart-accent-toggle");
 const defLegibilityInput = document.getElementById("def-legibility-input");
 const defLegibilityValue = document.getElementById("def-legibility-value");
 const smartAccentStatus = document.getElementById("smart-accent-status");
+const customAccentToggle = document.getElementById("custom-accent-toggle");
+const customAccentStatus = document.getElementById("custom-accent-status");
+const accentWheelCanvas = document.getElementById("accent-wheel-canvas");
+const accentWheelThumb = document.getElementById("accent-wheel-thumb");
+const accentHexInput = document.getElementById("accent-hex-input");
+const accentLightnessInput = document.getElementById("accent-lightness-input");
+const accentLightnessValue = document.getElementById("accent-lightness-value");
+const accentColorSwatch = document.getElementById("accent-color-swatch");
+const resetCustomAccentBtn = document.getElementById("reset-custom-accent-btn");
 const fishModeToggle = document.getElementById("fish-mode-toggle");
 const fishSpeciesControls = document.getElementById("fish-species-controls");
 const fishSpeciesCheckboxes = Array.from(
@@ -2241,6 +2282,41 @@ if (mergePageBarsToggle) {
   });
 }
 setPageBarMode(pageBarMerged);
+
+/* ---------------------------------------------------------------------
+   SCROLLBAR VISIBILITY — purely cosmetic toggle (⚙️ Fetch limits →
+   Scrollbar). Off hides the browser's scrollbar rendering; scrolling
+   itself (wheel, trackpad, keyboard) keeps working exactly as before,
+   and html's scrollbar-gutter: stable (see style.css) keeps the layout
+   from shifting either way. Persisted so the choice survives a refresh.
+--------------------------------------------------------------------- */
+const SHOW_SCROLLBAR_STORAGE = "litVocabShowScrollbar";
+
+function getShowScrollbar() {
+  try {
+    const raw = localStorage.getItem(SHOW_SCROLLBAR_STORAGE);
+    return raw === null ? true : raw === "true"; // default: visible (original behavior)
+  } catch (err) {
+    return true;
+  }
+}
+
+function setShowScrollbar(visible) {
+  document.documentElement.classList.toggle("scrollbar-hidden", !visible);
+  if (showScrollbarToggle) showScrollbarToggle.checked = visible;
+  try {
+    localStorage.setItem(SHOW_SCROLLBAR_STORAGE, String(visible));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+if (showScrollbarToggle) {
+  showScrollbarToggle.addEventListener("change", () => {
+    setShowScrollbar(showScrollbarToggle.checked);
+  });
+}
+setShowScrollbar(getShowScrollbar());
 
 /* ---------------------------------------------------------------------
    DISPLAY SIZES — search bar width, definition text size, and the size
@@ -5798,6 +5874,308 @@ function applySmartAccentColors(hsl) {
   root.setProperty("--progress-bar-fill", accent);
 }
 
+// ---- 🌈 Custom Accent Color: manual override, wide-spectrum wheel -------
+// Sits ALONGSIDE Smart Color-Extraction rather than replacing it: both
+// ultimately just call applySmartAccentColors() with an {h,s,l}, so every
+// place in style.css/map-window.css that already reads
+// --accent-color/-deep/-soft/-pale (buttons, focus rings, badges, the
+// Audio Window's whole palette) picks this up automatically with zero
+// changes elsewhere — the person gets to recolor "everything" without any
+// of the shadows/radius/glass treatment that gives those elements their
+// polish changing at all. The two sources are mutually exclusive (see the
+// toggle handlers below): turning one on turns the other off, so there's
+// always exactly one thing deciding the accent.
+function getCustomAccentEnabled() {
+  try {
+    return localStorage.getItem(CUSTOM_ACCENT_ENABLED_STORAGE) === "true";
+  } catch (err) {
+    return false;
+  }
+}
+
+function setCustomAccentEnabled(enabled) {
+  try {
+    localStorage.setItem(CUSTOM_ACCENT_ENABLED_STORAGE, enabled ? "true" : "false");
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function getCustomAccentHsl() {
+  try {
+    return {
+      h: clampRange(localStorage.getItem(CUSTOM_ACCENT_HUE_STORAGE), 0, 360, DEFAULT_CUSTOM_ACCENT_HUE),
+      s: clampRange(localStorage.getItem(CUSTOM_ACCENT_SAT_STORAGE), 0, 100, DEFAULT_CUSTOM_ACCENT_SAT),
+      l: clampRange(localStorage.getItem(CUSTOM_ACCENT_LIGHT_STORAGE), CUSTOM_ACCENT_LIGHT_MIN, CUSTOM_ACCENT_LIGHT_MAX, DEFAULT_CUSTOM_ACCENT_LIGHT),
+    };
+  } catch (err) {
+    return { h: DEFAULT_CUSTOM_ACCENT_HUE, s: DEFAULT_CUSTOM_ACCENT_SAT, l: DEFAULT_CUSTOM_ACCENT_LIGHT };
+  }
+}
+
+function setCustomAccentHsl({ h, s, l }) {
+  try {
+    localStorage.setItem(CUSTOM_ACCENT_HUE_STORAGE, String(clampRange(Math.round(h), 0, 360, DEFAULT_CUSTOM_ACCENT_HUE)));
+    localStorage.setItem(CUSTOM_ACCENT_SAT_STORAGE, String(clampRange(Math.round(s), 0, 100, DEFAULT_CUSTOM_ACCENT_SAT)));
+    localStorage.setItem(CUSTOM_ACCENT_LIGHT_STORAGE, String(clampRange(Math.round(l), CUSTOM_ACCENT_LIGHT_MIN, CUSTOM_ACCENT_LIGHT_MAX, DEFAULT_CUSTOM_ACCENT_LIGHT)));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+// Unlike adjustAccentForContrast (used for wallpaper-sampled colors, which
+// also clamps saturation into a 35–85 band because a photo-sampled hue can
+// come back near-gray or neon), this only ever nudges LIGHTNESS down, and
+// only if needed for white icon/text contrast — hue and saturation are the
+// person's explicit pick and are never altered. Keeps the "wide spectrum,
+// my own choice" promise while still guaranteeing buttons stay legible.
+function adjustCustomAccentForContrast(hsl) {
+  let { h, s, l } = hsl;
+  for (let attempts = 0; attempts < 40; attempts++) {
+    const { r, g, b } = hslToRgb(h, s, l);
+    const ratio = contrastRatio(relativeLuminance(r, g, b), relativeLuminance(255, 255, 255));
+    if (ratio >= SMART_ACCENT_MIN_CONTRAST || l <= 12) break;
+    l -= 2;
+  }
+  return { h, s, l: Math.max(12, l) };
+}
+
+function hslToHex(h, s, l) {
+  const { r, g, b } = hslToRgb(h, s, l);
+  const toHex = (n) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+}
+
+// Renders the wheel exactly once — its pixel content never changes, only
+// the thumb marker (positioned separately, in CSS) moves. Standard polar
+// hue/saturation picker: angle = hue (0° at 3 o'clock, increasing
+// counter-clockwise, matching how the reference color wheel is labeled),
+// distance from center = saturation, drawn at a fixed 50% lightness so
+// the wheel itself always reads as fully vivid — the separate Lightness
+// slider is what actually controls the third HSL axis.
+function drawAccentWheel() {
+  if (!accentWheelCanvas) return;
+  const ctx = accentWheelCanvas.getContext("2d");
+  const size = accentWheelCanvas.width;
+  const cx = size / 2, cy = size / 2, radius = size / 2 - 1;
+  const img = ctx.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = x - cx, dy = y - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const idx = (y * size + x) * 4;
+      if (dist > radius) continue; // leave fully transparent outside the circle
+      let hue = Math.atan2(-dy, dx) * 180 / Math.PI;
+      if (hue < 0) hue += 360;
+      const sat = Math.min(100, (dist / radius) * 100);
+      const { r, g, b } = hslToRgb(hue, sat, 50);
+      img.data[idx] = r; img.data[idx + 1] = g; img.data[idx + 2] = b; img.data[idx + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function positionAccentWheelThumb(h, s) {
+  if (!accentWheelCanvas || !accentWheelThumb) return;
+  const size = accentWheelCanvas.clientWidth || accentWheelCanvas.width;
+  const cx = size / 2, cy = size / 2, radius = size / 2 - 1;
+  const rad = (h * Math.PI) / 180;
+  const dist = (s / 100) * radius;
+  accentWheelThumb.style.left = `${cx + Math.cos(rad) * dist}px`;
+  accentWheelThumb.style.top = `${cy - Math.sin(rad) * dist}px`;
+}
+
+// Inverse of the drawing math above — converts a pointer/click position
+// (viewport coordinates) into {h, s}, clamping distance to the wheel's
+// radius so a drag that strays outside the circle still lands a sensible
+// value at full saturation instead of being ignored.
+function accentWheelPointToHsl(clientX, clientY) {
+  const rect = accentWheelCanvas.getBoundingClientRect();
+  const size = rect.width;
+  const cx = size / 2, cy = size / 2, radius = size / 2 - 1;
+  const x = clientX - rect.left - cx;
+  const y = clientY - rect.top - cy;
+  const dist = Math.min(radius, Math.sqrt(x * x + y * y));
+  let hue = Math.atan2(-y, x) * 180 / Math.PI;
+  if (hue < 0) hue += 360;
+  const sat = Math.min(100, (dist / radius) * 100);
+  return { h: hue, s: sat };
+}
+
+// Any direct interaction with the wheel/hex/lightness controls means the
+// person wants THIS color applied now — switch Custom on and Smart
+// Color-Extraction off so there's never ambiguity about which is driving
+// --accent-color.
+function enableCustomAccentFromInteraction() {
+  setCustomAccentEnabled(true);
+  setSmartAccentEnabled(false);
+  if (smartAccentToggle) smartAccentToggle.checked = false;
+  smartAccentStatus?.classList.add("hidden");
+}
+
+// Syncs every piece of the picker UI (thumb position, hex field, swatch,
+// lightness slider, toggle) to whatever's currently stored — called after
+// any change, from any of the three input methods, so they never drift
+// out of sync with each other.
+function applyCustomAccentUI() {
+  const enabled = getCustomAccentEnabled();
+  const hsl = getCustomAccentHsl();
+  if (customAccentToggle) customAccentToggle.checked = enabled;
+  positionAccentWheelThumb(hsl.h, hsl.s);
+  if (accentLightnessInput) accentLightnessInput.value = hsl.l;
+  if (accentLightnessValue) accentLightnessValue.textContent = `${hsl.l}%`;
+  const hex = hslToHex(hsl.h, hsl.s, hsl.l);
+  if (accentColorSwatch) accentColorSwatch.style.background = hex;
+  // Don't stomp on the hex field while the person is actively typing in it.
+  if (accentHexInput && document.activeElement !== accentHexInput) accentHexInput.value = hex;
+}
+
+function updateCustomAccentStatus(enabled) {
+  if (!customAccentStatus) return;
+  customAccentStatus.textContent = enabled
+    ? "Custom color applied to buttons, highlights & borders across the app."
+    : "Pick a hue on the wheel, then fine-tune lightness — it'll switch on above as soon as you do.";
+}
+
+let accentWheelDragging = false;
+function handleAccentWheelPointer(e) {
+  const { h, s } = accentWheelPointToHsl(e.clientX, e.clientY);
+  const current = getCustomAccentHsl();
+  setCustomAccentHsl({ h, s, l: current.l });
+  enableCustomAccentFromInteraction();
+  applyCustomAccentUI();
+  applySmartAccent();
+}
+
+accentWheelCanvas?.addEventListener("pointerdown", (e) => {
+  accentWheelDragging = true;
+  accentWheelCanvas.setPointerCapture(e.pointerId);
+  handleAccentWheelPointer(e);
+});
+accentWheelCanvas?.addEventListener("pointermove", (e) => {
+  if (accentWheelDragging) handleAccentWheelPointer(e);
+});
+accentWheelCanvas?.addEventListener("pointerup", () => { accentWheelDragging = false; });
+accentWheelCanvas?.addEventListener("pointercancel", () => { accentWheelDragging = false; });
+
+// Keyboard equivalent for anyone who can't (or doesn't want to) drag on
+// canvas — left/right step hue, up/down step saturation, Shift for a
+// bigger step.
+accentWheelCanvas?.addEventListener("keydown", (e) => {
+  const hsl = getCustomAccentHsl();
+  let { h, s } = hsl;
+  const step = e.shiftKey ? 10 : 4;
+  switch (e.key) {
+    case "ArrowLeft": h = (h - step + 360) % 360; break;
+    case "ArrowRight": h = (h + step) % 360; break;
+    case "ArrowUp": s = Math.min(100, s + step); break;
+    case "ArrowDown": s = Math.max(0, s - step); break;
+    default: return;
+  }
+  e.preventDefault();
+  setCustomAccentHsl({ h, s, l: hsl.l });
+  enableCustomAccentFromInteraction();
+  applyCustomAccentUI();
+  applySmartAccent();
+});
+
+accentHexInput?.addEventListener("change", () => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(accentHexInput.value.trim());
+  if (!m) { applyCustomAccentUI(); return; } // invalid entry — just revert the field
+  const hex = m[1];
+  const r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16);
+  const hsl = rgbToHsl(r, g, b);
+  setCustomAccentHsl(hsl);
+  enableCustomAccentFromInteraction();
+  applyCustomAccentUI();
+  applySmartAccent();
+});
+accentHexInput?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") accentHexInput.blur(); // triggers the change handler above
+});
+
+accentLightnessInput?.addEventListener("input", () => {
+  const hsl = getCustomAccentHsl();
+  const l = clampRange(accentLightnessInput.value, CUSTOM_ACCENT_LIGHT_MIN, CUSTOM_ACCENT_LIGHT_MAX, DEFAULT_CUSTOM_ACCENT_LIGHT);
+  setCustomAccentHsl({ h: hsl.h, s: hsl.s, l });
+  enableCustomAccentFromInteraction();
+  applyCustomAccentUI();
+  applySmartAccent();
+});
+
+customAccentToggle?.addEventListener("change", () => {
+  setCustomAccentEnabled(customAccentToggle.checked);
+  if (customAccentToggle.checked) {
+    setSmartAccentEnabled(false);
+    if (smartAccentToggle) smartAccentToggle.checked = false;
+  }
+  applySmartAccent();
+  applyCustomAccentUI();
+});
+
+resetCustomAccentBtn?.addEventListener("click", () => {
+  setCustomAccentEnabled(false);
+  if (customAccentToggle) customAccentToggle.checked = false;
+  applySmartAccent();
+  applyCustomAccentUI();
+});
+
+drawAccentWheel();
+
+// ---- 🖌️ Accent Color Scopes: which regions accept --accent-color -------
+function getAccentScopes() {
+  let stored = {};
+  try {
+    stored = JSON.parse(localStorage.getItem(ACCENT_SCOPES_STORAGE)) || {};
+  } catch (err) {
+    stored = {};
+  }
+  const result = {};
+  ACCENT_SCOPES.forEach((s) => {
+    result[s.id] = typeof stored[s.id] === "boolean" ? stored[s.id] : s.defaultOn;
+  });
+  return result;
+}
+
+function setAccentScope(id, on) {
+  const scopes = getAccentScopes();
+  scopes[id] = !!on;
+  try {
+    localStorage.setItem(ACCENT_SCOPES_STORAGE, JSON.stringify(scopes));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+// Writes each scope's on/off state onto <html> as data-accent-scope-<id>
+// — the only thing the CSS rules in style.css read. Independent of
+// whether Custom or Smart Accent is actually driving --accent-color
+// right now: a scope that's "on" just means that region uses whatever
+// --accent-color currently resolves to (which is the static --blue
+// family whenever neither accent feature is active) instead of always
+// reading its own hardcoded color.
+function applyAccentScopes() {
+  const scopes = getAccentScopes();
+  ACCENT_SCOPES.forEach((s) => {
+    document.documentElement.setAttribute(`data-accent-scope-${s.id}`, scopes[s.id] ? "on" : "off");
+  });
+}
+
+function initAccentScopeUI() {
+  const scopes = getAccentScopes();
+  ACCENT_SCOPES.forEach((s) => {
+    const el = document.getElementById(`accent-scope-${s.id}-toggle`);
+    if (el) el.checked = scopes[s.id];
+  });
+}
+
+ACCENT_SCOPES.forEach((s) => {
+  document.getElementById(`accent-scope-${s.id}-toggle`)?.addEventListener("change", (e) => {
+    setAccentScope(s.id, e.target.checked);
+    applyAccentScopes();
+  });
+});
+
 function updateSmartAccentStatus(enabled, image, adjusted, pending) {
   if (!smartAccentStatus) return;
   if (!enabled) {
@@ -5823,9 +6201,23 @@ function updateSmartAccentStatus(enabled, image, adjusted, pending) {
 // (e.g. rapidly swapping wallpapers) and clobbering the latest result.
 let smartAccentRequestId = 0;
 async function applySmartAccent() {
+  const requestId = ++smartAccentRequestId;
+
+  // A manually-picked Custom Accent Color always wins — it's an explicit
+  // choice, not a fallback, so it's checked before wallpaper sampling even
+  // runs. adjustCustomAccentForContrast only ever nudges lightness (never
+  // hue/saturation), so this still respects exactly what was picked.
+  if (getCustomAccentEnabled()) {
+    const adjusted = adjustCustomAccentForContrast(getCustomAccentHsl());
+    applySmartAccentColors(adjusted);
+    updateSmartAccentStatus(false, null, null, false);
+    updateCustomAccentStatus(true);
+    return;
+  }
+  updateCustomAccentStatus(false);
+
   const enabled = getSmartAccentEnabled();
   const image = getActiveWallpaperImage();
-  const requestId = ++smartAccentRequestId;
   if (!enabled || !image) {
     applySmartAccentColors(null);
     updateSmartAccentStatus(enabled, image, null, false);
@@ -5851,6 +6243,8 @@ function applyDisplayPrefs() {
   applyFishPrefs();
   applyWallpaperPrefs();
   applySmartAccent();
+  applyCustomAccentUI();
+  applyAccentScopes();
   if (window.WallpaperTone) window.WallpaperTone.applyWallpaperTone(getActiveWallpaperImage());
 }
 
@@ -5962,7 +6356,12 @@ bubbleSpecularInput?.addEventListener("input", () => {
 
 smartAccentToggle?.addEventListener("change", () => {
   setSmartAccentEnabled(smartAccentToggle.checked);
+  if (smartAccentToggle.checked) {
+    setCustomAccentEnabled(false);
+    if (customAccentToggle) customAccentToggle.checked = false;
+  }
   applySmartAccent();
+  applyCustomAccentUI();
 });
 
 defLegibilityInput?.addEventListener("input", () => {
@@ -6122,6 +6521,8 @@ function initDisplayUI() {
     wallpaperBlurValue.textContent = `${wb}px`;
   }
   if (smartAccentToggle) smartAccentToggle.checked = getSmartAccentEnabled();
+  if (customAccentToggle) customAccentToggle.checked = getCustomAccentEnabled();
+  initAccentScopeUI();
   applyDisplayPrefs();
 }
 
@@ -6508,20 +6909,38 @@ async function fetchAiImages(word, book, aiQueries, limit) {
 function buildEnhancePrompt(word, book, aiDefLimit, aiImgLimit) {
   const wantDefs = aiDefLimit > 0;
   const wantImages = aiImgLimit > 0;
+  // 🗺️ Only asked for when the Map Window (map-window.js) is open AND has
+  // an active map loaded — otherwise this stays completely absent from
+  // the prompt/schema, exactly as if the feature didn't exist. See
+  // "AI Map Coordinate Fetching" in map-window.js for how the optional
+  // mapData field below gets consumed once the reply comes back.
+  const wantMap = !!window.MapWindow?.isActive?.();
 
   const asks = [];
   if (wantDefs) asks.push(`Exactly ${aiDefLimit} context-aware definition(s) specific to this book`);
   if (wantImages) asks.push(`Exactly ${aiImgLimit} concrete image search quer${aiImgLimit === 1 ? "y" : "ies"}`);
+  if (wantMap) {
+    asks.push(
+      `if (and only if) "${word}" refers to a real or fictional place, region, or battle/event with a ` +
+      `clear location on the map currently open ("${window.MapWindow.getActiveMapLabel()}"), its approximate ` +
+      `position on that map as percentages from the top-left corner`
+    );
+  }
   // Images are the first priority: even when both are requested, call
   // them out explicitly so the model doesn't shortchange the queries.
   const askLine = asks.length
     ? `Provide: ${asks.join(", and ")}. `
     : "";
 
+  const mapSchema = wantMap
+    ? `, "mapData": {"onMap": true|false, "xPercent": 0-100, "yPercent": 0-100, "label": "..."}`
+    : "";
+
   return (
     `You are a literary analyst. The word is "${word}" and the book is "${book}". ` +
     askLine +
-    `Respond ONLY in JSON: {"contextDefinitions": [${wantDefs ? Array(aiDefLimit).fill('"..."').join(", ") : ""}], "imageQueries": [${wantImages ? Array(aiImgLimit).fill('"..."').join(", ") : ""}]}. ` +
+    `Respond ONLY in JSON: {"contextDefinitions": [${wantDefs ? Array(aiDefLimit).fill('"..."').join(", ") : ""}], "imageQueries": [${wantImages ? Array(aiImgLimit).fill('"..."').join(", ") : ""}]${mapSchema}}. ` +
+    `${wantMap ? 'Set "onMap": false and omit xPercent/yPercent/label if the word has no clear location on that map. ' : ""}` +
     `Do not include markdown or conversational text.`
   );
 }
@@ -6558,12 +6977,31 @@ function parseEnhanceReply(rawText, aiDefLimit, aiImgLimit) {
   // An empty reply is only a genuine failure if something was actually
   // requested. If both limits are set to 0 (deliberately disabled in
   // Settings ⚙️), empty arrays are the expected, correct outcome.
+  // 🗺️ Optional — only present when buildEnhancePrompt() asked for it
+  // (Map Window open + active map). Deliberately never counts toward
+  // "somethingWasRequested" below: a word genuinely having no map
+  // location (onMap: false, or the field missing entirely) is a normal,
+  // successful outcome, not a failed AI reply.
+  let mapData = null;
+  const rawMap = parsed.mapData;
+  if (rawMap && typeof rawMap === "object" && rawMap.onMap) {
+    const xPercent = Number(rawMap.xPercent);
+    const yPercent = Number(rawMap.yPercent);
+    if (Number.isFinite(xPercent) && Number.isFinite(yPercent)) {
+      mapData = {
+        xPercent: Math.min(100, Math.max(0, xPercent)),
+        yPercent: Math.min(100, Math.max(0, yPercent)),
+        label: String(rawMap.label || "").trim(),
+      };
+    }
+  }
+
   const somethingWasRequested = (aiDefLimit ?? 1) > 0 || (aiImgLimit ?? 1) > 0;
   if (somethingWasRequested && contextDefinitions.length === 0 && imageQueries.length === 0) {
     return { ok: false, reason: "empty-response", message: "The AI didn't return any usable content." };
   }
 
-  return { ok: true, contextDefinitions, imageQueries };
+  return { ok: true, contextDefinitions, imageQueries, mapData };
 }
 
 /**
@@ -7118,9 +7556,18 @@ aiFetchBtn.addEventListener("click", async () => {
     const aiDefLimit = getAiDefLimit();
     result.contextDefinitions.slice(0, aiDefLimit).forEach((def) => addPendingDefinition(def, `context:${book}`));
 
+    // 🗺️ Hand any returned coordinates to the Map Window as a pending
+    // marker (word isn't saved as an entry yet, so it can't be pinned to
+    // an entry id until Add Entry runs — see map-window.js ingestAiMapData).
+    let markerAdded = false;
+    if (result.mapData && window.MapWindow?.ingestAiMapData) {
+      markerAdded = window.MapWindow.ingestAiMapData(word, result.mapData);
+    }
+
     const parts = [];
     if (result.contextDefinitions.length) parts.push(`${result.contextDefinitions.length} book-specific definition(s)`);
     if (imagesAdded) parts.push(`${imagesAdded} image(s)`);
+    if (markerAdded) parts.push(`a map location`);
     aiFetchStatus.textContent = parts.length
       ? `Added ${parts.join(" and ")} below — tick what you'd like to keep.`
       : aiImgLimit > 0
@@ -7486,6 +7933,11 @@ function addEntryFromForm() {
     if (!vawCurrentId) vawCurrentId = entry.id;
     renderVawContent();
   }
+
+  // 🗺️ If "Fetch with AI" returned a map location for this word while it
+  // was still pending (see ingestAiMapData), attach that marker to the
+  // now-real entry id so double-clicking the saved word can pan to it.
+  window.MapWindow?.promotePendingMarker?.(entry.word, entry.id);
 
   // Reset only the word/definitions/images — keep Book & Page as-is.
   wordInput.value = "";
@@ -8896,7 +9348,7 @@ function renderRowCells(entry, includeBookColumn) {
 
   return `
     <td data-label="Word">
-      <div class="word-cell">
+      <div class="word-cell" data-id="${entry.id}">
         <span class="word-text">${escapeHtml(entry.word)}</span>
       </div>
       ${phoneticLine ? `<div class="phonetic-line">${phoneticLine}</div>` : ""}
@@ -8960,7 +9412,7 @@ function renderFlatTable(list) {
   // ordering used for JSON/PDF export, kept consistent everywhere entries
   // are displayed.
   const sorted = list.slice().sort(compareEntriesForExport);
-  const rowHtmlList = sorted.map((entry) => `<tr>${renderRowCells(entry, true)}</tr>`);
+  const rowHtmlList = sorted.map((entry) => `<tr data-id="${entry.id}">${renderRowCells(entry, true)}</tr>`);
 
   tableContainer.innerHTML = `
     <table>
@@ -8996,7 +9448,7 @@ function renderGroupedByPage(list) {
     rowHtmlList.push(`<tr class="page-group-row"><td colspan="4">${formatPageLabel(pageStart, pageEnd)}</td></tr>`);
     const wordsOnPage = pageEntries.sort((a, b) => (a.seq ?? a.timestamp) - (b.seq ?? b.timestamp));
     wordsOnPage.forEach((entry) => {
-      rowHtmlList.push(`<tr>${renderRowCells(entry, false)}</tr>`);
+      rowHtmlList.push(`<tr data-id="${entry.id}">${renderRowCells(entry, false)}</tr>`);
     });
   });
 
@@ -9064,7 +9516,20 @@ function bindTableRowDelegation() {
   // bails out immediately with no side effects, per spec.
   tableContainer.addEventListener("dblclick", (e) => {
     const cell = e.target.closest(".def-cell");
-    if (cell) vawHandleDefDblClick(cell.dataset.id);
+    if (cell) {
+      vawHandleDefDblClick(cell.dataset.id);
+      return;
+    }
+    // 🗺️ Strictly gated double-click trigger for the Vocabulary Map
+    // Window (see map-window.js) — double-clicking a word's own cell
+    // (not its definitions, which the Audio Window already owns above)
+    // asks the map window to pan/zoom to that word's saved marker, if
+    // it has one. A complete no-op — including the dataset lookup — when
+    // the map window script isn't loaded or the word has no marker.
+    const wordCell = e.target.closest(".word-cell");
+    if (wordCell && window.MapWindow?.centerOnEntry) {
+      window.MapWindow.centerOnEntry(wordCell.dataset.id);
+    }
   });
 
   // "error" doesn't bubble, but a capturing listener on an ancestor still

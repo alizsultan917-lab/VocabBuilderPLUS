@@ -131,6 +131,21 @@ html {
   scrollbar-gutter: stable;
 }
 
+/* Scrollbar visibility toggle (⚙️ Fetch limits → Scrollbar → Show Scrollbar).
+   Hides only the scrollbar's own rendering — html keeps scrollbar-gutter:
+   stable above either way, so the layout never shifts when toggling, and
+   scrolling itself (wheel, trackpad, keyboard) is completely unaffected. */
+html.scrollbar-hidden {
+  scrollbar-width: none;      /* Firefox */
+  -ms-overflow-style: none;   /* old Edge / IE */
+}
+
+html.scrollbar-hidden::-webkit-scrollbar {
+  display: none;              /* Chrome, Safari, new Edge */
+  width: 0;
+  height: 0;
+}
+
 :focus-visible {
   outline: 2px solid var(--accent-color);
   outline-offset: 2px;
@@ -1088,6 +1103,305 @@ body.has-wallpaper .vaw-header {
 .wallpaper-preview-actions .btn {
   width: 100%;
   text-align: center;
+}
+
+/* ---------- 🌈 Custom Accent Color (manual wheel picker) ----------
+   Sits right below Smart Color-Extraction since both write to the same
+   --accent-color/-deep/-soft/-pale family (see applySmartAccentColors in
+   script.js) — this one just lets the person author that color directly
+   instead of sampling it from a wallpaper. The wheel is a classic polar
+   hue/saturation picker (hue = angle, saturation = distance from center,
+   drawn at a fixed 50% lightness so it reads as a full-vividness color
+   wheel); lightness gets its own slider since a single 2D wheel can't
+   carry all three HSL axes at once. */
+.custom-accent-controls {
+  margin: 0 0 0.7rem;
+}
+
+.accent-wheel-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.9rem;
+  margin: 0.4rem 0 0.5rem;
+}
+
+.accent-wheel-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  width: 168px;
+  height: 168px;
+}
+
+.accent-wheel-canvas {
+  display: block;
+  width: 168px;
+  height: 168px;
+  border-radius: 50%;
+  cursor: crosshair;
+  /* Same shadow token every other card/panel uses, so the wheel reads as
+     part of the app's normal elevation language rather than a bolted-on
+     widget. */
+  box-shadow: var(--shadow), inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+  touch-action: none;
+}
+
+.accent-wheel-canvas:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
+}
+
+/* Small ring marker showing the current pick — positioned in JS from the
+   stored hue/saturation, independent of the canvas's own pixel content
+   so it stays crisp at any zoom level. */
+.accent-wheel-thumb {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  margin-top: -9px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  background: var(--accent-color);
+}
+
+.accent-wheel-side {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.accent-color-swatch {
+  width: 100%;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.accent-hex-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  color: var(--ink);
+  background: var(--paper);
+  text-transform: uppercase;
+}
+
+.accent-hex-input:focus {
+  outline: none;
+  border-color: var(--accent-color-soft);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 20%, transparent);
+}
+
+.accent-lightness-row {
+  margin-bottom: 0;
+}
+
+.accent-wheel-side .btn {
+  margin-top: 0.1rem;
+}
+
+/* ---------- 🖌️ Accent Color Scopes ----------
+   Lets Custom Accent Color (and Smart Color-Extraction, since both write
+   the same --accent-color/-deep/-soft/-pale family) recolor CHOSEN parts
+   of the app instead of an all-or-nothing switch. JS (see
+   applyAccentScopes in script.js) writes data-accent-scope-<id>="on"/"off"
+   onto <html> for every entry in ACCENT_SCOPES — the attribute selectors
+   below are the only place that's read. Each rule just swaps a region's
+   normally-static color reference (the --blue* family) for the live
+   --accent-color* family, or the reverse for "buttons" (the one scope
+   that ships on, since --accent-color already drives .btn-primary by
+   default) — no layout/shadow/radius touched, matching how the original
+   whole-app toggle already behaves. Scopes default to "off" unless noted
+   in ACCENT_SCOPES, so nothing here changes anyone's current look until
+   they explicitly tick a box. */
+html[data-accent-scope-header="on"] .site-header {
+  background: linear-gradient(135deg, var(--accent-color-deep), var(--accent-color) 65%, var(--accent-color-soft));
+}
+
+html[data-accent-scope-headings="on"] .card h2 {
+  color: var(--accent-color-deep);
+}
+
+html[data-accent-scope-labels="on"] label {
+  color: var(--accent-color-deep);
+}
+
+html[data-accent-scope-links="on"] .select-links .link-btn {
+  color: var(--accent-color);
+}
+html[data-accent-scope-links="on"] .select-links .link-btn:hover {
+  color: var(--accent-color-deep);
+}
+
+html[data-accent-scope-badges="on"] .pron-accent {
+  color: var(--accent-color-deep);
+  background: var(--accent-color-pale);
+}
+
+/* "buttons" ships ON (see ACCENT_SCOPES) — .btn-primary already reads
+   --accent-color/-deep directly, so only the OFF state needs a rule
+   here, to fall back to the static blue family. */
+html[data-accent-scope-buttons="off"] .btn-primary {
+  background: linear-gradient(135deg, var(--blue), var(--blue-deep));
+}
+html[data-accent-scope-buttons="off"] .btn-primary:hover {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--blue) 85%, white), var(--blue-deep));
+}
+
+html[data-accent-scope-ai-button="on"] .btn-ai {
+  background: linear-gradient(135deg, var(--accent-color-deep), var(--accent-color));
+}
+
+html[data-accent-scope-add-buttons="on"] .manual-add-row .btn-secondary {
+  background: var(--accent-color-pale);
+  color: var(--accent-color-deep);
+}
+html[data-accent-scope-add-buttons="on"] .manual-add-row .btn-secondary:hover {
+  background: var(--accent-color-soft);
+}
+
+/* ---------- 🖌️ Accent Color Scopes — Liquid Interface adjustments ----------
+   🫧 Liquid Interface (body.bubbly-mode) already gives .site-header and
+   every .btn its own background formula further down this file, at the
+   same specificity as the plain rules above — so without help, those
+   later bubbly-mode rules would just win the cascade tie and silently
+   swallow a ticked scope the moment Liquid Interface turns on. Each
+   selector below adds one extra ancestor hop (html[data-accent-scope-*]
+   as its own compound instead of merged onto .btn/.site-header) purely
+   to outrank that specificity, no source-order dependence needed.
+
+   Header bar: still a real (if translucent) surface in bubbly mode, so
+   it gets the same treatment as normal mode — its own glass-formula
+   background, just built from --accent-color-* instead of the hardcoded
+   deep-blue/blue/light-blue glass stops.
+
+   Buttons (.btn-primary/.btn-ai/.btn-secondary): Liquid Interface makes
+   these "genuinely see-through" bubbles (see the "full pill shape... real
+   refraction" comment further down) — recoloring a background that's
+   mostly transparent wouldn't read as accented at all. The wording is
+   what's actually visible there, so that's what switches to the accent
+   color instead; the bubble fill itself is deliberately left alone so
+   it keeps behaving exactly like every other bubble in Liquid mode. */
+html[data-accent-scope-header="on"] body.bubbly-mode .site-header {
+  background: linear-gradient(160deg,
+    color-mix(in srgb, var(--accent-color-deep) var(--glass-tint), transparent) 0%,
+    color-mix(in srgb, var(--accent-color) var(--glass-tint), transparent) 55%,
+    color-mix(in srgb, var(--accent-color-soft) var(--glass-tint), transparent) 100%);
+}
+
+html[data-accent-scope-buttons="on"] body.bubbly-mode .btn-primary {
+  color: var(--accent-color-deep);
+}
+
+html[data-accent-scope-ai-button="on"] body.bubbly-mode .btn-ai {
+  color: var(--accent-color-deep);
+}
+
+html[data-accent-scope-add-buttons="on"] body.bubbly-mode .manual-add-row .btn-secondary {
+  color: var(--accent-color-deep);
+}
+
+/* ---------- 🖌️ Accent scope checklist ---------- */
+.accent-scope-section {
+  margin: 0.9rem 0 0.2rem;
+  padding-top: 0.7rem;
+  border-top: 1px dashed var(--border);
+}
+
+.accent-scope-title {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--ink);
+  margin: 0 0 0.15rem;
+}
+
+.accent-scope-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem 0.8rem;
+  margin-top: 0.55rem;
+}
+
+.accent-scope-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+  user-select: none;
+  padding: 0.32rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.accent-scope-check:hover {
+  background: var(--blue-pale);
+}
+
+/* Checked rows get a light accent-tinted background too, so the whole
+   row reads as "marked" — not just the little box. */
+.accent-scope-check:has(input:checked) {
+  color: var(--ink);
+  background: var(--accent-color-pale);
+  border-color: var(--accent-color-soft);
+}
+
+/* Deliberately chunkier than a native checkbox — a bold, unmistakable
+   tick rather than a thin default one, echoing the thick marker circles
+   used to mark up these same regions in the first place. */
+.accent-scope-check input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 2.5px solid var(--blue-soft);
+  background: #fff;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.accent-scope-check input[type="checkbox"]:checked {
+  background: var(--accent-color);
+  border-color: var(--accent-color-deep);
+}
+
+.accent-scope-check input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 1px;
+  width: 6px;
+  height: 11px;
+  border: solid #fff;
+  border-width: 0 3px 3px 0;
+  transform: rotate(40deg);
+}
+
+.accent-scope-check input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .accent-scope-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ---------- Export destination checkboxes ---------- */

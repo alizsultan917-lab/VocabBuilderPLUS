@@ -1,0 +1,1930 @@
+/* =========================================================================
+   map-window.css
+   -------------------------------------------------------------------------
+   Styling for #vocab-map-window (see map-window.js). Deliberately mirrors
+   .vocab-audio-window's structure and variables in style.css — same
+   --radius/--shadow-lift/--accent-color-* tokens, same open/close
+   transition shape, same header-bar drag affordance — so the two floating
+   windows read as one consistent system rather than two different ones.
+   ========================================================================= */
+
+/* ---------- 🗺️ Map Window master toggle (ON state) ---------- */
+#map-window-toggle-btn.active {
+  background: var(--accent-color);
+  border-color: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3);
+}
+
+.vocab-map-window {
+  position: fixed;
+  top: 90px;
+  left: 24px;
+  right: auto;
+  width: 420px;
+  min-width: 320px;
+  max-width: calc(100vw - 32px);
+  /* The settings/paths/symbols panels can each grow taller than the
+     viewport (long content, small screens). Without a cap + scroll the
+     window would just keep growing downward past the visible area with
+     no way to reach what's cut off (overflow: hidden was silently
+     clipping it). Capping height here and scrolling internally keeps
+     the whole window reachable no matter how tall its content gets. */
+  max-height: calc(100vh - 110px);
+  z-index: 98;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  box-shadow: var(--shadow-lift);
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Scrollable, but the scrollbar track/thumb itself is hidden — the
+     content still scrolls fine via wheel/trackpad/touch/drag, this just
+     hides the browser's default bar chrome from view. */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* old Edge/IE */
+
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(10px) scale(0.97);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
+}
+
+.vocab-map-window.mw-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0s;
+}
+
+.vocab-map-window::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Edge (Chromium) */
+}
+
+html[data-wallpaper-tone="light"] body.has-wallpaper .vocab-map-window {
+  background: var(--accent-color-pale);
+  border-color: var(--accent-color-soft);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--accent-color-deep) 30%, transparent);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html[data-wallpaper-tone="dark"] body.has-wallpaper .vocab-map-window {
+  background: var(--accent-color-deep);
+  border-color: color-mix(in srgb, var(--accent-color-soft) 55%, white);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--accent-color-deep) 55%, black);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html[data-wallpaper-tone="dark"] body.has-wallpaper .mw-region-select,
+html[data-wallpaper-tone="dark"] body.has-wallpaper .mw-empty-state {
+  color: var(--on-wallpaper-text, #f5f8fb);
+}
+
+body.has-wallpaper .mw-header {
+  background: linear-gradient(135deg, var(--accent-color-deep), var(--accent-color) 65%, var(--accent-color-soft));
+}
+
+.mw-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.6rem;
+  background: linear-gradient(135deg, var(--blue-deep), var(--blue) 65%, #2f78bd);
+  color: #fff;
+  cursor: grab;
+  user-select: none;
+}
+
+.mw-header.mw-dragging,
+.mw-header:active {
+  cursor: grabbing;
+}
+
+/* ---------- Header size variants (Header bar → Size in settings) ----------
+   "Normal" is the default look above and needs no extra class. Compact/
+   Roomy just scale the same padding/font/icon-size properties so the
+   orange "how tall is the bar" region in a screenshot grows or shrinks
+   without touching layout structure. */
+.mw-header--compact {
+  padding: 0.3rem 0.5rem;
+  gap: 0.35rem;
+}
+
+.mw-header--compact .mw-title {
+  font-size: 0.82rem;
+}
+
+.mw-header--compact .mw-drag-grip {
+  font-size: 0.7rem;
+}
+
+.mw-header--compact .mw-header-actions .icon-btn {
+  width: 20px;
+  height: 20px;
+  font-size: 0.75rem;
+}
+
+.mw-header--roomy {
+  padding: 0.85rem 0.9rem;
+  gap: 0.65rem;
+}
+
+.mw-header--roomy .mw-title {
+  font-size: 1.15rem;
+}
+
+.mw-header--roomy .mw-drag-grip {
+  font-size: 1rem;
+}
+
+.mw-header--roomy .mw-header-actions .icon-btn {
+  width: 28px;
+  height: 28px;
+  font-size: 0.95rem;
+}
+
+/* ---------- Minimal header (Header bar → Minimal Header toggle) ----------
+   Keeps only the drag grip, title and ⚙️ settings button on the bar —
+   the blue-outlined "core" of the header — and hides the ✕ close button,
+   the orange strip's own extra real estate, so more of the window is
+   free for the map underneath. Closing still works via the "Close Map
+   Window" button that appears in the settings panel while this is on. */
+.mw-header--minimal #mw-close-btn {
+  display: none;
+}
+
+/* ---------- Micro header (Header bar → Size → Micro) ----------
+   The most compact option: the header stops being a full-width bar at
+   all. It collapses to zero height in normal flow, and its two pieces
+   re-appear as small floating pieces pinned over the map itself — an
+   elegant pill (drag grip + title) top-left, and a round ⚙️ button
+   top-right. The ✕ is hidden (same fallback as Minimal above: use the
+   "Close Map Window" button in the settings panel). Because the header
+   itself contributes no height, the map viewport starts right at the
+   very top of the window, with these two floating pieces resting on
+   top of it rather than pushing it down. */
+.mw-header.mw-header--micro {
+  position: relative;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  gap: 0;
+  min-height: 0;
+  pointer-events: none; /* clicks fall through to the map except on the two floating pieces */
+}
+
+/* body.has-wallpaper's ".mw-header" background rule (above) is more
+   specific than the plain ".mw-header.mw-header--micro" reset above
+   (it carries the "body" element selector), so without this override
+   it wins and leaves a full-width tinted bar sitting over the map
+   even in Micro mode. Repeat the override with the wallpaper
+   ancestor included so it always wins. */
+body.has-wallpaper .mw-header.mw-header--micro {
+  background: transparent;
+}
+
+.mw-header--micro .mw-header-main {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 4;
+  flex: none;
+  width: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  pointer-events: auto;
+  padding: 0.32rem 0.7rem 0.32rem 0.6rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--blue-deep), var(--blue) 65%, #2f78bd);
+  box-shadow: 0 6px 16px rgba(20, 40, 70, 0.35);
+  backdrop-filter: blur(6px) saturate(160%);
+  -webkit-backdrop-filter: blur(6px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  /* Invisible at rest — not even the pill itself shows over the map.
+     It fades in only on hover (so it can still be found) and while
+     actively being dragged (so there's feedback mid-drag); otherwise
+     the map is the only thing on screen besides the ⚙️ button. */
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.mw-header--micro .mw-header-main:hover,
+.mw-header--micro.mw-dragging .mw-header-main {
+  opacity: 1;
+}
+
+body.has-wallpaper .mw-header--micro .mw-header-main {
+  background: linear-gradient(135deg, var(--accent-color-deep), var(--accent-color) 65%, var(--accent-color-soft));
+}
+
+.mw-header--micro .mw-drag-grip {
+  font-size: 0.78rem;
+}
+
+.mw-header--micro .mw-title {
+  font-size: 0.86rem;
+}
+
+.mw-header--micro .mw-header-actions {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 4;
+  pointer-events: auto;
+  gap: 0;
+}
+
+.mw-header--micro .mw-header-actions .icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--blue-deep);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 6px 14px rgba(20, 40, 70, 0.35);
+}
+
+.mw-header--micro .mw-header-actions .icon-btn:hover {
+  background: #fff;
+}
+
+.mw-header--micro #mw-close-btn {
+  display: none;
+}
+
+.mw-drag-grip {
+  font-size: 0.85rem;
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+
+.mw-header-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.mw-title {
+  font-family: "Playfair Display", Georgia, serif;
+  font-weight: 700;
+  font-size: 0.98rem;
+}
+
+.mw-header-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.mw-header-actions .icon-btn {
+  width: 24px;
+  height: 24px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.mw-header-actions .icon-btn:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+/* ---------- Toolbar: region picker + zoom controls ---------- */
+.mw-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid rgba(120, 140, 160, 0.18);
+}
+
+.mw-region-select {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--accent-color-soft);
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.82rem;
+}
+
+.mw-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.mw-zoom-btn {
+  width: 24px;
+  height: 24px;
+  font-weight: 700;
+  border-color: var(--accent-color-soft);
+}
+
+.mw-zoom-btn:hover {
+  background: var(--accent-color-pale);
+}
+
+.mw-zoom-level {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  min-width: 34px;
+  text-align: center;
+}
+
+/* ---------- Toolbar relocated into the settings panel ---------- */
+.mw-toolbar-settings-slot {
+  display: flex;
+}
+
+.mw-toolbar-settings-slot .mw-toolbar {
+  padding: 0;
+  border-bottom: none;
+  width: 100%;
+}
+
+/* ---------- Options panel: custom map upload ---------- */
+.mw-options-panel {
+  padding: 0.65rem 0.7rem;
+  border-bottom: 1px solid rgba(120, 140, 160, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+/* ---------- Settings panel: grouped sections (tools / size & fit / image) ---------- */
+.mw-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid rgba(120, 140, 160, 0.18);
+}
+
+.mw-settings-section:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.mw-settings-section-title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.mw-settings-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.mw-settings-actions-row .btn {
+  flex: 1;
+  min-width: 140px;
+}
+
+.mw-upload-row {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.mw-upload-name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--accent-color-soft);
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+
+/* ---------- Options panel: local folder connection + save-image ---------- */
+.mw-folder-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+#mw-save-image-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------- Fit-mode row: Window / Image toggle + ratio reset ---------- */
+.mw-fit-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.mw-fit-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.mw-fit-segmented {
+  display: flex;
+  border: 1px solid var(--accent-color-soft);
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.mw-fit-seg-btn {
+  border: none;
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.mw-fit-seg-btn:not(:last-child) {
+  border-right: 1px solid var(--accent-color-soft);
+}
+
+.mw-fit-seg-btn:hover {
+  background: var(--accent-color-pale);
+}
+
+.mw-fit-seg-btn.active {
+  background: var(--accent-color);
+  color: #fff;
+}
+
+/* Glow-duration segmented controls (Settings → Search glow timing) reuse
+   the same look, but have one more option than the built-in row width
+   comfortably fits ("Until next search" is long) — let this pair wrap
+   onto a second line instead of overflowing the settings panel. */
+.mw-glow-duration-segmented {
+  flex-wrap: wrap;
+}
+
+.mw-glow-duration-segmented .mw-fit-seg-btn {
+  flex: 1 1 auto;
+  white-space: nowrap;
+}
+
+/* ---------- Aspect ratio presets: one-tap common shapes ---------- */
+.mw-ratio-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.mw-ratio-preset-btn {
+  border: 1px solid var(--accent-color-soft);
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.28rem 0.65rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.mw-ratio-preset-btn:hover {
+  background: var(--accent-color-pale);
+}
+
+.mw-ratio-preset-btn:active {
+  transform: scale(0.96);
+}
+
+.mw-ratio-preset-btn.active {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: #fff;
+}
+
+/* ---------- Viewport: pan/zoom stage ---------- */
+.map-viewport {
+  position: relative;
+  width: 100%;
+  height: 320px;
+  overflow: hidden;
+  background: repeating-conic-gradient(#e7edf3 0% 25%, #dee6ee 0% 50%) 50% / 22px 22px;
+  cursor: default;
+  touch-action: none;
+}
+
+/* ---------- Resize handle (Image fit mode only) ----------
+   A compact corner grip, like resizing a native app window: dragging
+   it sideways sets the window's width, up/down sets the viewport's
+   height, and together they define the aspect ratio. Deliberately not
+   a thin edge-bar or a native-scrollbar look — those read as "browser
+   chrome"; this reads as a deliberate, grabbable control. */
+.mw-resize-handle {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  cursor: nwse-resize;
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(20, 30, 45, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 3;
+  user-select: none;
+  touch-action: none;
+  opacity: 0.8;
+  transition: background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+}
+
+.mw-resize-handle svg {
+  display: block;
+  pointer-events: none;
+}
+
+.mw-resize-handle:hover {
+  opacity: 1;
+  background: rgba(20, 30, 45, 0.58);
+  transform: scale(1.06);
+}
+
+.mw-resize-handle.mw-resizing {
+  opacity: 1;
+  background: var(--accent-color);
+  transform: scale(1.1);
+}
+
+/* ---------- Resize tooltip: live "W × H · ratio" readout ---------- */
+.mw-resize-tooltip {
+  position: absolute;
+  right: 10px;
+  bottom: 42px;
+  padding: 0.28rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(20, 30, 45, 0.85);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  z-index: 4;
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+}
+
+.map-viewport.mw-can-pan {
+  cursor: grab;
+}
+
+.map-viewport.mw-panning {
+  cursor: grabbing;
+}
+
+.map-viewport.mw-drop-hover::after {
+  content: "Drop image to add as a map";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(47, 120, 189, 0.18);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.85rem;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.map-canvas-container {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform-origin: 0 0;
+  /* Mirrors the live pan/zoom `scale` (see applyTransform() in
+     map-window.js) as a CSS variable, so path/vertex sizing below can
+     counter-scale against it without a full renderPaths() on every
+     wheel tick — see the PATHS block in map-window.css for how it's
+     used. Falls back to 1 for anything that reads it before JS runs. */
+  --mw-zoom: 1;
+}
+
+/* `will-change: transform` is applied ONLY while a zoom/pan gesture is
+   in flight (this class is toggled by applyTransform()/scheduleZoomIdle()
+   in map-window.js), never permanently. Chrome rasterizes a
+   will-change:transform layer's contents once (image + SVG path layer +
+   symbol markers, all composited together) and just stretches that
+   texture on subsequent scale changes rather than re-rasterizing it —
+   fine mid-gesture, but it leaves everything visibly blurry once you
+   stop at a high zoom, since the texture was never redrawn at that
+   resolution. Dropping the class right after the gesture settles tears
+   down the compositing layer and forces a normal, crisp repaint at the
+   final scale — which is also why closing/reopening the window (which
+   recreates the layer from scratch) "fixes" it: this does the same
+   thing without requiring a reopen. */
+.map-canvas-container.mw-zoom-live {
+  will-change: transform;
+}
+
+.active-map-image {
+  width: 100%;
+  height: 100%;
+  /* #map-canvas-container is now sized in JS to the image's own true
+     aspect ratio (see recomputeContentBox() in map-window.js), so this
+     never actually crops anything — "contain" is just a safety net
+     against sub-pixel rounding, not the fitting mechanism itself. */
+  object-fit: contain;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.map-markers-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.mw-empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1.5rem;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  pointer-events: none;
+}
+
+/* ---------- Markers ---------- */
+.map-marker {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
+}
+
+.map-marker-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50% 50% 50% 0;
+  background: var(--accent-color, #2f78bd);
+  border: 2px solid #fff;
+  transform: rotate(-45deg);
+}
+
+.map-marker-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(28, 43, 58, 0.75);
+  padding: 1px 5px;
+  border-radius: 5px;
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-marker:hover .map-marker-dot {
+  background: var(--accent-color-deep, #1c5a94);
+}
+
+@keyframes mw-marker-pulse {
+  0%, 100% { transform: translate(-50%, -100%) scale(1); }
+  50% { transform: translate(-50%, -100%) scale(1.35); }
+}
+
+.map-marker-pulse .map-marker-dot {
+  animation: mw-marker-pulse 0.4s ease-in-out 2;
+}
+
+/* ---------- Table row highlight, triggered from a marker click ---------- */
+@keyframes mw-row-highlight {
+  0%, 100% { background-color: transparent; }
+  30% { background-color: var(--accent-color-pale, rgba(47, 120, 189, 0.25)); }
+}
+
+.mw-row-highlight {
+  animation: mw-row-highlight 1.6s ease-out;
+}
+
+/* =========================================================================
+   PATHS — draw & edit routes across the map (Google-Maps-style polylines)
+   -------------------------------------------------------------------------
+   Two pieces:
+     1. #mw-paths-panel — the management panel (draw button, hint, list of
+        saved paths with color/name/visibility/focus/delete), toggled by
+        the 🛤️ header button, mirroring #mw-options-panel's pattern.
+     2. #map-paths-layer — an SVG sibling of the markers layer inside
+        #map-canvas-container, so it pans/zooms in lockstep with the map
+        image. Its viewBox is set in real CSS-pixel units at render time
+        (see renderPaths() in map-window.js) rather than a 0–100 box, so
+        strokes and vertex circles never stretch into ellipses on a
+        non-square viewport.
+   ========================================================================= */
+
+.mw-paths-panel-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.mw-draw-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mw-draw-row .btn {
+  flex: 1;
+}
+
+.mw-draw-hint {
+  font-size: 0.76rem;
+  color: var(--accent-color-deep, var(--blue-deep));
+  background: var(--accent-color-pale);
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  line-height: 1.4;
+}
+
+html[data-wallpaper-tone="dark"] body.has-wallpaper .mw-draw-hint {
+  background: color-mix(in srgb, var(--accent-color-soft) 30%, transparent);
+  color: var(--on-wallpaper-text, #f5f8fb);
+}
+
+.mw-paths-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.mw-path-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: rgba(120, 140, 160, 0.08);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.mw-path-row:hover {
+  background: var(--accent-color-pale);
+}
+
+.mw-path-row.active {
+  border-color: var(--accent-color);
+  background: var(--accent-color-pale);
+}
+
+.mw-path-row-hidden {
+  opacity: 0.5;
+}
+
+/* Swatch button — used both per-path in the list rows and as the
+   draft-color picker above the "Draw New Path" button. A plain button
+   (not <input type="color">) so it can open the spectrum wheel popover
+   below instead of the OS's native color dialog. */
+.mw-path-swatch {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(120, 140, 160, 0.35);
+  cursor: pointer;
+  background: conic-gradient(from 0deg, #e63946, #f4a261, #f9d423, #2a9d8f, #2f78bd, #8e44ad, #e63946);
+}
+
+#mw-draft-color-btn {
+  width: 28px;
+  height: 28px;
+}
+
+/* ---------- Spectrum colour-wheel popover ---------- */
+.mw-color-wheel-popover {
+  position: fixed;
+  z-index: 220;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(120, 140, 160, 0.25);
+  box-shadow: var(--shadow-lift);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+html[data-wallpaper-tone="dark"] body.has-wallpaper .mw-color-wheel-popover {
+  background: var(--accent-color-deep);
+  border-color: color-mix(in srgb, var(--accent-color-soft) 55%, white);
+}
+
+.mw-color-wheel {
+  position: relative;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  cursor: crosshair;
+  /* Hue by angle (matches a standard colour wheel), saturation by
+     radius: vivid at the rim, fading toward white at the centre. */
+  background:
+    radial-gradient(circle, #fff 0%, rgba(255, 255, 255, 0) 70%),
+    conic-gradient(
+      from 90deg,
+      #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000
+    );
+  box-shadow: 0 0 0 1px rgba(120, 140, 160, 0.3), inset 0 0 10px rgba(0, 0, 0, 0.08);
+  touch-action: none;
+}
+
+.mw-color-wheel-cursor {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.mw-color-wheel-preview {
+  width: 100%;
+  height: 22px;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 140, 160, 0.3);
+}
+
+/* Always carries its own light, opaque-enough chip behind the text —
+   deliberately NOT dependent on the ambient wallpaper-tone theming
+   (unlike most of this panel). That theming swaps text to a near-white
+   colour while the background underneath isn't reliably dark, which is
+   what made typed names unreadable here. A fixed light background +
+   fixed dark text keeps this one field legible no matter what photo is
+   behind the window or how that photo's tone gets read. */
+.mw-path-name-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid rgba(120, 140, 160, 0.3);
+  background: rgba(255, 255, 255, 0.78);
+  font-size: 0.8rem;
+  color: var(--ink);
+  padding: 0.15rem 0.35rem;
+  border-radius: 6px;
+}
+.mw-path-name-input::placeholder {
+  color: rgba(28, 43, 58, 0.45);
+}
+.mw-path-name-input:hover,
+.mw-path-name-input:focus {
+  background: #fff;
+  border-color: var(--accent-color);
+  outline: none;
+}
+
+.mw-path-row-actions {
+  display: flex;
+  gap: 0.15rem;
+  flex-shrink: 0;
+}
+
+.mw-path-row-actions .icon-btn {
+  width: 22px;
+  height: 22px;
+  font-size: 0.75rem;
+}
+
+/* The Edit toggle carries a text label ("🔒 Edit" / "🔓 Editing"), so it
+   needs to grow past the fixed square size the other row icon buttons
+   use. Locked (default) reads as a plain outline button; once a path is
+   unlocked it switches to a solid highlight so it's obvious at a glance
+   which single path — if any — can currently be dragged/reshaped. */
+.mw-path-row-actions .mw-path-edit-btn {
+  width: auto;
+  padding: 0 0.4rem;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 140, 160, 0.35);
+}
+
+.mw-path-row-actions .mw-path-edit-btn.active {
+  background: var(--accent-color);
+  color: #fff;
+  border-color: var(--accent-color);
+}
+
+/* The ➤ arrow-visibility toggle: full opacity/solid when a path draws
+   its direction arrowhead (the default), faded to a ghost when turned
+   off for that path — same at-a-glance on/off language as the 👁️/🙈
+   visibility button beside it. */
+.mw-path-row-actions .mw-path-arrow-btn.off {
+  opacity: 0.32;
+}
+
+.mw-path-row-editing {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 1px var(--accent-color);
+}
+
+/* ---------- Standalone symbol marker size control ---------- */
+/* Symbol rows get an extra full-width line under the swatch/label/
+   actions for a manual size slider — wrap is scoped to this class only
+   so path rows (which don't have the control) stay single-line. */
+.mw-symbol-row {
+  flex-wrap: wrap;
+}
+
+.mw-symbol-size-control {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0 0.1rem;
+}
+
+.mw-symbol-size-control input[type="range"] {
+  flex: 1;
+  height: 3px;
+  accent-color: var(--accent-color);
+  cursor: pointer;
+}
+
+.mw-symbol-size-icon {
+  font-size: 0.65rem;
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+
+.mw-symbol-size-value {
+  font-size: 0.68rem;
+  color: var(--ink-soft);
+  min-width: 34px;
+  text-align: right;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A path's line gets a dashed outline while unlocked for editing, on
+   top of the normal ".selected" highlight — a persistent visual cue
+   (independent of hover) that this is the one path whose shape can
+   currently change. */
+.mw-path-line.editing {
+  filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.45));
+}
+
+/* ---------- Symbol picker popover ---------- */
+.mw-symbol-picker-popover {
+  position: fixed;
+  z-index: 220;
+  width: 340px;
+  max-height: 460px;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(120, 140, 160, 0.25);
+  box-shadow: var(--shadow-lift);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  overflow: hidden;
+}
+
+.mw-symbol-search-row {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid rgba(120, 140, 160, 0.2);
+  flex-shrink: 0;
+}
+
+.mw-symbol-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(120, 140, 160, 0.3);
+  border-radius: 999px;
+  padding: 0.32rem 0.7rem;
+  font-size: 0.8rem;
+  color: var(--ink);
+  background: rgba(120, 140, 160, 0.06);
+  outline: none;
+}
+
+.mw-symbol-search-input:focus {
+  border-color: var(--accent-color);
+  background: #fff;
+}
+
+.mw-symbol-tabs {
+  display: flex;
+  gap: 0.3rem;
+  overflow-x: auto;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid rgba(120, 140, 160, 0.2);
+  flex-shrink: 0;
+  scrollbar-width: thin;
+}
+
+.mw-symbol-tabs.hidden {
+  display: none;
+}
+
+.mw-symbol-tab {
+  flex-shrink: 0;
+  border: 1px solid rgba(120, 140, 160, 0.3);
+  background: none;
+  border-radius: 999px;
+  padding: 0.18rem 0.6rem;
+  font-size: 0.68rem;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--ink-soft);
+}
+
+.mw-symbol-tab:hover {
+  background: var(--accent-color-pale);
+}
+
+.mw-symbol-tab.active {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: #fff;
+}
+
+.mw-symbol-count,
+.mw-symbol-empty {
+  font-size: 0.68rem;
+  color: var(--ink-soft);
+  text-align: center;
+  padding: 0.5rem 0.4rem 0.2rem;
+  font-style: italic;
+}
+
+html[data-wallpaper-tone="dark"] body.has-wallpaper .mw-symbol-picker-popover {
+  background: var(--accent-color-deep);
+  border-color: color-mix(in srgb, var(--accent-color-soft) 55%, white);
+}
+
+.mw-symbol-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  border-bottom: 1px solid rgba(120, 140, 160, 0.2);
+  flex-shrink: 0;
+}
+
+.mw-symbol-clear-btn {
+  border: 1px solid rgba(120, 140, 160, 0.35);
+  background: none;
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+  color: var(--ink-soft);
+}
+
+.mw-symbol-clear-btn:hover {
+  background: var(--accent-color-pale);
+  color: var(--ink);
+}
+
+.mw-symbol-picker-body {
+  overflow-y: auto;
+  padding: 0.4rem 0.6rem 0.6rem;
+}
+
+.mw-symbol-cat-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-soft);
+  margin: 0.5rem 0 0.25rem;
+}
+
+.mw-symbol-cat-label:first-child {
+  margin-top: 0;
+}
+
+.mw-symbol-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 0.2rem;
+}
+
+.mw-symbol-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  background: rgba(120, 140, 160, 0.08);
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0.22rem 0;
+  transition: transform 0.08s ease, background 0.12s ease;
+}
+
+.mw-symbol-btn:hover {
+  background: var(--accent-color-pale);
+  transform: scale(1.08);
+}
+
+.mw-symbol-btn.active {
+  border-color: var(--accent-color);
+  background: var(--accent-color-pale);
+}
+
+/* Real Twemoji artwork inside a picker cell — sized generously so the
+   full-colour illustration (flag stripes, facial detail, tool shading)
+   actually reads at a glance instead of shrinking to a dull dot. */
+.mw-symbol-btn-img {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+/* Base rule for every rendered symbol image across the map window
+   (picker grid, swatches, pinned markers, path points). Keeping this
+   shared class means one place controls baseline behaviour, and each
+   context below only overrides size. */
+.mw-emoji-img {
+  display: inline-block;
+  vertical-align: middle;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Shown only if the Twemoji CDN hasn't loaded yet — the plain Unicode
+   glyph, sized to roughly match where the image would sit. */
+.mw-emoji-fallback {
+  font-size: 1.2em;
+  line-height: 1;
+}
+
+.mw-paths-empty {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  font-style: italic;
+  text-align: center;
+}
+
+html[data-wallpaper-tone="dark"] body.has-wallpaper .mw-paths-empty {
+  color: var(--on-wallpaper-text, #f5f8fb);
+  opacity: 0.75;
+}
+
+/* =========================================================================
+   STANDALONE SYMBOL MARKERS — pin any icon from the same 190+ symbol
+   palette used for path points at a fixed spot on the map (a campfire at
+   a campsite, a skull at a battle site...), independent of any path.
+   -------------------------------------------------------------------------
+   1. #mw-symbols-panel — same "📍 place" button + list pattern as
+      #mw-paths-panel; each row reuses the .mw-path-row/-actions/-edit-btn
+      styling above so the two panels read as one family.
+   2. #map-symbols-layer — a plain HTML sibling of the markers layer
+      (not SVG, since these icons don't need the counter-zoom stroke
+      trick paths do) inside #map-canvas-container, so it pans/zooms with
+      the map image for free.
+   ========================================================================= */
+
+.mw-symbols-panel-head {
+  display: flex;
+  align-items: center;
+}
+
+.mw-symbols-panel-head .btn {
+  flex: 1;
+}
+
+/* Round emoji "swatch" button in a symbol-marker row — same footprint as
+   .mw-path-swatch (the color dot) but shows the pinned icon itself, and
+   opens the symbol picker instead of the color wheel. */
+.mw-symbol-swatch {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(120, 140, 160, 0.35);
+  cursor: pointer;
+  background: rgba(120, 140, 160, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.mw-symbol-swatch-img {
+  width: 16px;
+  height: 16px;
+}
+
+.map-viewport.mw-placing-symbol {
+  cursor: crosshair;
+}
+
+.map-symbols-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.map-symbol-marker {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: default;
+  pointer-events: auto;
+  user-select: none;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.4));
+  transition: transform 0.1s ease;
+}
+
+/* Same counter-scale trick as .mw-path-symbol-img / .mw-path-vertex above:
+   xPercent/yPercent placement always zooms with the map (so precision
+   placement while zoomed in lands exactly where you clicked), but the
+   icon's on-screen SIZE is divided back out by --mw-zoom so it doesn't
+   balloon into a giant emoji that hides the very spot you're trying to
+   pin at high zoom ("micro" placement). clamp() puts a floor under
+   that shrinkage so it never disappears at extreme zoom, and a ceiling
+   equal to the base size — meaning at normal/fit-to-view zoom (scale
+   1) the marker sits at its full, clearly-visible size, Google-Maps-
+   pin style, rather than looking tiny against the whole map.
+   --mw-symbol-scale is a PER-MARKER manual multiplier (set inline from
+   the size slider in the 📍 panel, stored as marker.scale) layered on
+   top of that — it's what lets you override the automatic sizing and
+   pin a symbol at whatever size you want, big or small, regardless of
+   zoom level. */
+.map-symbol-marker-emoji {
+  /* One size expression driving both the real <img> (width/height) and
+     the plain-glyph fallback <span> (font-size) — whichever markup
+     mwEmojiImgHtml() produced picks up the rule it needs. */
+  width: calc(var(--mw-symbol-scale, 1) * clamp(1.15rem, calc(1.7rem / var(--mw-zoom, 1)), 1.7rem));
+  height: calc(var(--mw-symbol-scale, 1) * clamp(1.15rem, calc(1.7rem / var(--mw-zoom, 1)), 1.7rem));
+  font-size: calc(var(--mw-symbol-scale, 1) * clamp(1.15rem, calc(1.7rem / var(--mw-zoom, 1)), 1.7rem));
+  line-height: 1;
+  transition: width 0.05s linear, height 0.05s linear, font-size 0.05s linear;
+}
+
+.map-symbol-marker-label {
+  font-size: calc(var(--mw-symbol-scale, 1) * clamp(0.52rem, calc(0.62rem / var(--mw-zoom, 1)), 0.62rem));
+  font-weight: 600;
+  color: #fff;
+  background: rgba(28, 43, 58, 0.75);
+  padding: 1px 5px;
+  border-radius: 5px;
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: font-size 0.05s linear;
+}
+
+/* Locked (default) markers are permanent map decoration — inert to
+   click/drag, same "sits there and doesn't catch a mis-click" idea as an
+   unedited path. Only the ONE marker unlocked via a row's 🔒 Edit
+   button (editingSymbolId in map-window.js) becomes draggable/clickable
+   on the map itself. */
+.map-symbol-marker.editing {
+  cursor: grab;
+  filter: drop-shadow(0 0 4px var(--accent-color, #2f78bd)) drop-shadow(0 2px 3px rgba(0, 0, 0, 0.4));
+}
+
+.map-symbol-marker.editing:active {
+  cursor: grabbing;
+}
+
+.map-symbol-marker.editing:hover {
+  transform: translate(-50%, -50%) scale(1.12);
+}
+
+/* ---------- SVG drawing layer ---------- */
+.map-paths-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.map-viewport.mw-drawing {
+  cursor: crosshair;
+}
+
+.map-viewport.mw-drawing.mw-can-pan {
+  cursor: crosshair;
+}
+
+/* Wide, invisible stroke so a path is easy to click for selection or to
+   insert a mid-route point — the visible line stays thin and precise.
+   Both this and .mw-path-line counter-scale against --mw-zoom (set live
+   from the pan/zoom `scale` in applyTransform()) combined with
+   vector-effect: non-scaling-stroke, which makes the stroke-width value
+   below apply directly in *screen* pixels regardless of the ambient
+   zoom transform. The result: bold and easy to see zoomed out, then
+   progressively thinner — down to a precise hairline — as you zoom in
+   to trace fine detail, instead of ballooning into an unusable blob
+   that swallows your clicks at high zoom. clamp() keeps a usable floor
+   and ceiling at either extreme. */
+.mw-path-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: clamp(7px, calc(16px / var(--mw-zoom, 1)), 20px);
+  vector-effect: non-scaling-stroke;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.mw-path-line {
+  fill: none;
+  stroke-width: clamp(1px, calc(3.5px / var(--mw-zoom, 1)), 5px);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+  transition: stroke-width 0.15s ease, filter 0.15s ease;
+}
+
+.mw-path-line.selected {
+  stroke-width: clamp(1.4px, calc(5px / var(--mw-zoom, 1)), 6.5px);
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.35));
+}
+
+/* The dart-shaped arrowhead drawn at each path's end (see renderPaths()
+   in map-window.js). It's a plain SVG <path>, not an <marker> — its
+   position, heading, and constant on-screen size at any zoom are all set
+   directly via its `transform` ATTRIBUTE from JS (updateArrowheadTransform,
+   re-run on every pan/zoom tick), not CSS. Two earlier approaches both
+   quietly stopped updating once you zoomed: a CSS `transform: scale()`
+   counter-scale on shape content living inside a <marker>, and later just
+   resizing the <marker> itself — <marker>/<pattern>/<clipPath> content
+   sits outside the normal render tree, and in practice browsers don't
+   reliably keep it live once it's been referenced once. A normal element
+   with its geometry pushed via plain attribute updates (the same category
+   as the vertex handles' cx/cy/r below) doesn't have that problem — it
+   repaints every time, at any zoom. */
+.mw-path-arrowhead {
+  pointer-events: none;
+  /* Thin dark halo so the dart stays legible whether it's sitting over
+     pale terrain or a dark sea, at any zoom — a hairline outline reads
+     far better than relying on the fill color's contrast alone, without
+     adding visible bulk to the shape. */
+  stroke: rgba(0, 0, 0, 0.45);
+  stroke-width: 0.6px;
+  stroke-linejoin: round;
+}
+
+
+/* Vertex handles use the CSS `r` geometry property, not just `stroke-
+   width` — a circle's radius scales with the ambient zoom transform
+   the same way its position does (vector-effect only exempts the
+   stroke outline, not the fill). Dividing r by --mw-zoom here cancels
+   that scaling exactly (r-in-user-units × zoom = a constant on-screen
+   size), so handles stay a small, constant, precisely-clickable size
+   at any zoom instead of growing in lockstep with the map and hiding
+   the very detail you're trying to trace. vector-effect on the ring's
+   stroke does the equivalent job for its outline. */
+.mw-path-vertex {
+  r: calc(6px / var(--mw-zoom, 1));
+  stroke: #fff;
+  /* Plain constant here, deliberately NOT divided by --mw-zoom: unlike
+     `r` above, vector-effect already makes this render at exactly its
+     literal value in screen pixels regardless of the ambient zoom
+     transform, so dividing again would make the ring shrink to
+     nothing at high zoom instead of staying legible. */
+  stroke-width: 1.6px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: all;
+  cursor: grab;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.1s ease;
+}
+
+.mw-path-vertex:hover {
+  transform: scale(1.35);
+}
+
+.mw-path-vertex:active {
+  cursor: grabbing;
+}
+
+/* Symbol decorations pinned to path points (castle, tree, ship...), now
+   rendered as real Twemoji SVG artwork (<image>) rather than a plain
+   Unicode glyph in <text>. Same r-cancels-zoom idea as the vertex
+   handles, applied to width/height, so an icon stays a small, legible,
+   constant size at any zoom instead of growing huge when zoomed out or
+   shrinking to nothing zoomed in. pointer-events:none lets clicks pass
+   through to the vertex handle underneath (in edit mode) or straight to
+   the path/hit beneath it.
+   IMPORTANT: this used to be an SVG <text> glyph with a CSS `stroke`
+   for a white halo — stroking a colour emoji glyph is exactly what
+   made Chrome/Blink fall back to rendering the character's raw
+   Unicode code point NUMBER instead of the emoji. An <image> has no
+   font glyph to stroke, so that failure mode can't happen here; the
+   halo is now a drop-shadow instead. */
+.mw-path-symbol-img {
+  width: calc(22px / var(--mw-zoom, 1));
+  height: calc(22px / var(--mw-zoom, 1));
+  transform: translate(-50%, -50%);
+  transform-box: fill-box;
+  transform-origin: center;
+  pointer-events: none;
+  user-select: none;
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.9)) drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
+}
+
+/* Fallback only used if Twemoji hasn't loaded — deliberately NO stroke
+   (see note above), just a drop-shadow halo, so it degrades to a plain
+   glyph instead of ever reproducing the code-point-number bug. */
+.mw-path-symbol-fallback {
+  font-size: calc(20px / var(--mw-zoom, 1));
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+  user-select: none;
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.9)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+}
+
+.mw-path-draft-line {
+  fill: none;
+  stroke-width: clamp(1px, calc(3px / var(--mw-zoom, 1)), 4px);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 6 5;
+  vector-effect: non-scaling-stroke;
+  animation: mw-marching-ants 0.6s linear infinite;
+}
+
+/* Same r-cancels-zoom trick as .mw-path-vertex — keeps the point you
+   just dropped at a small, constant, precisely-placeable size while
+   you're actively zoomed in tracing fine detail. */
+.mw-path-draft-vertex {
+  fill: #fff;
+  r: calc(4px / var(--mw-zoom, 1));
+  stroke: var(--accent-color-deep, var(--blue-deep));
+  stroke-width: 1.6px;
+  vector-effect: non-scaling-stroke;
+}
+
+.mw-path-rubber {
+  stroke: rgba(90, 110, 130, 0.65);
+  stroke-width: calc(2px / var(--mw-zoom, 1));
+  vector-effect: non-scaling-stroke;
+  stroke-dasharray: 3 5;
+  pointer-events: none;
+}
+
+@keyframes mw-marching-ants {
+  to { stroke-dashoffset: -22; }
+}
+
+/* =========================================================================
+   MAP SEARCH — a slim, glass pill for finding a path or symbol by name.
+   -------------------------------------------------------------------------
+   Sits over the top strip of #map-viewport (left/right insets keep it
+   clear of the ⚙️/✕ corner buttons and, in Micro header mode, the
+   floating drag-handle pill). Deliberately invisible at rest: the wrap
+   itself is what catches the hover (its box spans the whole strip, not
+   just the pill), so drifting the cursor anywhere across that band reveals
+   the bar — exactly the "hover this region" affordance the header's own
+   Micro pieces already use elsewhere in this file. :focus-within keeps it
+   visible while typing even if the cursor isn't over it, and the results
+   list lives inside the same flow so hovering a result keeps it open too —
+   no JS state needed for show/hide, only for the search + glow logic
+   (map-window.js). ---------------------------------------------------- */
+.mw-map-search-wrap {
+  position: absolute;
+  top: 8px;
+  left: 58px;
+  right: 58px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.mw-map-search {
+  display: flex;
+  align-items: center;
+  gap: 0.32rem;
+  width: min(320px, 100%);
+  height: 22px;
+  padding: 0 0.55rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 34, 0.55);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 10px 24px rgba(8, 14, 24, 0.32);
+  opacity: 0;
+  transform: translateY(-8px) scale(0.97);
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s ease, background 0.22s ease, box-shadow 0.22s ease;
+}
+
+.mw-map-search-wrap:hover .mw-map-search,
+.mw-map-search:focus-within {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+/* After picking a search result the bar clears + blurs itself (see
+   selectMapSearchResult in map-window.js), but the cursor is typically
+   still resting on the strip right after that click, so plain :hover
+   would keep it visible. This wins over the :hover rule above on
+   specificity (3 classes vs 2) and forces it closed until the mouse
+   actually leaves, at which point the wrap's mouseleave handler drops
+   the class and hover/focus behave normally again. */
+.mw-map-search-wrap.mw-search-force-hide .mw-map-search {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.97);
+  pointer-events: none;
+}
+
+.mw-map-search:focus-within {
+  background: rgba(15, 23, 34, 0.72);
+  border-color: rgba(255, 255, 255, 0.32);
+  box-shadow: 0 12px 28px rgba(8, 14, 24, 0.4), 0 0 0 3px color-mix(in srgb, var(--accent-color, #2f78bd) 45%, transparent);
+}
+
+.mw-map-search-icon {
+  flex-shrink: 0;
+  width: 11px;
+  height: 11px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.mw-map-search:focus-within .mw-map-search-icon {
+  color: #fff;
+}
+
+input.mw-map-search-input {
+  /* Specificity note: the site-wide `input[type="text"]` rule in style.css
+     (width:100%, padding, border-radius:8px, background:#fbfdff) actually
+     out-specifies a bare `.mw-map-search-input` class selector — attribute
+     selectors count the same as classes, so that compound rule wins the
+     tie via its extra `input` element. That's what was making a white,
+     8px-radius, padded box bleed out past this pill. Prefixing with
+     `input` here matches its specificity exactly and wins on source order
+     instead, so every one of these has to be restated explicitly. */
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  color: #fff;
+  font-size: 0.72rem;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  box-shadow: none;
+}
+
+input.mw-map-search-input:focus {
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
+.mw-map-search-input::placeholder {
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 400;
+}
+
+.mw-map-search-clear {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 0.5rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.mw-map-search-clear:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* ---------- Results dropdown ---------- */
+.mw-map-search-results {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0.3rem;
+  width: min(320px, 100%);
+  max-height: 220px;
+  overflow-y: auto;
+  border-radius: 14px;
+  background: rgba(15, 23, 34, 0.78);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 14px 30px rgba(8, 14, 24, 0.4);
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.mw-map-search-wrap:hover .mw-map-search-results:not(.hidden),
+.mw-map-search-wrap:focus-within .mw-map-search-results:not(.hidden) {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.mw-map-search-result {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 9px;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.mw-map-search-result:hover,
+.mw-map-search-result.mw-map-search-result-active {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.mw-map-search-result-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  font-size: 0.95rem;
+}
+
+.mw-map-search-result-icon .mw-emoji-img,
+.mw-map-search-result-icon .mw-emoji-fallback {
+  width: 16px;
+  height: 16px;
+  font-size: 0.95rem;
+}
+
+.mw-map-search-result-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mw-map-search-result-type {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.mw-map-search-empty {
+  padding: 0.55rem 0.6rem;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.65);
+  text-align: center;
+}
+
+/* ---------- Search result glow: paths ----------
+   The matched path's own visible line pulses with a soft outer glow in
+   its own colour, and a second, purely-decorative polyline (cloned from
+   it — same points, so it always tracks pan/zoom/edits without extra
+   bookkeeping) rides on top with small bright dashes animating along
+   stroke-dashoffset. Because the dash pattern travels from the first
+   point toward the last — the same order the direction arrowhead is
+   drawn from — it reads as motion flowing the way the path actually
+   goes, not just a generic shimmer. */
+.mw-path-line.mw-path-search-glow {
+  animation: mw-search-path-pulse 1.7s ease-in-out infinite;
+}
+
+@keyframes mw-search-path-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 9px var(--mw-search-glow-color, #7dd3fc));
+  }
+  50% {
+    filter: drop-shadow(0 0 4px #fff) drop-shadow(0 0 20px var(--mw-search-glow-color, #7dd3fc));
+  }
+}
+
+.mw-path-flow-line {
+  fill: none;
+  stroke: #fff;
+  stroke-width: clamp(1.4px, calc(3.5px / var(--mw-zoom, 1)), 5px);
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+  stroke-dasharray: 0.5 17;
+  filter: drop-shadow(0 0 5px #fff) drop-shadow(0 0 3px var(--mw-search-glow-color, #7dd3fc));
+  animation: mw-search-flow 0.85s linear infinite;
+}
+
+@keyframes mw-search-flow {
+  to { stroke-dashoffset: -36; }
+}
+
+.mw-path-search-fading .mw-path-line.mw-path-search-glow,
+.mw-path-search-fading.mw-path-flow-line {
+  animation-play-state: paused;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
+/* ---------- Search result glow: path endpoints ----------
+   The start and end of a glowing path each get a small beacon — a solid
+   glowing core plus two staggered rings pinging outward, like a soft
+   sonar ping — in fixed colors that always carry the same meaning
+   (emerald = start, coral = end) regardless of the path's own stroke
+   colour, so the two ends read apart at a glance even on a single-colour
+   line. Same r/stroke-width-counter-scales-against-zoom trick as the
+   vertex handles elsewhere in this file, via the CSS `r` geometry
+   property + transform-box:fill-box, so the beacon stays a small,
+   constant size at any zoom instead of ballooning in or shrinking away. */
+.mw-path-endpoint {
+  pointer-events: none;
+}
+
+.mw-path-endpoint-ring {
+  fill: none;
+  stroke-width: calc(2px / var(--mw-zoom, 1));
+  r: calc(9px / var(--mw-zoom, 1));
+  vector-effect: non-scaling-stroke;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mw-endpoint-ring-ping 1.8s ease-out infinite;
+}
+
+.mw-path-endpoint-ring-b {
+  animation-delay: 0.9s;
+}
+
+@keyframes mw-endpoint-ring-ping {
+  0% { transform: scale(0.55); opacity: 0.85; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+.mw-path-endpoint-core {
+  r: calc(4.5px / var(--mw-zoom, 1));
+  stroke: #fff;
+  stroke-width: calc(1.6px / var(--mw-zoom, 1));
+  vector-effect: non-scaling-stroke;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.mw-path-endpoint-start .mw-path-endpoint-ring {
+  stroke: #34d399;
+}
+
+.mw-path-endpoint-start .mw-path-endpoint-core {
+  fill: #34d399;
+  animation: mw-endpoint-core-pulse-start 1.8s ease-in-out infinite;
+}
+
+@keyframes mw-endpoint-core-pulse-start {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 3px #fff) drop-shadow(0 0 8px #34d399); }
+  50% { transform: scale(1.3); filter: drop-shadow(0 0 6px #fff) drop-shadow(0 0 18px #34d399); }
+}
+
+.mw-path-endpoint-end .mw-path-endpoint-ring {
+  stroke: #fb7185;
+}
+
+.mw-path-endpoint-end .mw-path-endpoint-core {
+  fill: #fb7185;
+  animation: mw-endpoint-core-pulse-end 1.8s ease-in-out infinite;
+}
+
+@keyframes mw-endpoint-core-pulse-end {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 3px #fff) drop-shadow(0 0 8px #fb7185); }
+  50% { transform: scale(1.3); filter: drop-shadow(0 0 6px #fff) drop-shadow(0 0 18px #fb7185); }
+}
+
+.mw-path-search-fading .mw-path-endpoint {
+  animation-play-state: paused;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
+/* ---------- Search result glow: symbols ----------
+   The glow comes ONLY from the icon itself — no separate shape drawn
+   behind or beside it. drop-shadow() (unlike box-shadow) traces the
+   emoji's own alpha silhouette, so stacking several at increasing blur
+   radii builds a soft bloom that hugs the icon's actual outline rather
+   than sitting in a generic circle around it. brightness()+saturate()
+   are layered on top so the icon visibly lights up from within at the
+   peak, not just gets a colored outline. The colour itself comes from
+   the icon's own artwork (sampled in JS — see mwResolveSymbolGlowColor
+   in map-window.js), so a red flag glows red, a blue droplet glows
+   blue, and so on, instead of one generic tint for every symbol. At
+   the pulse's peak a wider, dimmer shadow ring is added on top of the
+   original tight ones — still hugging the icon's own outline, just a
+   little further out — so it reads clearly even when the map is
+   zoomed well out, without ever becoming a separate shape of its own. */
+.map-symbol-marker.mw-symbol-search-glow {
+  animation: mw-search-symbol-glow 1.7s ease-in-out infinite;
+}
+
+@keyframes mw-search-symbol-glow {
+  0%, 100% {
+    transform: translate(-50%, -50%) scale(1);
+    filter:
+      brightness(1) saturate(1)
+      drop-shadow(0 0 1px #fff)
+      drop-shadow(0 0 3px var(--mw-search-glow-color, #ffd76b))
+      drop-shadow(0 0 6px var(--mw-search-glow-color, #ffd76b))
+      drop-shadow(0 2px 3px rgba(0, 0, 0, 0.4));
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.1);
+    filter:
+      brightness(1.6) saturate(1.5)
+      drop-shadow(0 0 3px #fff)
+      drop-shadow(0 0 8px var(--mw-search-glow-color, #ffd76b))
+      drop-shadow(0 0 14px var(--mw-search-glow-color, #ffd76b))
+      drop-shadow(0 2px 3px rgba(0, 0, 0, 0.4));
+  }
+}
+
+.map-symbol-marker.mw-symbol-search-fading {
+  animation-play-state: paused;
+  filter: brightness(1) drop-shadow(0 0 1px #fff) drop-shadow(0 0 3px var(--mw-search-glow-color, #ffd76b)) drop-shadow(0 2px 3px rgba(0, 0, 0, 0.4));
+  transition: filter 0.5s ease;
+}

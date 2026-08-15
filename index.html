@@ -14,13 +14,21 @@
   - 'unsafe-inline' on style-src is only for the few inline style="..."
     attributes already in this page (no inline <script> or inline
     event handlers exist anywhere, so script-src has no such exception).
+  - media-src is explicit (matching img-src's pattern) because it has
+    no fallback to connect-src: without it, media-src silently inherits
+    default-src 'self', which blocks every <audio> load used by the
+    pronunciation feature (dictionary recording clips and the Google
+    Translate TTS fallback both live on other origins) — the browser
+    voice fallback still worked on devices with good local TTS voices,
+    which is why this went unnoticed for a while.
 -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
   script-src 'self' https://cdnjs.cloudflare.com https://accounts.google.com;
   style-src 'self' https://fonts.googleapis.com 'unsafe-inline';
   font-src 'self' https://fonts.gstatic.com;
-  img-src 'self' https: data:;
+  img-src 'self' https: data: blob:;
+  media-src 'self' https: blob: data:;
   connect-src *;
   frame-src https://accounts.google.com;
   object-src 'none';
@@ -32,6 +40,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="wallpaper-enhancements.css">
+<link rel="stylesheet" href="map-window.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -88,6 +97,12 @@
       </button>
     </div>
 
+    <div id="map-window-widget" class="storage-widget">
+      <button type="button" id="map-window-toggle-btn" class="storage-toggle-btn" title="Map Window: OFF" aria-pressed="false">
+        <span class="storage-icon">🗺️</span>
+      </button>
+    </div>
+
     <div id="shortcuts-widget" class="storage-widget">
       <button type="button" id="shortcuts-toggle-btn" class="storage-toggle-btn" title="Keyboard Shortcuts">
         <span class="storage-icon">⌨️</span>
@@ -110,6 +125,20 @@
             </div>
             <label class="switch" for="merge-page-bars-toggle">
               <input type="checkbox" id="merge-page-bars-toggle" checked>
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="limits-group">
+          <h4 class="limits-group-title">Scrollbar</h4>
+          <div class="bubbly-toggle-row">
+            <div class="bubbly-toggle-label">
+              <span class="bubbly-toggle-title">Show Scrollbar</span>
+              <span class="bubbly-toggle-hint">Off hides the page scrollbar for a cleaner look — you can still scroll (mouse wheel, trackpad, arrow/space keys) exactly as before.</span>
+            </div>
+            <label class="switch" for="show-scrollbar-toggle">
+              <input type="checkbox" id="show-scrollbar-toggle" checked>
               <span class="switch-track"><span class="switch-thumb"></span></span>
             </label>
           </div>
@@ -392,6 +421,80 @@
             </label>
           </div>
           <p id="smart-accent-status" class="storage-sync-hint hidden"></p>
+
+          <div class="bubbly-toggle-row">
+            <div class="bubbly-toggle-label">
+              <span class="bubbly-toggle-title">🌈 Custom Accent Color</span>
+              <span class="bubbly-toggle-hint">Pick your own color for buttons, highlights &amp; borders across the whole app</span>
+            </div>
+            <label class="switch" for="custom-accent-toggle">
+              <input type="checkbox" id="custom-accent-toggle">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+
+          <div id="custom-accent-controls" class="custom-accent-controls">
+            <div class="accent-wheel-row">
+              <div class="accent-wheel-wrap">
+                <canvas id="accent-wheel-canvas" width="168" height="168" class="accent-wheel-canvas"
+                        tabindex="0" role="application"
+                        aria-label="Accent color wheel. Click or drag to pick a hue and saturation, or use arrow keys — left and right change hue, up and down change saturation."></canvas>
+                <div id="accent-wheel-thumb" class="accent-wheel-thumb" aria-hidden="true"></div>
+              </div>
+              <div class="accent-wheel-side">
+                <div id="accent-color-swatch" class="accent-color-swatch" aria-hidden="true"></div>
+                <input type="text" id="accent-hex-input" class="accent-hex-input" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Accent color hex code">
+                <div class="slider-field-row accent-lightness-row">
+                  <div class="slider-field-label">
+                    <label for="accent-lightness-input">Lightness</label>
+                    <span id="accent-lightness-value" class="slider-value">50%</span>
+                  </div>
+                  <input type="range" id="accent-lightness-input" min="10" max="90" step="1">
+                </div>
+                <button type="button" id="reset-custom-accent-btn" class="btn btn-secondary btn-small">Reset to Automatic</button>
+              </div>
+            </div>
+            <p id="custom-accent-status" class="storage-sync-hint">Pick a hue on the wheel, then fine-tune lightness — it'll switch on above as soon as you do.</p>
+
+            <div class="accent-scope-section">
+              <p class="accent-scope-title">🖌️ Apply Custom Color To</p>
+              <p class="storage-sync-hint">Tick the parts of the app you want tinted with the color above — leave the rest unticked to keep them as they are.</p>
+              <div class="accent-scope-grid" id="accent-scope-grid">
+                <label class="accent-scope-check" title="Top title bar background & glow">
+                  <input type="checkbox" id="accent-scope-header-toggle" data-scope="header">
+                  <span>Header Bar</span>
+                </label>
+                <label class="accent-scope-check" title="&quot;Add a Word&quot; and other card titles">
+                  <input type="checkbox" id="accent-scope-headings-toggle" data-scope="headings">
+                  <span>Card Headings</span>
+                </label>
+                <label class="accent-scope-check" title="Word, Page, Pronunciation, Definitions, Related Images">
+                  <input type="checkbox" id="accent-scope-labels-toggle" data-scope="labels">
+                  <span>Field &amp; Section Labels</span>
+                </label>
+                <label class="accent-scope-check" title="Definitions &amp; Images select-all links">
+                  <input type="checkbox" id="accent-scope-links-toggle" data-scope="links">
+                  <span>"All / None" Links</span>
+                </label>
+                <label class="accent-scope-check" title="The US / UK pronunciation pills">
+                  <input type="checkbox" id="accent-scope-badges-toggle" data-scope="badges">
+                  <span>Pronunciation Badges</span>
+                </label>
+                <label class="accent-scope-check" title="Add Entry, Save Changes, and other primary buttons">
+                  <input type="checkbox" id="accent-scope-buttons-toggle" data-scope="buttons">
+                  <span>Primary Buttons</span>
+                </label>
+                <label class="accent-scope-check" title="The Fetch with AI button">
+                  <input type="checkbox" id="accent-scope-ai-button-toggle" data-scope="ai-button">
+                  <span>"Fetch with AI" Button</span>
+                </label>
+                <label class="accent-scope-check" title="The small Add buttons next to manual definition/image entry">
+                  <input type="checkbox" id="accent-scope-add-buttons-toggle" data-scope="add-buttons">
+                  <span>Small "Add" Buttons</span>
+                </label>
+              </div>
+            </div>
+          </div>
 
           <div class="slider-field-row">
             <div class="slider-field-label">
@@ -878,6 +981,251 @@
   </div>
 </div>
 
+<!-- 🗺️ FLOATING VOCABULARY MAP WINDOW — detachable pan/zoom map viewer for
+     pinning book locations against the words that reference them. Gated
+     behind the "Map Window" master toggle (#map-window-toggle-btn), same
+     pattern as the Audio Window above. Hidden by default; all behavior
+     lives in map-window.js (loaded after script.js, since it hooks a few
+     of script.js's existing entry points — see the comments in that
+     file). Position is draggable via the header bar once open. -->
+<div id="vocab-map-window" class="vocab-map-window hidden" aria-hidden="true">
+  <div class="mw-header" id="mw-drag-handle" title="Drag to move">
+    <div class="mw-header-main">
+      <span class="mw-drag-grip" aria-hidden="true">⠿</span>
+      <span id="mw-title" class="mw-title">Map</span>
+    </div>
+    <div class="mw-header-actions">
+      <button type="button" id="mw-options-btn" class="icon-btn" title="Map settings — tools, size &amp; fit, image">⚙️</button>
+      <button type="button" id="mw-close-btn" class="icon-btn" title="Close map window">✕</button>
+    </div>
+  </div>
+
+  <div class="mw-toolbar">
+    <select id="mw-region-select" class="mw-region-select" title="Choose a map">
+      <option value="">No map selected…</option>
+    </select>
+    <div class="mw-zoom-controls">
+      <button type="button" id="vaw-map-zoom-out" class="icon-btn mw-zoom-btn" title="Zoom out">−</button>
+      <span id="mw-zoom-level" class="mw-zoom-level">100%</span>
+      <button type="button" id="vaw-map-zoom-in" class="icon-btn mw-zoom-btn" title="Zoom in">+</button>
+      <button type="button" id="mw-zoom-reset" class="icon-btn" title="Reset view">⤢</button>
+    </div>
+  </div>
+
+  <div id="mw-options-panel" class="mw-options-panel hidden">
+    <div class="mw-settings-section">
+      <p class="mw-settings-section-title">Header bar</p>
+      <div class="mw-fit-row">
+        <span class="mw-fit-label">Size</span>
+        <div class="mw-fit-segmented" role="group" aria-label="Header bar size">
+          <button type="button" id="mw-header-size-micro" class="mw-fit-seg-btn" data-header-size="micro" title="Elegant floating pill — just the drag handle, title &amp; ⚙️, hovering over the map with nothing else in the way">Micro</button>
+          <button type="button" id="mw-header-size-compact" class="mw-fit-seg-btn" data-header-size="compact" title="Slim header — less vertical space taken from the map">Compact</button>
+          <button type="button" id="mw-header-size-normal" class="mw-fit-seg-btn" data-header-size="normal" title="Default header size">Normal</button>
+          <button type="button" id="mw-header-size-roomy" class="mw-fit-seg-btn" data-header-size="roomy" title="Taller header — bigger title &amp; buttons">Roomy</button>
+        </div>
+      </div>
+      <p id="mw-header-size-hint" class="storage-sync-hint hidden">Micro hides the drag handle &amp; title completely — nothing but ⚙️ sits over the map. Hover the top-left corner (or start dragging) to bring the drag handle back into view for a moment. The ✕ moves down to the "Close Map Window" button below. Works best with the toolbar hidden too.</p>
+      <div class="bubbly-toggle-row">
+        <div class="bubbly-toggle-label">
+          <span class="bubbly-toggle-title">Minimal Header</span>
+          <span class="bubbly-toggle-hint">On: only the drag handle, title &amp; ⚙️ stay visible — the ✕ is tucked away below so the map gets more room.</span>
+        </div>
+        <label class="switch" for="mw-minimal-header-toggle">
+          <input type="checkbox" id="mw-minimal-header-toggle">
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+        </label>
+      </div>
+      <button type="button" id="mw-settings-close-btn" class="btn btn-secondary btn-small hidden">✕ Close Map Window</button>
+    </div>
+
+    <div class="mw-settings-section">
+      <p class="mw-settings-section-title">Toolbar</p>
+      <div class="bubbly-toggle-row">
+        <div class="bubbly-toggle-label">
+          <span class="bubbly-toggle-title">Show Toolbar</span>
+          <span class="bubbly-toggle-hint">Hide the map picker &amp; zoom controls row, or bring it back.</span>
+        </div>
+        <label class="switch" for="mw-toolbar-hide-toggle">
+          <input type="checkbox" id="mw-toolbar-hide-toggle" checked>
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+        </label>
+      </div>
+      <div class="bubbly-toggle-row">
+        <div class="bubbly-toggle-label">
+          <span class="bubbly-toggle-title">Move Toolbar into Settings</span>
+          <span class="bubbly-toggle-hint">On: the map picker &amp; zoom controls move down here instead of sitting under the header.</span>
+        </div>
+        <label class="switch" for="mw-toolbar-move-toggle">
+          <input type="checkbox" id="mw-toolbar-move-toggle">
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+        </label>
+      </div>
+      <div id="mw-toolbar-settings-slot" class="mw-toolbar-settings-slot hidden"></div>
+    </div>
+
+    <div class="mw-settings-section">
+      <p class="mw-settings-section-title">Map tools</p>
+      <div class="mw-settings-actions-row">
+        <button type="button" id="mw-paths-btn" class="btn btn-secondary btn-small" title="Trace a journey across the map — click to drop points, just like drawing a route in Google Maps. Zoom in first for pinpoint accuracy on small details. A finished path is locked: tap &quot;🔒 Edit&quot; on it to drag points, add points, or pin a symbol (castle, tree, ship...) to a point — then tap it again to lock it back up.">🛤️ Draw &amp; Manage Paths</button>
+        <button type="button" id="mw-symbols-btn" class="btn btn-secondary btn-small">📍 Place &amp; Manage Symbol Markers</button>
+      </div>
+    </div>
+
+    <div class="mw-settings-section">
+      <p class="mw-settings-section-title">Search glow timing</p>
+      <p class="storage-sync-hint">How long a path or symbol keeps glowing on the map after you search for it above.</p>
+      <div class="mw-fit-row">
+        <span class="mw-fit-label">Path glow</span>
+        <div class="mw-fit-segmented mw-glow-duration-segmented" role="group" aria-label="Path search glow duration" id="mw-path-glow-duration-group">
+          <button type="button" class="mw-fit-seg-btn" data-glow-duration="3" title="Glow for 3 seconds, then settle back down">3s</button>
+          <button type="button" class="mw-fit-seg-btn" data-glow-duration="6" title="Glow for 6 seconds, then settle back down">6s</button>
+          <button type="button" class="mw-fit-seg-btn" data-glow-duration="10" title="Glow for 10 seconds, then settle back down">10s</button>
+          <button type="button" class="mw-fit-seg-btn" data-glow-duration="20" title="Glow for 20 seconds, then settle back down">20s</button>
+          <button type="button" class="mw-fit-seg-btn" data-glow-duration="until-next" title="Keep glowing indefinitely until you search for another path">Until next search</button>
+        </div>
+      </div>
+      <div class="mw-fit-row">
+        <span class="mw-fit-label">Symbol glow</span>
+        <div class="mw-fit-segmented mw-glow-duration-segmented" role="group" aria-label="Symbol search glow duration" id="mw-symbol-glow-duration-group">
+          <button type="button" class="mw-fit-seg-btn" data-glow-duration="3" title="Glow for 3 seconds, then settle back down">3s</button>
+          <button type="button" class="mw-fit-seg-btn" data-glow-duration="6" title="Glow for 6 seconds, then settle back down">6s</button>
+          <button type="button" class="mw-fit-seg-btn" data-glow-duration="10" title="Glow for 10 seconds, then settle back down">10s</button>
+          <button type="button" class="mw-fit-seg-btn" data-glow-duration="20" title="Glow for 20 seconds, then settle back down">20s</button>
+          <button type="button" class="mw-fit-seg-btn" data-glow-duration="until-next" title="Keep glowing indefinitely until you search for another symbol">Until next search</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="mw-settings-section">
+      <p class="mw-settings-section-title">Window size &amp; fit</p>
+      <div class="mw-fit-row">
+        <span class="mw-fit-label">Fit</span>
+        <div class="mw-fit-segmented" role="group" aria-label="Map fit mode">
+          <button type="button" id="mw-fit-window-btn" class="mw-fit-seg-btn" title="Fill the window; drag or scroll to reach the rest of the map — nothing is ever cropped away">🗔 Window</button>
+          <button type="button" id="mw-fit-image-btn" class="mw-fit-seg-btn" title="Reshape the window to the map's own proportions">🖼️ Image</button>
+        </div>
+      </div>
+      <div id="mw-ratio-presets" class="mw-ratio-presets hidden" role="group" aria-label="Aspect ratio presets">
+        <button type="button" class="mw-ratio-preset-btn" data-ratio="auto" title="Reset to this map's own proportions">Auto</button>
+        <button type="button" class="mw-ratio-preset-btn" data-ratio="1" title="Square">1:1</button>
+        <button type="button" class="mw-ratio-preset-btn" data-ratio="1.3333333333333333" title="Classic 4:3">4:3</button>
+        <button type="button" class="mw-ratio-preset-btn" data-ratio="1.5" title="Photo 3:2">3:2</button>
+        <button type="button" class="mw-ratio-preset-btn" data-ratio="1.7777777777777777" title="Widescreen 16:9">16:9</button>
+      </div>
+      <p class="storage-sync-hint">In "Image" mode, drag the ⤡ handle at the map's bottom-right corner — sideways to resize the window's width, up/down to resize its height — or just tap a ratio above for a common shape. "Auto" snaps back to the map's own proportions.</p>
+    </div>
+
+    <div class="mw-settings-section">
+      <p class="mw-settings-section-title">Map image</p>
+      <p class="storage-sync-hint">Upload a custom map image (PNG, JPG, WEBP). It's added to the dropdown above and, by default, stored in this browser only. Uploading a PNG previously exported below auto-restores its paths &amp; symbols as editable data.</p>
+      <div class="mw-upload-row">
+        <input type="text" id="mw-upload-name-input" class="mw-upload-name-input" placeholder="Map name (e.g. got-westeros)" maxlength="60">
+        <button type="button" id="mw-upload-btn" class="btn btn-secondary btn-small">Upload Image…</button>
+      </div>
+      <input type="file" id="mw-file-input" accept="image/png,image/jpeg,image/webp" class="hidden">
+      <p id="mw-upload-status" class="storage-sync-hint hidden"></p>
+
+      <div class="mw-folder-row">
+        <button type="button" id="mw-choose-folder-btn" class="btn btn-secondary btn-small">🗂️ Connect Local Folder…</button>
+        <button type="button" id="mw-reconnect-folder-btn" class="btn btn-secondary btn-small hidden">🔌 Reconnect Folder</button>
+      </div>
+      <p id="mw-folder-status" class="storage-sync-hint">Not connected — map images are stored in browser storage only.</p>
+
+      <button type="button" id="mw-save-image-btn" class="btn btn-secondary btn-small" disabled>💾 Save Map Image (bakes in markers/paths/symbols)</button>
+      <p id="mw-save-status" class="storage-sync-hint hidden"></p>
+
+      <button type="button" id="mw-export-data-btn" class="btn btn-secondary btn-small" disabled title="Writes this map's image and its &lt;mapId&gt;.json (markers, paths, symbols, aspect ratio) to whichever destination(s) are ticked below. With neither ticked (or nothing available), downloads the .json instead.">📦 Export Map Data</button>
+      <span class="export-dest-group">
+        <label class="export-dest-check" title="Choose a folder on this device to save into">
+          <input type="checkbox" id="mw-export-local-checkbox" checked><span>Local folder</span>
+        </label>
+        <label class="export-dest-check hidden" id="mw-export-drive-check-wrap" title="Also save a copy to your connected Google Drive">
+          <input type="checkbox" id="mw-export-drive-checkbox"><span>Save to Drive</span>
+        </label>
+      </span>
+      <div class="mw-folder-row hidden" id="mw-export-drive-folder-row">
+        <select id="mw-export-drive-folder-select" class="mw-region-select" title="Which Google Drive folder to export into"></select>
+      </div>
+      <p id="mw-export-data-status" class="storage-sync-hint hidden"></p>
+
+      <p class="mw-settings-section-title">Import a map bundle</p>
+      <p class="storage-sync-hint">Bring in a map (image + its <code>.json</code> metadata) exported from this app on another device — its paths, symbols, and markers come back fully editable, not flattened. In the picker, select both the image and the <code>.json</code> file together (ctrl/cmd-click to select two files).</p>
+      <div class="mw-folder-row">
+        <button type="button" id="mw-import-disk-btn" class="btn btn-secondary btn-small">📥 Import from Disk…</button>
+        <button type="button" id="mw-import-drive-btn" class="btn btn-secondary btn-small">☁️ Import from Drive…</button>
+      </div>
+      <input type="file" id="mw-import-files-input" accept="image/png,image/jpeg,image/webp,application/json,.json" multiple class="hidden">
+      <div class="mw-folder-row">
+        <select id="mw-import-drive-select" class="mw-region-select hidden"></select>
+        <button type="button" id="mw-import-drive-confirm-btn" class="btn btn-secondary btn-small hidden">Import Selected</button>
+      </div>
+      <p id="mw-import-status" class="storage-sync-hint hidden"></p>
+
+      <button type="button" id="mw-delete-map-btn" class="btn btn-danger btn-small">🗑️ Delete Current Map</button>
+    </div>
+  </div>
+
+  <div id="mw-paths-panel" class="mw-options-panel mw-paths-panel hidden">
+    <div class="mw-paths-panel-head">
+      <div class="mw-draw-row">
+        <button type="button" id="mw-draw-path-btn" class="btn btn-secondary btn-small" title="Trace a journey across the map — click to drop points, just like drawing a route in Google Maps. Zoom in first for pinpoint accuracy on small details.">✏️ Draw New Path</button>
+        <button type="button" id="mw-draft-color-btn" class="mw-path-swatch" title="Choose path colour" aria-label="Choose path colour"></button>
+      </div>
+    </div>
+    <p id="mw-draw-hint" class="mw-draw-hint hidden"></p>
+    <ul id="mw-paths-list" class="mw-paths-list"></ul>
+    <p id="mw-paths-empty" class="mw-paths-empty">No paths yet — draw one to trace a journey across this map.</p>
+  </div>
+
+  <div id="mw-symbols-panel" class="mw-options-panel mw-symbols-panel hidden">
+    <div class="mw-symbols-panel-head">
+      <button type="button" id="mw-place-symbol-btn" class="btn btn-secondary btn-small">📍 Place Symbol</button>
+    </div>
+    <p id="mw-symbol-hint" class="mw-draw-hint hidden"></p>
+    <ul id="mw-symbols-list" class="mw-paths-list"></ul>
+    <p id="mw-symbols-empty" class="mw-paths-empty">No symbols placed yet — pick an icon, then click anywhere on the map to pin it there.</p>
+  </div>
+
+  <div id="mw-folder-reconnect-banner" class="mw-folder-reconnect-banner hidden">
+    <span>🔌 Map folder disconnected — reconnect to keep saving images to it.</span>
+    <button type="button" id="mw-reconnect-banner-btn" class="btn btn-secondary btn-small">Reconnect</button>
+  </div>
+
+  <div id="map-viewport" class="map-viewport">
+    <div id="map-canvas-container" class="map-canvas-container">
+      <img id="active-map-image" class="active-map-image" alt="" draggable="false">
+      <div id="map-markers-layer" class="map-markers-layer" aria-hidden="true"></div>
+      <svg id="map-paths-layer" class="map-paths-layer" aria-hidden="true"></svg>
+      <div id="map-symbols-layer" class="map-symbols-layer" aria-hidden="true"></div>
+    </div>
+
+    <!-- Minimalist map search — invisible until the cursor rests over the
+         top strip of the map (or the box is focused), then fades in as a
+         slim glass pill. Searches the active map's path & symbol names;
+         picking a result pans/zooms to it and makes it glow — a flowing
+         directional trail for paths, a soft pulse for symbols. See the
+         MAP SEARCH block in map-window.js. -->
+    <div id="mw-map-search-wrap" class="mw-map-search-wrap">
+      <div class="mw-map-search">
+        <svg class="mw-map-search-icon" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
+          <path d="M10.5 3a7.5 7.5 0 1 0 4.65 13.4l5.23 5.22a1 1 0 0 0 1.42-1.42l-5.23-5.23A7.5 7.5 0 0 0 10.5 3Zm-5.5 7.5a5.5 5.5 0 1 1 11 0 5.5 5.5 0 0 1-11 0Z" fill="currentColor"/>
+        </svg>
+        <input type="text" id="mw-map-search-input" class="mw-map-search-input" placeholder="Search paths &amp; symbols…" autocomplete="off" spellcheck="false" aria-label="Search paths and symbols on this map">
+        <button type="button" id="mw-map-search-clear" class="mw-map-search-clear hidden" title="Clear search" aria-label="Clear search">✕</button>
+      </div>
+      <ul id="mw-map-search-results" class="mw-map-search-results hidden"></ul>
+    </div>
+
+    <p id="mw-empty-state" class="mw-empty-state">No map loaded — pick one above or upload your own via ⚙️.</p>
+    <div id="mw-resize-handle" class="mw-resize-handle hidden" title="Drag to resize — width, height &amp; aspect ratio">
+      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+        <path d="M14 2 L2 14 M14 7 L7 14 M14 12 L12 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div id="mw-resize-tooltip" class="mw-resize-tooltip hidden"></div>
+  </div>
+</div>
+
 <footer class="site-footer">
   <p>Stored on your device · <span id="footer-total">0</span> words registered</p>
 </footer>
@@ -886,6 +1234,22 @@
 <script src="wallpaper-tone-contrast.js"></script>
 <script src="wallpaper-adaptive-text.js"></script>
 <script src="script.js"></script>
+<!-- Twemoji: renders every map symbol (and country flag) as a crisp,
+     full-colour SVG image instead of relying on whatever emoji font the
+     visitor's OS happens to ship — that's what keeps flags looking like
+     actual flags and professions/activities looking richly illustrated
+     on every platform, and it's also what map-window.js uses to fix the
+     "symbol renders as a bare number" bug (see MW_EMOJI helpers there).
+     Loaded from cdnjs.cloudflare.com first since this page already
+     trusts that host (see the jsPDF <script> above) — most likely to
+     get through unblocked. onerror falls back to jsDelivr's mirror of
+     the same library in case cdnjs itself is ever unreachable. If both
+     fail, map-window.js quietly degrades every symbol to the plain
+     Unicode character instead of breaking anything. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/twemoji.min.js"
+  onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@twemoji/api@latest/dist/twemoji.min.js';s.crossOrigin='anonymous';this.after(s);"></script>
+<script src="map-symbols-data.js"></script>
+<script src="map-window.js"></script>
 <script src="perf-monitor.js"></script>
 </body>
 </html>
