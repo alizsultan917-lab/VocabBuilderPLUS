@@ -266,6 +266,14 @@
   const SYMBOL_SCALE_MAX = 4.0;
   const SYMBOL_SCALE_STEP = 0.05;
   const SYMBOL_SCALE_DEFAULT = 1.0;
+  // Label size is a SEPARATE multiplier from the icon/symbol scale above —
+  // it's what lets a name be shrunk down to near-nothing (or hidden
+  // outright via labelHidden) while the icon itself stays full size, for
+  // labels that only exist so the map search can find the thing by name.
+  const LABEL_SCALE_MIN = 0.1;
+  const LABEL_SCALE_MAX = 3.0;
+  const LABEL_SCALE_STEP = 0.05;
+  const LABEL_SCALE_DEFAULT = 1.0;
   const WHEEL_ZOOM_SENSITIVITY = 0.0016; // multiplied against -deltaY
   const SVG_NS = "http://www.w3.org/2000/svg";
   const PATH_COLORS = ["#e63946", "#2f78bd", "#2a9d8f", "#f4a261", "#8e44ad", "#e07a5f", "#588157", "#c9184a"];
@@ -732,11 +740,22 @@
   async function pushMapBundleToDrive(id, bundle, { withImage = false, folderId = "" } = {}) {
     if (!usingCloudStorage) return false;
     try {
-      await driveUpsertJson(driveMapJsonFileName(id), bundle, folderId);
+      const jsonName = driveMapJsonFileName(id);
+      await driveUpsertJson(jsonName, bundle, folderId);
       if (withImage) {
         const meta = mapsMeta.find((m) => m.id === id);
         const blob = await readMapImage(id, meta?.ext);
         if (blob) await driveUpsertBinary(driveMapFileName(id, meta?.ext), driveMimeForExt(meta?.ext), blob, folderId);
+      }
+      // Verify the write actually landed in the folder we think it did,
+      // rather than trusting a 200 response alone — a stale/incorrect
+      // folderId, a wrong Drive account, or Drive's own indexing lag can
+      // otherwise let this report success while nothing shows up where
+      // the person is looking. This costs one more round trip per export.
+      const confirmedId = await driveFindFileIdInFolder(jsonName, folderId);
+      if (!confirmedId) {
+        console.warn("Map Window: Drive upload reported success but the file couldn't be found back in the target folder.");
+        return false;
       }
       return true;
     } catch (err) {
@@ -2182,6 +2201,11 @@
       color: draftColor,
       visible: true,
       points: draftPoints.slice(),
+      labelScale: LABEL_SCALE_DEFAULT,
+      // Paths never used to show their name on the map at all (only in
+      // this panel and in search) — default new paths to that same
+      // behavior; turning the on-map name on is opt-in via the 🏷️ toggle.
+      labelHidden: true,
     };
     pathsFor(activeMapId).push(path);
     savePaths();
@@ -2376,6 +2400,48 @@
       }
       if (arrowHead) pathsSvg.appendChild(arrowHead);
 
+      // Path name label — off by default (see finishDrawing) since paths
+      // never used to show a name on the map at all, only in this list
+      // and in search. When turned on via the 🏷️ toggle, it's drawn as a
+      // small pill at the path's midpoint, sized independently via
+      // path.labelScale so it can be shrunk down to near-nothing without
+      // affecting anything else about the path.
+      if (path.label && path.labelHidden !== true) {
+        const midIdx = Math.floor((pts.length - 1) / 2);
+        const [lx, ly] = pts[midIdx];
+        const fontSize = Math.max(1, getLabelBaseFontPx() * (path.labelScale ?? LABEL_SCALE_DEFAULT));
+        const text = document.createElementNS(SVG_NS, "text");
+        text.setAttribute("x", lx);
+        text.setAttribute("y", ly);
+        text.setAttribute("font-size", fontSize.toFixed(2));
+        text.setAttribute("font-family", "system-ui, sans-serif");
+        text.setAttribute("font-weight", "600");
+        text.setAttribute("fill", "#fff");
+        text.setAttribute("text-anchor", "middle");
+        text.setAttribute("dominant-baseline", "middle");
+        text.setAttribute("class", "mw-path-name-label");
+        text.style.pointerEvents = "none";
+        text.textContent = path.label;
+        pathsSvg.appendChild(text);
+        try {
+          const bbox = text.getBBox();
+          const padX = fontSize * 0.5;
+          const padY = fontSize * 0.35;
+          const rect = document.createElementNS(SVG_NS, "rect");
+          rect.setAttribute("x", String(bbox.x - padX));
+          rect.setAttribute("y", String(bbox.y - padY));
+          rect.setAttribute("width", String(bbox.width + padX * 2));
+          rect.setAttribute("height", String(bbox.height + padY * 2));
+          rect.setAttribute("rx", String((bbox.height + padY * 2) / 2));
+          rect.setAttribute("fill", "rgba(20, 24, 30, 0.78)");
+          rect.style.pointerEvents = "none";
+          pathsSvg.insertBefore(rect, text);
+        } catch (err) {
+          /* getBBox can throw if the SVG isn't laid out yet (e.g. display:none
+             ancestor) — the bare text still renders fine without its pill */
+        }
+      }
+
       // Vertex drag/insert/delete handles — rendered ONLY while this path
       // is unlocked for editing, so a path just sits inert (no handles to
       // catch a mis-click) whenever it's merely selected or not touched.
@@ -2510,8 +2576,14 @@
           <button type="button" class="icon-btn mw-path-edit-btn${path.id === editingPathId ? " active" : ""}" title="${path.id === editingPathId ? "Done editing (locks the path again)" : "Unlock to drag points, insert points, or pin symbols"}">${path.id === editingPathId ? "🔓 Editing" : "🔒 Edit"}</button>
           <button type="button" class="icon-btn mw-path-arrow-btn${path.showArrow === false ? " off" : ""}" title="${path.showArrow === false ? "Show direction arrow" : "Hide direction arrow"}">➤</button>
           <button type="button" class="icon-btn mw-path-visibility-btn" title="${path.visible === false ? "Show path" : "Hide path"}">${path.visible === false ? "🙈" : "👁️"}</button>
+          <button type="button" class="icon-btn mw-path-label-visibility-btn" title="${path.labelHidden === false ? "Hide this name on the map (still searchable by name)" : "Show this name on the map"}">${path.labelHidden === false ? "👁️" : "🙈"}</button>
           <button type="button" class="icon-btn mw-path-focus-btn" title="Center on path">🎯</button>
           <button type="button" class="icon-btn mw-path-delete-btn" title="Delete path">🗑️</button>
+        </div>
+        <div class="mw-symbol-size-control mw-path-label-size-control">
+          <span class="mw-symbol-size-icon" title="Name label size">🏷️</span>
+          <input type="range" class="mw-path-label-size-slider" min="${LABEL_SCALE_MIN}" max="${LABEL_SCALE_MAX}" step="${LABEL_SCALE_STEP}" value="${path.labelScale ?? LABEL_SCALE_DEFAULT}" title="On-map name size — drag all the way down to make it barely visible">
+          <span class="mw-path-label-size-value">${Math.round((path.labelScale ?? LABEL_SCALE_DEFAULT) * 100)}%</span>
         </div>
       </li>`
       )
@@ -2561,6 +2633,23 @@
         savePaths();
         renderPaths();
         renderPathsList();
+      });
+      row.querySelector(".mw-path-label-visibility-btn")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        path.labelHidden = path.labelHidden === false ? true : false;
+        savePaths();
+        renderPaths();
+        renderPathsList();
+      });
+      const pathLabelSizeSlider = row.querySelector(".mw-path-label-size-slider");
+      const pathLabelSizeValueEl = row.querySelector(".mw-path-label-size-value");
+      pathLabelSizeSlider?.addEventListener("click", (e) => e.stopPropagation());
+      pathLabelSizeSlider?.addEventListener("input", (e) => {
+        const val = Math.min(LABEL_SCALE_MAX, Math.max(LABEL_SCALE_MIN, parseFloat(e.target.value) || LABEL_SCALE_DEFAULT));
+        path.labelScale = val;
+        if (pathLabelSizeValueEl) pathLabelSizeValueEl.textContent = `${Math.round(val * 100)}%`;
+        savePaths();
+        renderPaths(); // path labels are SVG text/rect pairs sized by attribute, so a full repaint is needed (unlike the symbol label's plain CSS font-size)
       });
       row.querySelector(".mw-path-focus-btn")?.addEventListener("click", () => focusOnPath(path));
       row.querySelector(".mw-path-delete-btn")?.addEventListener("click", () => {
@@ -2684,8 +2773,12 @@
         : marker.label
         ? `${marker.symbol} ${marker.label}`
         : "Unlock from the 📍 panel to move or change this symbol";
+      const showLabel = !!marker.label && marker.labelHidden !== true;
+      const labelFontPx = getLabelBaseFontPx() * (marker.labelScale ?? LABEL_SCALE_DEFAULT);
       el.innerHTML = `${mwEmojiImgHtml(marker.symbol, "map-symbol-marker-emoji")}${
-        marker.label ? `<span class="map-symbol-marker-label">${escapeHtml(marker.label)}</span>` : ""
+        showLabel
+          ? `<span class="map-symbol-marker-label" style="font-size:${labelFontPx.toFixed(2)}px">${escapeHtml(marker.label)}</span>`
+          : ""
       }`;
       el.addEventListener("mousedown", (e) => {
         if (!isEditing) return; // locked markers are inert to drag, same as an unedited path
@@ -2730,6 +2823,7 @@
         <input type="text" class="mw-path-name-input" value="${escapeHtml(marker.label || "")}" maxlength="40" placeholder="Label (optional)" title="Symbol label">
         <div class="mw-path-row-actions">
           <button type="button" class="icon-btn mw-path-edit-btn${marker.id === editingSymbolId ? " active" : ""}" title="${marker.id === editingSymbolId ? "Done editing (locks it in place)" : "Unlock to drag or change this symbol"}">${marker.id === editingSymbolId ? "🔓 Editing" : "🔒 Edit"}</button>
+          <button type="button" class="icon-btn mw-symbol-label-visibility-btn" title="${marker.labelHidden ? "Show this label on the map" : "Hide this label on the map (still searchable by name)"}">${marker.labelHidden ? "🙈" : "👁️"}</button>
           <button type="button" class="icon-btn mw-symbol-focus-btn" title="Center on this symbol">🎯</button>
           <button type="button" class="icon-btn mw-symbol-delete-btn" title="Delete symbol">🗑️</button>
         </div>
@@ -2737,6 +2831,11 @@
           <span class="mw-symbol-size-icon">🔎</span>
           <input type="range" class="mw-symbol-size-slider" min="${SYMBOL_SCALE_MIN}" max="${SYMBOL_SCALE_MAX}" step="${SYMBOL_SCALE_STEP}" value="${marker.scale || SYMBOL_SCALE_DEFAULT}" title="Symbol size — drag to make it as small or as big as you want">
           <span class="mw-symbol-size-value">${Math.round((marker.scale || SYMBOL_SCALE_DEFAULT) * 100)}%</span>
+        </div>
+        <div class="mw-symbol-size-control mw-symbol-label-size-control">
+          <span class="mw-symbol-size-icon" title="Label size">🏷️</span>
+          <input type="range" class="mw-symbol-label-size-slider" min="${LABEL_SCALE_MIN}" max="${LABEL_SCALE_MAX}" step="${LABEL_SCALE_STEP}" value="${marker.labelScale ?? LABEL_SCALE_DEFAULT}" title="Label size — independent of the icon size above; drag all the way down to make the name nearly invisible">
+          <span class="mw-symbol-label-size-value">${Math.round((marker.labelScale ?? LABEL_SCALE_DEFAULT) * 100)}%</span>
         </div>
       </li>`
       )
@@ -2776,6 +2875,13 @@
         renderSymbols();
         renderSymbolsList();
       });
+      row.querySelector(".mw-symbol-label-visibility-btn")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        marker.labelHidden = !marker.labelHidden;
+        saveSymbols();
+        renderSymbols();
+        renderSymbolsList();
+      });
       row.querySelector(".mw-symbol-focus-btn")?.addEventListener("click", () => focusOnSymbol(marker));
       row.querySelector(".mw-symbol-delete-btn")?.addEventListener("click", () => {
         if (!confirm(`Delete this ${marker.symbol} symbol? This can't be undone.`)) return;
@@ -2800,6 +2906,22 @@
         if (sizeValueEl) sizeValueEl.textContent = `${Math.round(val * 100)}%`;
         const markerEl = symbolsLayer?.querySelector(`[data-symbol-marker-id="${CSS.escape(marker.id)}"]`);
         markerEl?.style.setProperty("--mw-symbol-scale", String(val));
+        saveSymbols();
+      });
+
+      // Label size slider: completely independent of the icon-size slider
+      // above — updates the label span's font-size live (no full
+      // re-render, so the slider never loses focus mid-drag) and persists
+      // on every tick. Dragging to the minimum shrinks the name to
+      // barely-there without touching the icon at all.
+      const labelSizeSlider = row.querySelector(".mw-symbol-label-size-slider");
+      const labelSizeValueEl = row.querySelector(".mw-symbol-label-size-value");
+      labelSizeSlider?.addEventListener("input", (e) => {
+        const val = Math.min(LABEL_SCALE_MAX, Math.max(LABEL_SCALE_MIN, parseFloat(e.target.value) || LABEL_SCALE_DEFAULT));
+        marker.labelScale = val;
+        if (labelSizeValueEl) labelSizeValueEl.textContent = `${Math.round(val * 100)}%`;
+        const labelEl = symbolsLayer?.querySelector(`[data-symbol-marker-id="${CSS.escape(marker.id)}"] .map-symbol-marker-label`);
+        if (labelEl) labelEl.style.fontSize = `${(getLabelBaseFontPx() * val).toFixed(2)}px`;
         saveSymbols();
       });
     });
@@ -3295,7 +3417,16 @@
     if (!imageEl.getAttribute("src")) return;
     const pt = clientToPercent(e.clientX, e.clientY);
     if (pendingPlaceSymbol) {
-      symbolsFor(activeMapId).push({ id: uuid(), xPercent: pt.xPercent, yPercent: pt.yPercent, symbol: pendingPlaceSymbol, label: "", scale: SYMBOL_SCALE_DEFAULT });
+      symbolsFor(activeMapId).push({
+        id: uuid(),
+        xPercent: pt.xPercent,
+        yPercent: pt.yPercent,
+        symbol: pendingPlaceSymbol,
+        label: "",
+        scale: SYMBOL_SCALE_DEFAULT,
+        labelScale: LABEL_SCALE_DEFAULT,
+        labelHidden: false,
+      });
       saveSymbols();
       cancelPlacingSymbol();
       renderSymbols();
@@ -3417,6 +3548,32 @@
     ctx.textBaseline = "middle";
     ctx.fillText(symbol, cx, cy);
     ctx.restore();
+  }
+
+  // Reads the real, CSS-declared font-size of a label pill by briefly
+  // rendering an invisible probe with the same class, instead of guessing
+  // a pixel value — so the label-size slider's "100%" always matches
+  // whatever map-window.css actually defines, however that changes.
+  let mwLabelBaseFontPxCache = null;
+  function getLabelBaseFontPx() {
+    if (mwLabelBaseFontPxCache != null) return mwLabelBaseFontPxCache;
+    let size = 12;
+    try {
+      const probe = document.createElement("span");
+      probe.className = "map-symbol-marker-label";
+      probe.style.position = "absolute";
+      probe.style.visibility = "hidden";
+      probe.style.pointerEvents = "none";
+      probe.textContent = "x";
+      document.body.appendChild(probe);
+      const computed = parseFloat(getComputedStyle(probe).fontSize);
+      if (computed > 0) size = computed;
+      probe.remove();
+    } catch (err) {
+      /* fall back to the 12px default above */
+    }
+    mwLabelBaseFontPxCache = size;
+    return size;
   }
 
   function drawPillLabel(ctx, text, cx, topY, canvasW) {
@@ -3791,7 +3948,12 @@
 
       if (!folderResult && !wroteDrive) {
         downloadBlob(new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }), mapJsonFileName(activeMapId));
-        showExportStatus(`Downloaded "${mapJsonFileName(activeMapId)}" — tick "Local folder" or "Save to Drive" above to export directly next time.`);
+        const driveFailedNote = wantDrive ? ` Google Drive export failed — check your connection and Drive folder selection.` : "";
+        showExportStatus(
+          wantDrive
+            ? `Downloaded "${mapJsonFileName(activeMapId)}" instead.${driveFailedNote}`
+            : `Downloaded "${mapJsonFileName(activeMapId)}" — tick "Local folder" or "Save to Drive" above to export directly next time.`
+        );
       } else {
         const parts = [];
         if (folderResult) parts.push(`image + "${mapJsonFileName(activeMapId)}" saved to "${folderResult.folderName}"`);
@@ -3845,13 +4007,23 @@
     }
   }
 
-  async function refreshDriveFolderSelect() {
+  // ensureFolder: a { id, name } just created via the "+ New folder…"
+  // prompt below. Drive's files.list can lag a moment before a just-created
+  // folder shows up in query results (eventual consistency) — without this,
+  // that race would make populateDriveFolderSelect think the freshly
+  // created folder doesn't exist yet and silently fall back the selection
+  // to "My Drive (root)", right after the person picked a specific folder.
+  async function refreshDriveFolderSelect(ensureFolder) {
     if (!exportDriveFolderSelect || !usingCloudStorage) return;
     try {
       const folders = await driveListFolders();
+      if (ensureFolder && ensureFolder.id && !folders.some((f) => f.id === ensureFolder.id)) {
+        folders.unshift(ensureFolder);
+      }
       populateDriveFolderSelect(folders);
     } catch (err) {
       console.warn("Map Window: couldn't list Drive folders:", err);
+      showExportStatus("Couldn't load your Drive folders — check your connection and try again.");
     }
   }
 
@@ -3883,7 +4055,7 @@
     try {
       const id = await driveCreateFolder(name.trim());
       setMwDriveExportFolder(id, name.trim());
-      await refreshDriveFolderSelect();
+      await refreshDriveFolderSelect({ id, name: name.trim() });
     } catch (err) {
       console.error("Map Window: couldn't create Drive folder:", err);
       alert("Couldn't create that folder in Drive — see the console for details.");
