@@ -1929,7 +1929,22 @@ async function applySyncDirection(direction, opts = {}) {
   if (direction === "drive-wins") {
     let pulledCount = 0;
     try {
-      const remote = await perfTimeAsync("Folder / Drive Sync", () => readEntriesFromDrive());
+      let remote;
+      try {
+        remote = await perfTimeAsync("Folder / Drive Sync", () => readEntriesFromDrive());
+      } catch (readErr) {
+        // Unlike the write path, reads had no recovery from a quietly-expired
+        // access token — a single 401 here used to abort the whole pull with
+        // just the generic "Couldn't read" message, even though the write
+        // path's silent refresh-and-retry would have fixed it fine. Mirror
+        // that same recovery here before giving up for real.
+        const looksLikeAuthFailure = /\b401\b/.test(readErr.message || "") || /^invalid_grant$/.test(readErr.message || "");
+        if (!looksLikeAuthFailure) throw readErr;
+        await requestDriveToken(false);
+        scheduleDriveTokenRefresh();
+        remote = await perfTimeAsync("Folder / Drive Sync", () => readEntriesFromDrive());
+        driveSessionExpired = false;
+      }
       entries = remote;
       pulledCount = entries.length;
       if (usingDiskStorage && vocabDirHandle) {
@@ -1942,12 +1957,28 @@ async function applySyncDirection(direction, opts = {}) {
       updateStorageStatusUI();
     } catch (err) {
       console.error("Failed to pull entries from Google Drive:", err);
-      return { message: "Couldn't read Google Drive's entries — nothing here was changed." };
+      usingCloudStorage = false;
+      driveSessionExpired = true;
+      updateStorageStatusUI();
+      return {
+        message:
+          `Couldn't read Google Drive's entries — nothing here was changed. (${err.message || "unknown error"}) ` +
+          "Drive now shows as disconnected; click Connect Google Drive to sign in again.",
+      };
     }
 
     if (pullSettings) {
       try {
-        const driveSettings = await readSettingsFromDrive();
+        let driveSettings;
+        try {
+          driveSettings = await readSettingsFromDrive();
+        } catch (settingsErr) {
+          const looksLikeAuthFailure = /\b401\b/.test(settingsErr.message || "") || /^invalid_grant$/.test(settingsErr.message || "");
+          if (!looksLikeAuthFailure) throw settingsErr;
+          await requestDriveToken(false);
+          scheduleDriveTokenRefresh();
+          driveSettings = await readSettingsFromDrive();
+        }
         if (driveSettings && Object.keys(driveSettings).length) {
           const before = JSON.stringify(collectAllSettings());
           applySettingsSnapshot(driveSettings);
