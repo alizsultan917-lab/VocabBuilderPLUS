@@ -4400,10 +4400,13 @@
   }
 
   async function handleDrivePickerPicked(data) {
-    if (data.action !== google.picker.Action.PICKED) return; // cancelled
+    console.log("Map Window: Drive Picker callback fired", data);
+    if (data.action !== google.picker.Action.PICKED) return; // cancelled or just loaded
     const docs = data.docs || [];
+    console.log("Map Window: Drive Picker docs picked", docs);
     const jsonDocs = docs.filter(isJsonPickerDoc);
     const imageDocs = docs.filter((d) => isImagePickerDoc(d) && !isJsonPickerDoc(d));
+    console.log("Map Window: Drive Picker classified", { jsonDocs, imageDocs });
 
     if (!jsonDocs.length && !imageDocs.length) {
       showImportStatus("Couldn't recognize those files — pick one map image (.png/.jpg/.webp) and its .json metadata file together.");
@@ -4425,13 +4428,16 @@
     showImportStatus("Downloading from Drive…");
     try {
       const bundle = await driveDownloadJson(jsonDocs[0].id);
+      console.log("Map Window: Drive Picker JSON downloaded", bundle);
       if (!bundle || typeof bundle !== "object") {
         showImportStatus("Couldn't import — that .json file isn't a valid map bundle exported from this app.");
         return;
       }
       const ext = extFromFile({ name: imageDocs[0].name, type: imageDocs[0].mimeType }) || bundle.ext || "png";
       const blob = await driveDownloadBinary(imageDocs[0].id);
+      console.log("Map Window: Drive Picker image downloaded", { ext, size: blob?.size, type: blob?.type });
       const result = await finishMapImport(blob, ext, bundle);
+      console.log("Map Window: Drive Picker import finished", result);
       showImportStatus(
         result.ok
           ? `Imported "${result.label}" from Drive — it's now the active map, fully editable.`
