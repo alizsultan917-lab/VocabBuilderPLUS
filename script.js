@@ -488,6 +488,12 @@ const syncDirectionRow = document.getElementById("sync-direction-row");
 const syncDirectionLocalRadio = document.getElementById("sync-direction-local-radio");
 const syncDirectionDriveRadio = document.getElementById("sync-direction-drive-radio");
 const syncNowBtn = document.getElementById("sync-now-btn");
+const syncDirectionModal = document.getElementById("sync-direction-modal");
+const syncDirectionModalWarning = document.getElementById("sync-direction-modal-warning");
+const syncDirectionConfirmLabel = document.getElementById("sync-direction-confirm-label");
+const syncDirectionConfirmInput = document.getElementById("sync-direction-confirm-input");
+const syncDirectionCancelBtn = document.getElementById("sync-direction-cancel-btn");
+const syncDirectionConfirmBtn = document.getElementById("sync-direction-confirm-btn");
 
 const customizeToggleBtn = document.getElementById("customize-toggle-btn");
 const customizePanel = document.getElementById("customize-panel");
@@ -2264,42 +2270,71 @@ function updateSyncDirectionUI() {
 }
 
 const SYNC_DIRECTION_LABEL = {
-  "local-wins": "this device overwrites Google Drive",
+  "local-wins": "This device overwrites Google Drive",
   "drive-wins": "Google Drive overwrites this device",
+};
+const SYNC_DIRECTION_PHRASE = {
+  "local-wins": "LOCAL WINS",
+  "drive-wins": "DRIVE WINS",
 };
 
 // Two-step confirmation before a sync-direction change ever takes
-// effect, matching the same "confirm(), then type an exact phrase"
-// pattern already used elsewhere in this app for destructive bulk
-// actions (see the Delete All handler): an explicit confirm() dialog
-// spelling out what will get overwritten, THEN a typed phrase that has
-// to match exactly. Only after both steps succeed is the choice saved
-// (so it's remembered and auto-applied from then on) and, if Drive is
-// already connected, applied immediately.
-async function changeSyncDirection(newDirection) {
+// effect: an explanatory warning up front, PLUS a phrase the person has
+// to type out exactly (checked live, character by character — the
+// Confirm button stays disabled until it matches) before anything is
+// overwritten. This is a real in-app modal rather than the browser's
+// native confirm()/prompt() dialogs, since those can render
+// inconsistently — or not appear at all — inside some embedded/app
+// webviews, which made the confirmation step easy to miss entirely.
+let pendingSyncDirection = null;
+
+function openSyncDirectionModal(newDirection) {
   const current = getSyncDirection();
   if (newDirection === current) return;
 
+  pendingSyncDirection = newDirection;
   const hasFolder = usingDiskStorage && vocabDirHandle;
-  const firstConfirm = confirm(
-    `Change sync direction so ${SYNC_DIRECTION_LABEL[newDirection]}?\n\n` +
-      (newDirection === "drive-wins"
-        ? `This will immediately replace the words on this device${hasFolder ? " (and your local folder)" : ""} with whatever is currently on Google Drive. Anything here that isn't on Drive will be lost.`
-        : `This will immediately replace the words on Google Drive with what's on this device${hasFolder ? " (and your local folder)" : ""}. Anything on Drive that isn't here will be lost.`) +
-      `\n\nThis app will remember this choice and apply it automatically every time from now on — it won't ask again unless you change it here.`
-  );
-  if (!firstConfirm) {
-    updateSyncDirectionUI(); // revert the radio button to the current setting
-    return;
-  }
+  const phrase = SYNC_DIRECTION_PHRASE[newDirection];
 
-  const phrase = newDirection === "drive-wins" ? "DRIVE WINS" : "LOCAL WINS";
-  const typed = prompt(`Type ${phrase} to confirm.`);
-  if (typed !== phrase) {
-    alert("Sync direction unchanged — nothing was overwritten.");
-    updateSyncDirectionUI();
-    return;
-  }
+  syncDirectionModalWarning.textContent =
+    `Change sync direction so ${SYNC_DIRECTION_LABEL[newDirection]}? ` +
+    (newDirection === "drive-wins"
+      ? `This will immediately replace the words on this device${hasFolder ? " (and your local folder)" : ""} with whatever is currently on Google Drive. Anything here that isn't on Drive will be lost.`
+      : `This will immediately replace the words on Google Drive with what's on this device${hasFolder ? " (and your local folder)" : ""}. Anything on Drive that isn't here will be lost.`);
+  syncDirectionConfirmLabel.textContent = `Type ${phrase} to confirm`;
+  syncDirectionConfirmInput.value = "";
+  syncDirectionConfirmInput.placeholder = phrase;
+  syncDirectionConfirmBtn.disabled = true;
+  syncDirectionModal.classList.remove("hidden");
+  syncDirectionConfirmInput.focus();
+}
+
+function closeSyncDirectionModal(revert) {
+  syncDirectionModal.classList.add("hidden");
+  pendingSyncDirection = null;
+  if (revert) updateSyncDirectionUI(); // snap the radio back to the still-current setting
+}
+
+syncDirectionConfirmInput.addEventListener("input", () => {
+  if (!pendingSyncDirection) return;
+  syncDirectionConfirmBtn.disabled = syncDirectionConfirmInput.value !== SYNC_DIRECTION_PHRASE[pendingSyncDirection];
+});
+
+syncDirectionCancelBtn.addEventListener("click", () => closeSyncDirectionModal(true));
+
+syncDirectionModal.addEventListener("click", (e) => {
+  if (e.target === syncDirectionModal) closeSyncDirectionModal(true); // click on backdrop
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !syncDirectionModal.classList.contains("hidden")) closeSyncDirectionModal(true);
+});
+
+syncDirectionConfirmBtn.addEventListener("click", async () => {
+  if (!pendingSyncDirection || syncDirectionConfirmBtn.disabled) return;
+  const newDirection = pendingSyncDirection;
+  syncDirectionModal.classList.add("hidden");
+  pendingSyncDirection = null;
 
   setSyncDirection(newDirection);
   updateSyncDirectionUI();
@@ -2311,13 +2346,13 @@ async function changeSyncDirection(newDirection) {
 
   const result = await applySyncDirection(newDirection, { reloadOnSettingsChange: true, pullSettings: true });
   if (result.message) alert(result.message);
-}
+});
 
 syncDirectionLocalRadio.addEventListener("change", () => {
-  if (syncDirectionLocalRadio.checked) changeSyncDirection("local-wins");
+  if (syncDirectionLocalRadio.checked) openSyncDirectionModal("local-wins");
 });
 syncDirectionDriveRadio.addEventListener("change", () => {
-  if (syncDirectionDriveRadio.checked) changeSyncDirection("drive-wins");
+  if (syncDirectionDriveRadio.checked) openSyncDirectionModal("drive-wins");
 });
 
 syncNowBtn.addEventListener("click", async () => {
@@ -2371,11 +2406,10 @@ function updateCloudStatusUI() {
   exportDriveCheckWrap.classList.toggle("hidden", !usingCloudStorage);
   if (!usingCloudStorage) exportDriveCheckbox.checked = false;
 
-  // Sync direction matters any time Drive is connected — not only when a
-  // local folder is ALSO connected — since browser storage always counts
-  // as "local" for this purpose.
-  syncDirectionRow.classList.toggle("hidden", !usingCloudStorage);
-  if (usingCloudStorage) updateSyncDirectionUI();
+  // Sync direction is a standing preference the person can set up front
+  // (before ever connecting Drive), so this row always stays visible —
+  // it just won't take effect on anything until Drive is connected.
+  updateSyncDirectionUI();
 }
 
 async function loadEntries() {

@@ -574,7 +574,7 @@
           <label class="storage-check-row"><input type="checkbox" id="sync-cloud-checkbox" checked><span>Google Drive</span></label>
         </div>
 
-        <div id="sync-direction-row" class="storage-sync-options hidden">
+        <div id="sync-direction-row" class="storage-sync-options">
           <hr class="storage-divider">
           <p class="storage-sync-hint">If your local words and Google Drive ever disagree, which one should win?</p>
           <label class="storage-check-row"><input type="radio" name="sync-direction" id="sync-direction-local-radio"><span>💻 This device overwrites Google Drive</span></label>
@@ -946,6 +946,23 @@
     <div class="modal-actions">
       <button id="topage-confirm-cancel-btn" class="btn btn-secondary" type="button">Cancel</button>
       <button id="topage-confirm-ok-btn" class="btn btn-primary" type="button">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- SYNC DIRECTION CHANGE — TWO-STEP CONFIRM MODAL -->
+<div id="sync-direction-modal" class="modal hidden">
+  <div class="modal-content modal-content-compact">
+    <h3>⚠️ Change Sync Direction?</h3>
+    <p class="confirm-prompt-text" id="sync-direction-modal-warning"></p>
+    <p class="confirm-prompt-text">This will apply immediately, and be remembered from now on — it won't ask again unless you change it here.</p>
+    <div class="form-group">
+      <label for="sync-direction-confirm-input" id="sync-direction-confirm-label"></label>
+      <input type="text" id="sync-direction-confirm-input" autocomplete="off" placeholder="Type the phrase exactly">
+    </div>
+    <div class="modal-actions">
+      <button id="sync-direction-cancel-btn" class="btn btn-secondary" type="button">Cancel</button>
+      <button id="sync-direction-confirm-btn" class="btn btn-danger" type="button" disabled>Confirm &amp; Overwrite</button>
     </div>
   </div>
 </div>
