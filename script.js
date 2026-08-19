@@ -309,6 +309,9 @@ const DRIVE_AUTOCONNECT_STORAGE = "litVocabDriveAutoConnect";
 
 let driveTokenClient = null;
 let driveAccessToken = null;   // short-lived OAuth token, kept only in memory
+let driveTokenExpiresAt = null; // ms timestamp; used to silently refresh before it dies
+let driveRefreshTimer = null;
+let driveSessionExpired = false; // true when a previously-working connection died mid-session
 let driveFileId = localStorage.getItem(DRIVE_FILE_ID_STORAGE) || null;
 let usingCloudStorage = false; // true once Drive is connected and a token has been granted
 
@@ -1498,31 +1501,85 @@ async function createDriveFile(list) {
 async function readEntriesFromDrive() {
   driveFileId = driveFileId || (await findDriveFileId());
   if (!driveFileId) return [];
-  const res = await driveApiFetch(`https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`);
+  let res = await driveApiFetch(`https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`);
+  if (res.status === 404) {
+    // The cached file ID (persisted in localStorage indefinitely) is no
+    // longer visible to the app. With the drive.file scope this happens
+    // whenever access was revoked and re-granted, a different Google
+    // account signed in, or the file itself was deleted — Google returns
+    // 404 rather than 403 in these cases so it doesn't leak whether the
+    // file exists. Forget the stale ID and search fresh by name instead
+    // of treating this as a hard failure.
+    driveFileId = null;
+    localStorage.removeItem(DRIVE_FILE_ID_STORAGE);
+    driveFileId = await findDriveFileId();
+    if (!driveFileId) return [];
+    res = await driveApiFetch(`https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`);
+  }
   if (!res.ok) throw new Error(`Drive read failed (${res.status})`);
   const text = await res.text();
   localStorage.setItem(DRIVE_FILE_ID_STORAGE, driveFileId);
   return text.trim() ? JSON.parse(text) : [];
 }
 
+async function driveWriteAttempt(list) {
+  if (!driveFileId) driveFileId = await findDriveFileId();
+  if (!driveFileId) {
+    driveFileId = await createDriveFile(list);
+  } else {
+    const res = await driveApiFetch(
+      `https://www.googleapis.com/upload/drive/v3/files/${driveFileId}?uploadType=media`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(list) }
+    );
+    if (res.status === 404) {
+      // Same stale-file-ID situation as readEntriesFromDrive: the ID cached
+      // in localStorage no longer resolves under the current authorization.
+      // Forget it and look for (or create) the file fresh rather than
+      // failing the whole save — this is what used to surface as Drive
+      // "disconnecting" mid-session even though the token itself was fine.
+      driveFileId = null;
+      localStorage.removeItem(DRIVE_FILE_ID_STORAGE);
+      driveFileId = await findDriveFileId();
+      if (!driveFileId) {
+        driveFileId = await createDriveFile(list);
+      } else {
+        const retryRes = await driveApiFetch(
+          `https://www.googleapis.com/upload/drive/v3/files/${driveFileId}?uploadType=media`,
+          { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(list) }
+        );
+        if (!retryRes.ok) throw new Error(`Drive update failed (${retryRes.status})`);
+      }
+    } else if (!res.ok) {
+      throw new Error(`Drive update failed (${res.status})`);
+    }
+  }
+  localStorage.setItem(DRIVE_FILE_ID_STORAGE, driveFileId);
+}
+
 async function writeEntriesToDrive(list) {
   try {
-    if (!driveFileId) driveFileId = await findDriveFileId();
-    if (!driveFileId) {
-      driveFileId = await createDriveFile(list);
-    } else {
-      const res = await driveApiFetch(
-        `https://www.googleapis.com/upload/drive/v3/files/${driveFileId}?uploadType=media`,
-        { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(list) }
-      );
-      if (!res.ok) throw new Error(`Drive update failed (${res.status})`);
-    }
-    localStorage.setItem(DRIVE_FILE_ID_STORAGE, driveFileId);
+    await driveWriteAttempt(list);
   } catch (err) {
+    // A 401 here usually means the access token quietly died (expired,
+    // revoked, etc.) between scheduled refreshes. Try one silent
+    // re-authorization + retry before treating this as a real failure —
+    // this is what used to surface as a sudden mid-session "disconnect".
+    const looksLikeAuthFailure = /\b401\b/.test(err.message || "") || /^invalid_grant$/.test(err.message || "");
+    if (looksLikeAuthFailure) {
+      try {
+        await requestDriveToken(false);
+        scheduleDriveTokenRefresh();
+        await driveWriteAttempt(list);
+        driveSessionExpired = false;
+        return; // recovered — no need to alarm anyone
+      } catch (retryErr) {
+        console.warn("Google Drive: token refresh + retry after auth failure also failed:", retryErr);
+      }
+    }
     console.error("Failed to save entries to Google Drive:", err);
     usingCloudStorage = false;
+    driveSessionExpired = true;
     updateStorageStatusUI();
-    alert("Couldn't save to Google Drive — you may need to reconnect. Your words are still safe elsewhere.");
   }
 }
 
@@ -1605,6 +1662,11 @@ function requestDriveToken(interactive) {
         if (resp.error) reject(new Error(resp.error));
         else {
           driveAccessToken = resp.access_token;
+          // Google's implicit-flow tokens are short-lived (usually 1hr).
+          // expires_in comes back in seconds; fall back to a conservative
+          // 55 minutes if it's ever missing so we still refresh proactively.
+          const expiresInMs = (Number(resp.expires_in) || 3300) * 1000;
+          driveTokenExpiresAt = Date.now() + expiresInMs;
           resolve(resp.access_token);
         }
       },
@@ -1627,6 +1689,38 @@ function requestDriveToken(interactive) {
   });
 
   return Promise.race([attempt, timeout]);
+}
+
+// Access tokens die after ~1hr. Without this, a long-open tab would only
+// discover the token was dead the next time it tried to save — surfacing
+// as a sudden, confusing "disconnect" with nothing but a blockable alert()
+// to explain it. Instead, refresh silently in the background well before
+// expiry so a long session just keeps working invisibly. If the silent
+// refresh itself fails (session revoked, third-party cookies blocked,
+// etc.), that's when we actually give up and tell the person.
+function scheduleDriveTokenRefresh() {
+  if (driveRefreshTimer) clearTimeout(driveRefreshTimer);
+  if (!driveTokenExpiresAt) return;
+  // Refresh 5 minutes before expiry, but never less than 30s from now.
+  const delay = Math.max(30000, driveTokenExpiresAt - Date.now() - 5 * 60000);
+  driveRefreshTimer = setTimeout(async () => {
+    try {
+      await requestDriveToken(false);
+      driveSessionExpired = false;
+      scheduleDriveTokenRefresh(); // chain the next refresh
+    } catch (err) {
+      console.warn("Google Drive: silent token refresh failed — Drive will show as disconnected until you reconnect:", err);
+      usingCloudStorage = false;
+      driveSessionExpired = true;
+      updateStorageStatusUI();
+    }
+  }, delay);
+}
+
+function stopDriveTokenRefresh() {
+  if (driveRefreshTimer) clearTimeout(driveRefreshTimer);
+  driveRefreshTimer = null;
+  driveTokenExpiresAt = null;
 }
 
 // The GIS script tag is loaded async/defer, so it can still be mid-flight
@@ -1667,6 +1761,8 @@ async function tryRestoreDriveConnection() {
     const silentTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 8000));
     await Promise.race([requestDriveToken(false), silentTimeout]);
     usingCloudStorage = true;
+    driveSessionExpired = false;
+    scheduleDriveTokenRefresh();
     return true;
   } catch (err) {
     console.warn("Silent Google Drive reconnect failed; staying on local storage until reconnected manually:", err);
@@ -1709,6 +1805,8 @@ async function connectGoogleDrive() {
   try {
     await requestDriveToken(true);
     usingCloudStorage = true;
+    driveSessionExpired = false;
+    scheduleDriveTokenRefresh();
     localStorage.setItem(DRIVE_AUTOCONNECT_STORAGE, "1");
 
     // Your local copy (this browser, or your chosen folder) is the source
@@ -1743,7 +1841,9 @@ async function connectGoogleDrive() {
 
 function disconnectGoogleDrive() {
   usingCloudStorage = false;
+  driveSessionExpired = false;
   driveAccessToken = null;
+  stopDriveTokenRefresh();
   localStorage.removeItem(DRIVE_AUTOCONNECT_STORAGE);
   updateStorageStatusUI();
 }
@@ -1783,6 +1883,14 @@ function updateCloudStatusUI() {
     cloudStatus.classList.add("storage-status-warning");
     connectDriveBtn.classList.remove("hidden");
     connectDriveBtn.textContent = "Why can't I connect?";
+    disconnectDriveBtn.classList.add("hidden");
+  } else if (driveSessionExpired) {
+    cloudStatus.textContent =
+      "Your Google Drive session ended (sign-out, expired permission, or a blocked background " +
+      "refresh) — click Reconnect to pick it back up. Your words are still safe in local/browser storage.";
+    cloudStatus.classList.add("storage-status-warning");
+    connectDriveBtn.classList.remove("hidden");
+    connectDriveBtn.textContent = "Reconnect Google Drive";
     disconnectDriveBtn.classList.add("hidden");
   } else {
     cloudStatus.textContent = "Not connected to Google Drive.";
