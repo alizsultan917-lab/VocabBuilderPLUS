@@ -1161,10 +1161,20 @@ html[data-wallpaper-tone="dark"] body.has-wallpaper .mw-symbol-picker-popover {
   gap: 0.2rem;
 }
 
+/* Wraps a symbol button plus its ★ favorite-toggle (and, on the
+   Recent/Favorites tabs, its ✖ remove badge) as one grid cell — the
+   badges are positioned absolutely against this so they sit in the
+   button's corners without affecting the grid's own sizing. */
+.mw-symbol-cell {
+  position: relative;
+  display: block;
+}
+
 .mw-symbol-btn {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 100%;
   border: 1px solid transparent;
   background: rgba(120, 140, 160, 0.08);
   border-radius: 6px;
@@ -1189,6 +1199,68 @@ html[data-wallpaper-tone="dark"] body.has-wallpaper .mw-symbol-picker-popover {
 .mw-symbol-btn-img {
   width: 1.5rem;
   height: 1.5rem;
+}
+
+/* ★ favorite-toggle badge — top-right corner of every symbol cell.
+   Hidden until hover/focus unless the symbol is already a favorite, so
+   the grid doesn't look cluttered with 190+ stars at once. */
+.mw-symbol-fav-btn {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  line-height: 15px;
+  font-size: 0.7rem;
+  text-align: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--panel-bg, #fff);
+  box-shadow: 0 0 0 1px rgba(120, 140, 160, 0.35);
+  cursor: pointer;
+  color: var(--ink-soft);
+  opacity: 0;
+  transition: opacity 0.1s ease, color 0.1s ease;
+}
+
+.mw-symbol-cell:hover .mw-symbol-fav-btn,
+.mw-symbol-fav-btn.active {
+  opacity: 1;
+}
+
+.mw-symbol-fav-btn.active {
+  color: #d9a300;
+}
+
+/* ✖ remove badge — only rendered on the Recent/Favorites tabs, bottom-
+   left corner so it never overlaps the ★ toggle. */
+.mw-symbol-remove-btn {
+  position: absolute;
+  bottom: -4px;
+  left: -4px;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  line-height: 14px;
+  font-size: 0.6rem;
+  text-align: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--panel-bg, #fff);
+  box-shadow: 0 0 0 1px rgba(120, 140, 160, 0.35);
+  cursor: pointer;
+  color: var(--ink-soft);
+  opacity: 0;
+  transition: opacity 0.1s ease, color 0.1s ease;
+}
+
+.mw-symbol-cell:hover .mw-symbol-remove-btn {
+  opacity: 1;
+}
+
+.mw-symbol-remove-btn:hover {
+  color: #c0392b;
 }
 
 /* Base rule for every rendered symbol image across the map window
@@ -1268,6 +1340,14 @@ html[data-wallpaper-tone="dark"] body.has-wallpaper .mw-paths-empty {
 .mw-symbol-swatch-img {
   width: 16px;
   height: 16px;
+}
+
+/* Small inline icon inside the "Click anywhere on the map to pin ⟨icon⟩
+   there…" hint — sits mid-text next to the symbol's friendly name. */
+.mw-symbol-hint-img {
+  width: 1em;
+  height: 1em;
+  margin: 0 0.1em;
 }
 
 .map-viewport.mw-placing-symbol {

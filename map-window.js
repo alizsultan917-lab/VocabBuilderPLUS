@@ -78,6 +78,7 @@
   const MW_PATHS_STORAGE = "vocabRegister_mapWindowPaths"; // { [mapId]: [{id, label, color, visible, points:[{xPercent,yPercent,symbol?}]}] }
   const MW_SYMBOLS_STORAGE = "vocabRegister_mapWindowSymbols"; // { [mapId]: [{id, xPercent, yPercent, symbol, label}] } — standalone icons, independent of any path
   const MW_RECENT_SYMBOLS_STORAGE = "vocabRegister_mapWindowRecentSymbols"; // [symbolChar, ...] — most-recent first, shared across maps/paths/markers
+  const MW_FAVORITE_SYMBOLS_STORAGE = "vocabRegister_mapWindowFavoriteSymbols"; // [symbolChar, ...] — user-curated via the ★ toggle in the symbol picker
   const MW_RECENT_SYMBOLS_MAX = 24;
 
   // ---- Fit mode (see FIT MODE block below) --------------------------
@@ -204,6 +205,17 @@
     return map;
   })();
 
+  // Best available human-readable label for a symbol: its real
+  // Unicode/asset name when known, else a generic placeholder for custom
+  // hand-authored artwork. NEVER falls back to the raw symbol string
+  // itself — for custom SVG symbols (the ASOIAF structures etc.) that's
+  // a data:image/svg+xml URI hundreds of characters long, and dropping
+  // that into a title attribute or a text node blows up whatever UI it
+  // lands in.
+  function symbolLabelFor(symbol) {
+    return SYMBOL_NAME_BY_CHAR[symbol] || (mwIsCustomSvgSymbol(symbol) ? "Custom symbol" : symbol);
+  }
+
   // Builds the "🕓 Recent" tab fresh from the current recentSymbols list
   // (rather than being baked into the static SYMBOL_GROUPS array), so it
   // stays live as picks happen without needing a page reload.
@@ -211,15 +223,30 @@
     return {
       key: "recent",
       label: "🕓 Recent",
-      symbols: recentSymbols.map((s) => ({ s, n: SYMBOL_NAME_BY_CHAR[s] || s })),
+      symbols: recentSymbols.map((s) => ({ s, n: symbolLabelFor(s) })),
+    };
+  }
+
+  // Builds the "★ Favorites" tab fresh from the current favoriteSymbols
+  // list — user-curated (star-toggle in the picker), persisted, and
+  // editable, unlike the fixed SYMBOL_CATEGORIES seed it started from.
+  function buildFavoritesGroup() {
+    return {
+      key: "favorites",
+      label: "★ Favorites",
+      symbols: favoriteSymbols.map((s) => ({ s, n: symbolLabelFor(s) })),
     };
   }
 
   // Tab list the picker actually renders: "Recent" first (only while it
-  // has entries), then every group in SYMBOL_GROUPS unchanged.
+  // has entries), then the live "Favorites" tab, then every extended
+  // group from SYMBOL_GROUPS (skipping its own static "favorites" entry,
+  // which only exists to seed the search index — see buildSymbolGroups).
   function symbolGroupsForPicker() {
     const recent = buildRecentGroup();
-    return recent.symbols.length ? [recent, ...SYMBOL_GROUPS] : SYMBOL_GROUPS;
+    const favorites = buildFavoritesGroup();
+    const rest = SYMBOL_GROUPS.filter((g) => g.key !== "favorites");
+    return recent.symbols.length ? [recent, favorites, ...rest] : [favorites, ...rest];
   }
 
   const SYMBOL_RENDER_CAP = 400; // cap DOM nodes per render for popover performance
@@ -827,6 +854,41 @@
     if (!symbol) return; // "No symbol" / clear picks don't count
     recentSymbols = [symbol, ...recentSymbols.filter((s) => s !== symbol)].slice(0, MW_RECENT_SYMBOLS_MAX);
     saveRecentSymbols();
+  }
+  // Removes one entry from the "Recent" tab without touching favorites —
+  // called from the ✖ badge on a recent-tab symbol button.
+  function removeRecentSymbol(symbol) {
+    recentSymbols = recentSymbols.filter((s) => s !== symbol);
+    saveRecentSymbols();
+  }
+
+  // User-curated favorites — a real, editable list (star-toggle in the
+  // picker adds/removes), persisted the same way as recentSymbols.
+  // Seeded once from the original curated SYMBOL_CATEGORIES set so
+  // existing users don't open the picker to an empty Favorites tab.
+  let favoriteSymbols = loadJson(MW_FAVORITE_SYMBOLS_STORAGE, null);
+  if (!Array.isArray(favoriteSymbols)) {
+    favoriteSymbols = SYMBOL_CATEGORIES.flatMap((cat) => cat.symbols);
+  }
+  favoriteSymbols = favoriteSymbols.filter((s) => typeof s === "string" && s);
+  function saveFavoriteSymbols() {
+    saveJson(MW_FAVORITE_SYMBOLS_STORAGE, favoriteSymbols);
+  }
+  function isFavoriteSymbol(symbol) {
+    return favoriteSymbols.includes(symbol);
+  }
+  function addFavoriteSymbol(symbol) {
+    if (!symbol || favoriteSymbols.includes(symbol)) return;
+    favoriteSymbols = [symbol, ...favoriteSymbols];
+    saveFavoriteSymbols();
+  }
+  function removeFavoriteSymbol(symbol) {
+    favoriteSymbols = favoriteSymbols.filter((s) => s !== symbol);
+    saveFavoriteSymbols();
+  }
+  function toggleFavoriteSymbol(symbol) {
+    if (isFavoriteSymbol(symbol)) removeFavoriteSymbol(symbol);
+    else addFavoriteSymbol(symbol);
   }
 
   /* ----------------------------------------------------------------------
@@ -1611,9 +1673,21 @@
     return code ? `https://flagcdn.com/w160/${code}.png` : null;
   }
 
+  // Custom, hand-authored artwork (currently the "ASOIAF Main Structures"
+  // group in map-symbols-data.js) is stored directly as a
+  // data:image/svg+xml symbol string rather than a Unicode character —
+  // there's no codepoint to resolve, so it's detected up front and
+  // short-circuits straight past the flag/Twemoji lookups below (which
+  // would otherwise waste a regex pass over a multi-KB string and,
+  // for mwFlagCode, could never match anyway).
+  function mwIsCustomSvgSymbol(emoji) {
+    return typeof emoji === "string" && emoji.startsWith("data:image/svg+xml");
+  }
+
   // All candidate asset URLs for `emoji`, in try-order, or null. Real
   // flag artwork (if any) leads; the Twemoji chain follows as backup(s).
   function mwEmojiUrls(emoji) {
+    if (mwIsCustomSvgSymbol(emoji)) return [emoji];
     const flagUrl = mwFlagImgUrl(emoji);
     const cp = mwEmojiCodepoint(emoji);
     const twemojiUrls = cp ? MW_TWEMOJI_SOURCES.map((src) => `${src.base}${src.folder}/${cp}${src.ext}`) : [];
@@ -1641,7 +1715,11 @@
     const emoji = img.getAttribute("data-mw-emoji") || "";
     const span = document.createElement("span");
     span.className = `${img.className} mw-emoji-fallback`;
-    span.textContent = emoji;
+    // A custom SVG data URI has no plain-glyph equivalent — falling back
+    // to its raw text would dump several KB of markup onto the page, so
+    // it gets a generic placeholder instead. Everything else (real
+    // Unicode emoji) still falls back to the plain character as before.
+    span.textContent = mwIsCustomSvgSymbol(emoji) ? "🏰" : emoji;
     img.replaceWith(span);
   };
 
@@ -1863,7 +1941,13 @@
     // so the tab strip doesn't jump around under the user's cursor while
     // they're browsing it — it only picks up newly-recorded picks the
     // NEXT time the picker is opened.
-    const groups = symbolGroupsForPicker();
+    // `let`, not `const` — normally snapshotted for the life of the
+    // popover (see comment above) so the tab strip doesn't reflow under
+    // the cursor during ordinary picks, but an explicit ★/✖ action below
+    // rebuilds it on the spot so the Favorites/Recent tab you're looking
+    // at actually reflects the change you just made instead of waiting
+    // for the next time the picker opens.
+    let groups = symbolGroupsForPicker();
     let activeKey = groups[0].key;
 
     function renderTabs() {
@@ -1883,14 +1967,29 @@
       });
     }
 
-    function iconButtonHtml(item) {
+    // `removeCtx`, when set, is which live list the ✖ badge removes this
+    // item from ("recent" or "favorites") — only shown on those two tabs,
+    // since every other tab is a fixed library, not an editable list. The
+    // ★ favorite-toggle badge is shown everywhere so a symbol can be
+    // favorited (or unfavorited) from any tab, including search results.
+    function iconButtonHtml(item, removeCtx) {
       const active = item.s === currentSymbol ? " active" : "";
-      return `<button type="button" class="mw-symbol-btn${active}" data-symbol="${escapeHtml(item.s)}" title="${escapeHtml(item.n || item.s)}">${mwEmojiImgHtml(item.s, "mw-symbol-btn-img")}</button>`;
+      const fav = isFavoriteSymbol(item.s);
+      const label = escapeHtml(item.n || symbolLabelFor(item.s));
+      const removeBtn = removeCtx
+        ? `<button type="button" class="mw-symbol-remove-btn" data-remove-ctx="${removeCtx}" data-symbol="${escapeHtml(item.s)}" title="${removeCtx === "favorites" ? "Remove from favorites" : "Remove from recent"}" aria-label="Remove">✖</button>`
+        : "";
+      return `<span class="mw-symbol-cell">
+        <button type="button" class="mw-symbol-btn${active}" data-symbol="${escapeHtml(item.s)}" title="${label}">${mwEmojiImgHtml(item.s, "mw-symbol-btn-img")}</button>
+        <button type="button" class="mw-symbol-fav-btn${fav ? " active" : ""}" data-symbol="${escapeHtml(item.s)}" title="${fav ? "Remove from favorites" : "Add to favorites"}" aria-label="${fav ? "Remove from favorites" : "Add to favorites"}">${fav ? "★" : "☆"}</button>
+        ${removeBtn}
+      </span>`;
     }
 
     function renderBody() {
       const query = searchInput.value.trim().toLowerCase();
       let items, footNote = "";
+      let removeCtx = null;
       if (query) {
         const matches = SYMBOL_SEARCH_INDEX.filter(
           (it) => it.n.toLowerCase().includes(query) || it.s === query
@@ -1902,18 +2001,43 @@
             : matches.length > SYMBOL_RENDER_CAP
               ? `<div class="mw-symbol-count">Showing ${SYMBOL_RENDER_CAP} of ${matches.length} matches — keep typing to narrow it down</div>`
               : `<div class="mw-symbol-count">${matches.length} match${matches.length === 1 ? "" : "es"}</div>`;
-        bodyEl.innerHTML = `<div class="mw-symbol-grid">${items.map(iconButtonHtml).join("")}</div>${footNote}`;
       } else {
         const group = groups.find((g) => g.key === activeKey) || groups[0];
+        if (group.key === "recent" || group.key === "favorites") removeCtx = group.key;
         items = group.symbols.slice(0, SYMBOL_RENDER_CAP);
         footNote =
           group.symbols.length > SYMBOL_RENDER_CAP
             ? `<div class="mw-symbol-count">Showing ${SYMBOL_RENDER_CAP} of ${group.symbols.length} in this category — search by name to find more</div>`
-            : "";
-        bodyEl.innerHTML = `<div class="mw-symbol-grid">${items.map(iconButtonHtml).join("")}</div>${footNote}`;
+            : group.symbols.length === 0 && group.key === "favorites"
+              ? `<div class="mw-symbol-empty">No favorites yet — tap ☆ on any symbol to add it here.</div>`
+              : group.symbols.length === 0 && group.key === "recent"
+                ? `<div class="mw-symbol-empty">Symbols you pick will show up here.</div>`
+                : "";
       }
+      bodyEl.innerHTML = `<div class="mw-symbol-grid">${items.map((it) => iconButtonHtml(it, removeCtx)).join("")}</div>${footNote}`;
       bodyEl.querySelectorAll(".mw-symbol-btn").forEach((btn) => {
         btn.addEventListener("click", () => pick(btn.dataset.symbol));
+      });
+      function refreshAfterListEdit() {
+        groups = symbolGroupsForPicker();
+        if (!groups.find((g) => g.key === activeKey)) activeKey = groups[0].key;
+        renderTabs();
+        renderBody();
+      }
+      bodyEl.querySelectorAll(".mw-symbol-fav-btn").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          toggleFavoriteSymbol(btn.dataset.symbol);
+          refreshAfterListEdit();
+        });
+      });
+      bodyEl.querySelectorAll(".mw-symbol-remove-btn").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (btn.dataset.removeCtx === "favorites") removeFavoriteSymbol(btn.dataset.symbol);
+          else removeRecentSymbol(btn.dataset.symbol);
+          refreshAfterListEdit();
+        });
       });
     }
 
@@ -2463,6 +2587,11 @@
     symbolsPanel?.classList.add("hidden");
     pathsPanel?.classList.toggle("hidden");
     refreshDraftColorSwatch();
+    // #vocab-map-window scrolls internally (capped height); without
+    // resetting scroll here, switching panels from deep within a long
+    // Settings scroll leaves the newly-shown panel scrolled out of view
+    // above the fold — can look like only the bare map is showing.
+    win.scrollTop = 0;
   });
 
   drawPathBtn?.addEventListener("click", () => {
@@ -2509,7 +2638,14 @@
     pendingPlaceSymbol = symbol;
     viewport?.classList.add("mw-placing-symbol");
     if (symbolHintEl) {
-      symbolHintEl.textContent = `Click anywhere on the map to pin ${symbol} there (Esc to cancel).`;
+      // Never interpolate the raw symbol value into the hint text — for
+      // custom hand-authored artwork (ASOIAF structures etc.) `symbol` is
+      // a full data:image/svg+xml;... URI hundreds of characters long,
+      // and dumping that into a text node blows up the panel. Show a
+      // small rendered icon plus its friendly name instead, falling back
+      // to a generic phrase if no name is known for it.
+      const label = SYMBOL_NAME_BY_CHAR[symbol] || (mwIsCustomSvgSymbol(symbol) ? "this symbol" : symbol);
+      symbolHintEl.innerHTML = `Click anywhere on the map to pin ${mwEmojiImgHtml(symbol, "mw-symbol-hint-img")} ${escapeHtml(label)} there (Esc to cancel).`;
       symbolHintEl.classList.remove("hidden");
     }
   }
@@ -3088,6 +3224,10 @@
     optionsPanel?.classList.add("hidden");
     pathsPanel?.classList.add("hidden");
     symbolsPanel?.classList.toggle("hidden");
+    // See the matching comment on pathsBtn's handler above — without this,
+    // switching here from deep within a scrolled Settings panel leaves the
+    // symbols panel scrolled out of view (only the map below it shows).
+    win.scrollTop = 0;
   });
 
   placeSymbolBtn?.addEventListener("click", () => {
@@ -4363,6 +4503,10 @@
     symbolsPanel?.classList.add("hidden");
     optionsPanel?.classList.toggle("hidden");
     updateExportDriveVisibility();
+    // Same fix as the paths/symbols buttons — reopening Settings after
+    // leaving it scrolled deep should land back at the top, not wherever
+    // the scroll happened to be.
+    win.scrollTop = 0;
   });
 
   /* ----------------------------------------------------------------------
