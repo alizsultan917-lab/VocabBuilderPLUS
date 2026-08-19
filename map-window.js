@@ -270,10 +270,20 @@
   // it's what lets a name be shrunk down to near-nothing (or hidden
   // outright via labelHidden) while the icon itself stays full size, for
   // labels that only exist so the map search can find the thing by name.
-  const LABEL_SCALE_MIN = 0.1;
+  // Min goes all the way down to 0.001 (0.1%) — the leftmost tick on the
+  // slider — for names that need to be effectively invisible on the map
+  // while staying searchable.
+  const LABEL_SCALE_MIN = 0.001;
   const LABEL_SCALE_MAX = 3.0;
   const LABEL_SCALE_STEP = 0.05;
   const LABEL_SCALE_DEFAULT = 1.0;
+  // Formats a label-scale multiplier as a percent string. Below 10% we
+  // show one decimal place (e.g. "0.1%") since Math.round alone would
+  // collapse every value under 1% down to a meaningless "0%".
+  function fmtLabelScalePercent(v) {
+    const pct = v * 100;
+    return pct < 10 ? `${pct.toFixed(1)}%` : `${Math.round(pct)}%`;
+  }
   const WHEEL_ZOOM_SENSITIVITY = 0.0016; // multiplied against -deltaY
   const SVG_NS = "http://www.w3.org/2000/svg";
   const PATH_COLORS = ["#e63946", "#2f78bd", "#2a9d8f", "#f4a261", "#8e44ad", "#e07a5f", "#588157", "#c9184a"];
@@ -2570,10 +2580,12 @@
       .map(
         (path) => `
       <li class="mw-path-row${path.id === selectedPathId ? " active" : ""}${path.id === editingPathId ? " mw-path-row-editing" : ""}${path.visible === false ? " mw-path-row-hidden" : ""}" data-path-id="${escapeHtml(path.id)}">
-        <button type="button" class="mw-path-swatch" style="background:${escapeHtml(path.color)}" title="Path colour" aria-label="Path colour"></button>
-        <input type="text" class="mw-path-name-input" value="${escapeHtml(path.label)}" maxlength="40" title="Path name">
-        <div class="mw-path-row-actions">
+        <div class="mw-path-row-top">
+          <button type="button" class="mw-path-swatch" style="background:${escapeHtml(path.color)}" title="Path colour" aria-label="Path colour"></button>
+          <input type="text" class="mw-path-name-input" value="${escapeHtml(path.label)}" maxlength="40" placeholder="Path name" title="Path name">
           <button type="button" class="icon-btn mw-path-edit-btn${path.id === editingPathId ? " active" : ""}" title="${path.id === editingPathId ? "Done editing (locks the path again)" : "Unlock to drag points, insert points, or pin symbols"}">${path.id === editingPathId ? "🔓 Editing" : "🔒 Edit"}</button>
+        </div>
+        <div class="mw-path-row-actions">
           <button type="button" class="icon-btn mw-path-arrow-btn${path.showArrow === false ? " off" : ""}" title="${path.showArrow === false ? "Show direction arrow" : "Hide direction arrow"}">➤</button>
           <button type="button" class="icon-btn mw-path-visibility-btn" title="${path.visible === false ? "Show path" : "Hide path"}">${path.visible === false ? "🙈" : "👁️"}</button>
           <button type="button" class="icon-btn mw-path-label-visibility-btn" title="${path.labelHidden === false ? "Hide this name on the map (still searchable by name)" : "Show this name on the map"}">${path.labelHidden === false ? "👁️" : "🙈"}</button>
@@ -2582,8 +2594,8 @@
         </div>
         <div class="mw-symbol-size-control mw-path-label-size-control">
           <span class="mw-symbol-size-icon" title="Name label size">🏷️</span>
-          <input type="range" class="mw-path-label-size-slider" min="${LABEL_SCALE_MIN}" max="${LABEL_SCALE_MAX}" step="${LABEL_SCALE_STEP}" value="${path.labelScale ?? LABEL_SCALE_DEFAULT}" title="On-map name size — drag all the way down to make it barely visible">
-          <span class="mw-path-label-size-value">${Math.round((path.labelScale ?? LABEL_SCALE_DEFAULT) * 100)}%</span>
+          <input type="range" class="mw-path-label-size-slider" min="${LABEL_SCALE_MIN}" max="${LABEL_SCALE_MAX}" step="${LABEL_SCALE_STEP}" value="${path.labelScale ?? LABEL_SCALE_DEFAULT}" title="On-map name size — drag all the way down to make it barely visible (down to 0.1%)">
+          <span class="mw-path-label-size-value">${fmtLabelScalePercent(path.labelScale ?? LABEL_SCALE_DEFAULT)}</span>
         </div>
       </li>`
       )
@@ -2647,7 +2659,7 @@
       pathLabelSizeSlider?.addEventListener("input", (e) => {
         const val = Math.min(LABEL_SCALE_MAX, Math.max(LABEL_SCALE_MIN, parseFloat(e.target.value) || LABEL_SCALE_DEFAULT));
         path.labelScale = val;
-        if (pathLabelSizeValueEl) pathLabelSizeValueEl.textContent = `${Math.round(val * 100)}%`;
+        if (pathLabelSizeValueEl) pathLabelSizeValueEl.textContent = fmtLabelScalePercent(val);
         savePaths();
         renderPaths(); // path labels are SVG text/rect pairs sized by attribute, so a full repaint is needed (unlike the symbol label's plain CSS font-size)
       });
@@ -2819,23 +2831,25 @@
       .map(
         (marker) => `
       <li class="mw-path-row mw-symbol-row${marker.id === editingSymbolId ? " mw-path-row-editing" : ""}" data-symbol-marker-id="${escapeHtml(marker.id)}">
-        <button type="button" class="mw-symbol-swatch" title="Change symbol" aria-label="Change symbol">${mwEmojiImgHtml(marker.symbol, "mw-symbol-swatch-img")}</button>
-        <input type="text" class="mw-path-name-input" value="${escapeHtml(marker.label || "")}" maxlength="40" placeholder="Label (optional)" title="Symbol label">
-        <div class="mw-path-row-actions">
+        <div class="mw-path-row-top">
+          <button type="button" class="mw-symbol-swatch" title="Change symbol" aria-label="Change symbol">${mwEmojiImgHtml(marker.symbol, "mw-symbol-swatch-img")}</button>
+          <input type="text" class="mw-path-name-input" value="${escapeHtml(marker.label || "")}" maxlength="40" placeholder="Label (optional)" title="Symbol label">
           <button type="button" class="icon-btn mw-path-edit-btn${marker.id === editingSymbolId ? " active" : ""}" title="${marker.id === editingSymbolId ? "Done editing (locks it in place)" : "Unlock to drag or change this symbol"}">${marker.id === editingSymbolId ? "🔓 Editing" : "🔒 Edit"}</button>
+        </div>
+        <div class="mw-path-row-actions">
           <button type="button" class="icon-btn mw-symbol-label-visibility-btn" title="${marker.labelHidden ? "Show this label on the map" : "Hide this label on the map (still searchable by name)"}">${marker.labelHidden ? "🙈" : "👁️"}</button>
           <button type="button" class="icon-btn mw-symbol-focus-btn" title="Center on this symbol">🎯</button>
           <button type="button" class="icon-btn mw-symbol-delete-btn" title="Delete symbol">🗑️</button>
         </div>
         <div class="mw-symbol-size-control">
-          <span class="mw-symbol-size-icon">🔎</span>
+          <span class="mw-symbol-size-icon" title="Icon size">🔎</span>
           <input type="range" class="mw-symbol-size-slider" min="${SYMBOL_SCALE_MIN}" max="${SYMBOL_SCALE_MAX}" step="${SYMBOL_SCALE_STEP}" value="${marker.scale || SYMBOL_SCALE_DEFAULT}" title="Symbol size — drag to make it as small or as big as you want">
           <span class="mw-symbol-size-value">${Math.round((marker.scale || SYMBOL_SCALE_DEFAULT) * 100)}%</span>
         </div>
         <div class="mw-symbol-size-control mw-symbol-label-size-control">
           <span class="mw-symbol-size-icon" title="Label size">🏷️</span>
-          <input type="range" class="mw-symbol-label-size-slider" min="${LABEL_SCALE_MIN}" max="${LABEL_SCALE_MAX}" step="${LABEL_SCALE_STEP}" value="${marker.labelScale ?? LABEL_SCALE_DEFAULT}" title="Label size — independent of the icon size above; drag all the way down to make the name nearly invisible">
-          <span class="mw-symbol-label-size-value">${Math.round((marker.labelScale ?? LABEL_SCALE_DEFAULT) * 100)}%</span>
+          <input type="range" class="mw-symbol-label-size-slider" min="${LABEL_SCALE_MIN}" max="${LABEL_SCALE_MAX}" step="${LABEL_SCALE_STEP}" value="${marker.labelScale ?? LABEL_SCALE_DEFAULT}" title="Label size — independent of the icon size above; drag all the way down to make the name nearly invisible (down to 0.1%)">
+          <span class="mw-symbol-label-size-value">${fmtLabelScalePercent(marker.labelScale ?? LABEL_SCALE_DEFAULT)}</span>
         </div>
       </li>`
       )
@@ -2919,7 +2933,7 @@
       labelSizeSlider?.addEventListener("input", (e) => {
         const val = Math.min(LABEL_SCALE_MAX, Math.max(LABEL_SCALE_MIN, parseFloat(e.target.value) || LABEL_SCALE_DEFAULT));
         marker.labelScale = val;
-        if (labelSizeValueEl) labelSizeValueEl.textContent = `${Math.round(val * 100)}%`;
+        if (labelSizeValueEl) labelSizeValueEl.textContent = fmtLabelScalePercent(val);
         const labelEl = symbolsLayer?.querySelector(`[data-symbol-marker-id="${CSS.escape(marker.id)}"] .map-symbol-marker-label`);
         if (labelEl) labelEl.style.fontSize = `${(getLabelBaseFontPx() * val).toFixed(2)}px`;
         saveSymbols();
