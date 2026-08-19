@@ -4323,23 +4323,64 @@
      just those two files through the very same driveApiFetch() calls
      used everywhere else on this page.
   ---------------------------------------------------------------------- */
+  let mwGapiScriptPromise = null;
+  // The <script> tag for apis.google.com/js/api.js in index.html loads with
+  // async/defer, so it can still be in flight — or not yet started — the
+  // moment someone clicks "Browse Drive Folder". Rather than fail on that
+  // race, wait for it: reuse the existing tag if it's there (attaching a
+  // load listener works whether it's still loading or about to start),
+  // otherwise inject one on demand.
+  function loadGapiScript() {
+    if (window.gapi) return Promise.resolve();
+    if (mwGapiScriptPromise) return mwGapiScriptPromise;
+    mwGapiScriptPromise = new Promise((resolve, reject) => {
+      if (window.gapi) {
+        resolve();
+        return;
+      }
+      let script = document.querySelector('script[src="https://apis.google.com/js/api.js"]');
+      if (!script) {
+        script = document.createElement("script");
+        script.src = "https://apis.google.com/js/api.js";
+        document.head.appendChild(script);
+      }
+      script.addEventListener("load", () => resolve(), { once: true });
+      script.addEventListener(
+        "error",
+        () => reject(new Error("Couldn't load Google's API script — check your internet connection.")),
+        { once: true }
+      );
+      // Belt-and-suspenders in case neither event ever fires (e.g. the tag
+      // already finished loading before this listener attached).
+      setTimeout(() => {
+        if (window.gapi) resolve();
+        else reject(new Error("Timed out waiting for Google's API script to load — check your internet connection and try again."));
+      }, 15000);
+    }).catch((err) => {
+      mwGapiScriptPromise = null; // let a retry try again
+      throw err;
+    });
+    return mwGapiScriptPromise;
+  }
+
   let mwPickerApiPromise = null;
   function loadDrivePickerApi() {
     if (window.google?.picker) return Promise.resolve();
     if (mwPickerApiPromise) return mwPickerApiPromise;
-    mwPickerApiPromise = new Promise((resolve, reject) => {
-      if (!window.gapi) {
-        reject(new Error("Google's API loader hasn't finished loading yet — wait a moment and try again."));
-        return;
-      }
-      gapi.load("picker", {
-        callback: () => resolve(),
-        onerror: () => reject(new Error("Couldn't load Google Picker.")),
+    mwPickerApiPromise = loadGapiScript()
+      .then(
+        () =>
+          new Promise((resolve, reject) => {
+            gapi.load("picker", {
+              callback: () => resolve(),
+              onerror: () => reject(new Error("Couldn't load Google Picker.")),
+            });
+          })
+      )
+      .catch((err) => {
+        mwPickerApiPromise = null; // let a retry try loading again
+        throw err;
       });
-    }).catch((err) => {
-      mwPickerApiPromise = null; // let a retry try loading again
-      throw err;
-    });
     return mwPickerApiPromise;
   }
 
@@ -4407,7 +4448,7 @@
       showImportStatus("Connect Google Drive first (Storage settings, above the vocabulary table) to browse it.");
       return;
     }
-    showImportStatus("Opening Google Drive…");
+    showImportStatus("Opening Google Drive… (loading Google's file picker — may take a moment)");
     loadDrivePickerApi()
       .then(() => {
         const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
