@@ -743,7 +743,19 @@ async function writeEntriesToDisk(list) {
    file that might get synced, backed up, or shared elsewhere.
    ------------------------------------------------------------------- */
 const SETTINGS_KEY_PREFIXES = ["litVocab", "vocabRegister_"];
-const SETTINGS_EXCLUDED_KEYS = new Set([STORAGE_KEY, AI_SETTINGS_KEY_STORAGE]);
+// DRIVE_FILE_ID_STORAGE / DRIVE_SETTINGS_FILE_ID_STORAGE are internal
+// bookkeeping (which Drive file we've already created), not a user-facing
+// setting. They must stay excluded: writing them through localStorage.setItem
+// would otherwise re-trigger scheduleSettingsBackup()/scheduleDriveSettingsBackup()
+// every time a Drive write finishes, causing an endless chain of backups
+// (each write re-caches its ID -> which schedules another write -> ...),
+// and would also bake a stale file ID into the settings snapshot itself.
+const SETTINGS_EXCLUDED_KEYS = new Set([
+  STORAGE_KEY,
+  AI_SETTINGS_KEY_STORAGE,
+  DRIVE_FILE_ID_STORAGE,
+  DRIVE_SETTINGS_FILE_ID_STORAGE,
+]);
 
 function isBackedUpSettingsKey(key) {
   if (!key || SETTINGS_EXCLUDED_KEYS.has(key)) return false;
@@ -1703,14 +1715,26 @@ function driveApiFetch(url, options = {}) {
   });
 }
 
+// Self-healing: if past races (concurrent tabs, the write loop fixed
+// above, etc.) already left more than one file with this name in Drive,
+// keep the oldest as canonical and delete the rest so the duplicates
+// don't just sit there piling up forever.
 async function findDriveFileId() {
   const q = encodeURIComponent(`name = '${ENTRIES_FILE_NAME}' and trashed = false`);
   const res = await driveApiFetch(
-    `https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&fields=files(id,name)`
+    `https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&fields=files(id,name,createdTime)&orderBy=createdTime`
   );
   if (!res.ok) throw new Error(`Drive search failed (${res.status})`);
   const data = await res.json();
-  return data.files && data.files.length ? data.files[0].id : null;
+  const files = data.files || [];
+  if (!files.length) return null;
+  const [keep, ...extras] = files;
+  extras.forEach((f) => {
+    driveApiFetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, { method: "DELETE" }).catch((err) =>
+      console.warn("Couldn't remove a duplicate Drive entries file:", err)
+    );
+  });
+  return keep.id;
 }
 
 async function createDriveFile(list) {
@@ -1753,7 +1777,25 @@ async function readEntriesFromDrive() {
   return text.trim() ? JSON.parse(text) : [];
 }
 
+// In-flight guard: if a write is already running when another one is
+// requested (e.g. the debounced auto-save fires while an explicit "Sync
+// Now" write is still in progress), the second caller awaits the same
+// promise instead of racing it — both would otherwise see driveFileId
+// still unset and each create their own Drive file.
+let driveWriteInFlight = null;
 async function driveWriteAttempt(list) {
+  if (driveWriteInFlight) {
+    await driveWriteInFlight.catch(() => {}); // let the prior attempt settle either way
+  }
+  driveWriteInFlight = driveWriteAttemptInner(list);
+  try {
+    await driveWriteInFlight;
+  } finally {
+    driveWriteInFlight = null;
+  }
+}
+
+async function driveWriteAttemptInner(list) {
   if (!driveFileId) driveFileId = await findDriveFileId();
   if (!driveFileId) {
     driveFileId = await createDriveFile(list);
@@ -1817,14 +1859,23 @@ async function writeEntriesToDrive(list) {
 /* ----- Drive settings backup — same shape as the entries functions
    above, but for a second, separate JSON file so a settings write can
    never clobber the entries file or vice versa. ----- */
+// Same self-healing dedupe as findDriveFileId above.
 async function findDriveSettingsFileId() {
   const q = encodeURIComponent(`name = '${DRIVE_SETTINGS_FILE_NAME}' and trashed = false`);
   const res = await driveApiFetch(
-    `https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&fields=files(id,name)`
+    `https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&fields=files(id,name,createdTime)&orderBy=createdTime`
   );
   if (!res.ok) throw new Error(`Drive search failed (${res.status})`);
   const data = await res.json();
-  return data.files && data.files.length ? data.files[0].id : null;
+  const files = data.files || [];
+  if (!files.length) return null;
+  const [keep, ...extras] = files;
+  extras.forEach((f) => {
+    driveApiFetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, { method: "DELETE" }).catch((err) =>
+      console.warn("Couldn't remove a duplicate Drive settings file:", err)
+    );
+  });
+  return keep.id;
 }
 
 async function createDriveSettingsFile(snapshot) {
@@ -1860,7 +1911,21 @@ async function readSettingsFromDrive() {
   return text.trim() ? JSON.parse(text) : null;
 }
 
+// Same in-flight guard as driveWriteAttempt above, for the settings file.
+let driveSettingsWriteInFlight = null;
 async function driveSettingsWriteAttempt(snapshot) {
+  if (driveSettingsWriteInFlight) {
+    await driveSettingsWriteInFlight.catch(() => {});
+  }
+  driveSettingsWriteInFlight = driveSettingsWriteAttemptInner(snapshot);
+  try {
+    await driveSettingsWriteInFlight;
+  } finally {
+    driveSettingsWriteInFlight = null;
+  }
+}
+
+async function driveSettingsWriteAttemptInner(snapshot) {
   if (!driveSettingsFileId) driveSettingsFileId = await findDriveSettingsFileId();
   if (!driveSettingsFileId) {
     driveSettingsFileId = await createDriveSettingsFile(snapshot);
