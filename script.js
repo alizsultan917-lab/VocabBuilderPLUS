@@ -466,7 +466,12 @@ const exportJsonBtn = document.getElementById("export-json-btn");
 const exportPdfBtn = document.getElementById("export-pdf-btn");
 const importBtn = document.getElementById("import-btn");
 const importFileInput = document.getElementById("import-file-input");
+const importDriveBtn = document.getElementById("import-drive-btn");
 const deleteAllBtn = document.getElementById("delete-all-btn");
+const driveImportModal = document.getElementById("drive-import-modal");
+const driveImportList = document.getElementById("drive-import-list");
+const driveImportRefreshBtn = document.getElementById("drive-import-refresh-btn");
+const driveImportCancelBtn = document.getElementById("drive-import-cancel-btn");
 
 const storageStatus = document.getElementById("storage-status");
 const storageToggleBtn = document.getElementById("storage-toggle-btn");
@@ -2436,6 +2441,7 @@ function updateCloudStatusUI() {
 
   exportDriveCheckWrap.classList.toggle("hidden", !usingCloudStorage);
   if (!usingCloudStorage) exportDriveCheckbox.checked = false;
+  importDriveBtn.classList.toggle("hidden", !usingCloudStorage);
 
   // Sync direction is a standing preference the person can set up front
   // (before ever connecting Drive), so this row always stays visible —
@@ -9675,6 +9681,91 @@ deleteAllBtn.addEventListener("click", () => {
 
 importBtn.addEventListener("click", () => importFileInput.click());
 
+// Shared by both import sources (local file picker and Google Drive
+// import): parses one of this app's export shapes and merges it into
+// `entries`, skipping anything already present. Throws on a JSON shape
+// it doesn't recognize; returns the count of newly-added entries
+// otherwise. Doesn't touch importFileInput — callers that use it reset
+// it themselves.
+function mergeImportedJson(parsed) {
+  // Current export shape is a nested books → pages → words tree;
+  // flatten it back into one raw-entry-per-word list. Older flat
+  // exports (an `entries` array) are still accepted for compatibility.
+  let incoming = [];
+  if (Array.isArray(parsed?.books)) {
+    parsed.books.forEach((book) => {
+      (book.pages || []).forEach((page) => {
+        (page.words || []).forEach((w) => {
+          incoming.push({
+            word: w.word,
+            bookTitle: book.bookTitle,
+            pageStart: page.pageStart,
+            pageEnd: page.pageEnd,
+            definitions: w.definitions,
+            phonetics: w.phonetics,
+            images: w.images,
+          });
+        });
+      });
+    });
+  } else if (Array.isArray(parsed?.entries)) {
+    incoming = parsed.entries;
+  }
+
+  if (incoming.length === 0) {
+    throw new Error("no-entries");
+  }
+
+  const existingKeys = new Set(entries.map((e) => `${e.word}|${e.bookTitle}|${e.pageStart}-${e.pageEnd}`));
+  let added = 0;
+
+  incoming.forEach((raw) => {
+    // Accept both the current range shape and legacy single-page exports.
+    const pageStart = typeof raw.pageStart === "number" ? raw.pageStart : raw.pageNo;
+    const pageEnd = typeof raw.pageEnd === "number" ? raw.pageEnd : raw.pageEnd === null ? null : raw.pageNo;
+    if (typeof pageStart !== "number" || (typeof pageEnd !== "number" && pageEnd !== null)) return;
+
+    const key = `${raw.word}|${raw.bookTitle}|${pageStart}-${pageEnd}`;
+    if (existingKeys.has(key)) return; // skip duplicates
+    existingKeys.add(key);
+
+    const importedDefinitions = (raw.definitions || []).map((d) => ({
+      id: generateId(),
+      text: d.text,
+      source: d.source || "manual",
+    }));
+    const importedImages = (raw.images || [])
+      .map((url) => ({ id: generateId(), url: sanitizeImageUrl(url), source: "manual" }))
+      .filter((img) => img.url); // drop any image whose URL didn't pass sanitization
+
+    entries.push({
+      id: generateId(),
+      word: raw.word,
+      bookTitle: raw.bookTitle,
+      pageStart,
+      pageEnd,
+      timestamp: Date.now(),
+      // Assigned in the order entries appear in the file, so relative
+      // "first entered" order from the source export is preserved.
+      seq: nextSeq++,
+      systemDefinitions: importedDefinitions.filter((d) => bucketOf(d.source) === "system"),
+      aiDefinitions: importedDefinitions.filter((d) => bucketOf(d.source) === "ai"),
+      manualDefinitions: importedDefinitions.filter((d) => bucketOf(d.source) === "manual"),
+      systemImages: importedImages.filter((img) => bucketOf(img.source) === "system"),
+      aiImages: importedImages.filter((img) => bucketOf(img.source) === "ai"),
+      manualImages: importedImages.filter((img) => bucketOf(img.source) === "manual"),
+      phonetics: raw.phonetics || { us: null, uk: null },
+    });
+    added++;
+  });
+
+  saveEntries();
+  refreshBookFilterOptions();
+  refreshBookDatalist();
+  renderTable();
+  return added;
+}
+
 importFileInput.addEventListener("change", () => {
   const file = importFileInput.files?.[0];
   if (!file) return;
@@ -9683,92 +9774,156 @@ importFileInput.addEventListener("change", () => {
   reader.onload = () => {
     try {
       const parsed = JSON.parse(reader.result);
-
-      // Current export shape is a nested books → pages → words tree;
-      // flatten it back into one raw-entry-per-word list. Older flat
-      // exports (an `entries` array) are still accepted for compatibility.
-      let incoming = [];
-      if (Array.isArray(parsed?.books)) {
-        parsed.books.forEach((book) => {
-          (book.pages || []).forEach((page) => {
-            (page.words || []).forEach((w) => {
-              incoming.push({
-                word: w.word,
-                bookTitle: book.bookTitle,
-                pageStart: page.pageStart,
-                pageEnd: page.pageEnd,
-                definitions: w.definitions,
-                phonetics: w.phonetics,
-                images: w.images,
-              });
-            });
-          });
-        });
-      } else if (Array.isArray(parsed?.entries)) {
-        incoming = parsed.entries;
-      }
-
-      if (incoming.length === 0) {
-        alert("This file doesn't contain any recognizable entries.");
-        return;
-      }
-
-      const existingKeys = new Set(entries.map((e) => `${e.word}|${e.bookTitle}|${e.pageStart}-${e.pageEnd}`));
-      let added = 0;
-
-      incoming.forEach((raw) => {
-        // Accept both the current range shape and legacy single-page exports.
-        const pageStart = typeof raw.pageStart === "number" ? raw.pageStart : raw.pageNo;
-        const pageEnd = typeof raw.pageEnd === "number" ? raw.pageEnd : raw.pageEnd === null ? null : raw.pageNo;
-        if (typeof pageStart !== "number" || (typeof pageEnd !== "number" && pageEnd !== null)) return;
-
-        const key = `${raw.word}|${raw.bookTitle}|${pageStart}-${pageEnd}`;
-        if (existingKeys.has(key)) return; // skip duplicates
-        existingKeys.add(key);
-
-        const importedDefinitions = (raw.definitions || []).map((d) => ({
-          id: generateId(),
-          text: d.text,
-          source: d.source || "manual",
-        }));
-        const importedImages = (raw.images || [])
-          .map((url) => ({ id: generateId(), url: sanitizeImageUrl(url), source: "manual" }))
-          .filter((img) => img.url); // drop any image whose URL didn't pass sanitization
-
-        entries.push({
-          id: generateId(),
-          word: raw.word,
-          bookTitle: raw.bookTitle,
-          pageStart,
-          pageEnd,
-          timestamp: Date.now(),
-          // Assigned in the order entries appear in the file, so relative
-          // "first entered" order from the source export is preserved.
-          seq: nextSeq++,
-          systemDefinitions: importedDefinitions.filter((d) => bucketOf(d.source) === "system"),
-          aiDefinitions: importedDefinitions.filter((d) => bucketOf(d.source) === "ai"),
-          manualDefinitions: importedDefinitions.filter((d) => bucketOf(d.source) === "manual"),
-          systemImages: importedImages.filter((img) => bucketOf(img.source) === "system"),
-          aiImages: importedImages.filter((img) => bucketOf(img.source) === "ai"),
-          manualImages: importedImages.filter((img) => bucketOf(img.source) === "manual"),
-          phonetics: raw.phonetics || { us: null, uk: null },
-        });
-        added++;
-      });
-
-      saveEntries();
-      refreshBookFilterOptions();
-      refreshBookDatalist();
-      renderTable();
+      const added = mergeImportedJson(parsed);
       alert(`Imported ${added} new ${added === 1 ? "entry" : "entries"} (duplicates were skipped).`);
     } catch (err) {
-      console.error("Import failed:", err);
-      alert("Couldn't read that file — please make sure it's a JSON export from this app.");
+      if (err.message === "no-entries") {
+        alert("This file doesn't contain any recognizable entries.");
+      } else {
+        console.error("Import failed:", err);
+        alert("Couldn't read that file — please make sure it's a JSON export from this app.");
+      }
     } finally {
       importFileInput.value = "";
     }
   };
   reader.readAsText(file);
+});
+
+/* ----- Import from Google Drive -----
+   Lists JSON files this app can see on Drive — under the drive.file
+   scope that's only ever files the app itself created (its own live
+   entries/settings backups, plus anything saved via the "Save to
+   Drive" export checkbox) — and lets the person pick one to merge in,
+   using the same mergeImportedJson() logic as a local file. ----- */
+
+// Runs fn(); if it fails on what looks like a dead access token, refreshes
+// the token once and retries fn() a single time before giving up for real.
+// Shared with applySyncDirection's drive-wins pull, above.
+async function withDriveAuthRetry(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    const looksLikeAuthFailure = /\b401\b/.test(err.message || "") || /^invalid_grant$/.test(err.message || "");
+    if (!looksLikeAuthFailure) throw err;
+    await requestDriveToken(false);
+    scheduleDriveTokenRefresh();
+    return await fn();
+  }
+}
+
+async function listDriveImportableFiles() {
+  return withDriveAuthRetry(async () => {
+    const q = encodeURIComponent("mimeType = 'application/json' and trashed = false");
+    const res = await driveApiFetch(
+      `https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime desc&pageSize=100`
+    );
+    if (!res.ok) throw new Error(`Drive file list failed (${res.status})`);
+    const data = await res.json();
+    return data.files || [];
+  });
+}
+
+async function readDriveFileText(fileId) {
+  return withDriveAuthRetry(async () => {
+    const res = await driveApiFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+    if (!res.ok) throw new Error(`Drive file read failed (${res.status})`);
+    return res.text();
+  });
+}
+
+function fmtDriveFileSize(bytes) {
+  const b = Number(bytes);
+  if (!b) return "";
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function fmtDriveFileDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString();
+}
+
+function openDriveImportModal() {
+  if (!usingCloudStorage) {
+    alert("Connect Google Drive first, then you can import a JSON file from it.");
+    return;
+  }
+  driveImportModal.classList.remove("hidden");
+  refreshDriveImportList();
+}
+
+function closeDriveImportModal() {
+  driveImportModal.classList.add("hidden");
+}
+
+async function refreshDriveImportList() {
+  driveImportList.innerHTML = `<p class="drive-import-status">Loading files from Google Drive…</p>`;
+  try {
+    const files = await listDriveImportableFiles();
+    if (files.length === 0) {
+      driveImportList.innerHTML =
+        `<p class="drive-import-status">No JSON files found. This only lists files this app itself ` +
+        `created in your Drive (its own backups, plus anything saved via "Save to Drive" when ` +
+        `exporting) — the app can't see the rest of your Drive.</p>`;
+      return;
+    }
+    driveImportList.innerHTML = "";
+    files.forEach((f) => {
+      const isInternal = f.name === ENTRIES_FILE_NAME || f.name === DRIVE_SETTINGS_FILE_NAME;
+      const row = document.createElement("div");
+      row.className = "drive-import-row";
+      row.innerHTML = `
+        <div class="drive-import-row-info">
+          <span class="drive-import-row-name">${escapeHtml(f.name)}</span>
+          <span class="drive-import-row-meta">${escapeHtml(
+            [fmtDriveFileDate(f.modifiedTime), fmtDriveFileSize(f.size), isInternal ? "used for automatic sync" : null]
+              .filter(Boolean)
+              .join(" · ")
+          )}</span>
+        </div>
+        <button type="button" class="btn btn-secondary btn-small drive-import-row-btn">Import</button>
+      `;
+      row.querySelector(".drive-import-row-btn").addEventListener("click", () => importDriveFile(f));
+      driveImportList.appendChild(row);
+    });
+  } catch (err) {
+    console.error("Failed to list Drive files:", err);
+    driveImportList.innerHTML =
+      `<p class="drive-import-status">Couldn't load files from Google Drive (${escapeHtml(
+        err.message || "unknown error"
+      )}). Try Refresh, or reconnect Drive if this keeps happening.</p>`;
+  }
+}
+
+async function importDriveFile(file) {
+  try {
+    const text = await readDriveFileText(file.id);
+    const parsed = text.trim() ? JSON.parse(text) : null;
+    if (!parsed) throw new Error("no-entries");
+    const added = mergeImportedJson(parsed);
+    closeDriveImportModal();
+    alert(`Imported ${added} new ${added === 1 ? "entry" : "entries"} from "${file.name}" (duplicates were skipped).`);
+  } catch (err) {
+    if (err.message === "no-entries") {
+      alert(`"${file.name}" doesn't contain any recognizable entries.`);
+    } else {
+      console.error("Drive import failed:", err);
+      alert(`Couldn't import "${file.name}" — ${err.message || "unknown error"}.`);
+    }
+  }
+}
+
+importDriveBtn.addEventListener("click", openDriveImportModal);
+driveImportCancelBtn.addEventListener("click", closeDriveImportModal);
+driveImportRefreshBtn.addEventListener("click", refreshDriveImportList);
+driveImportModal.addEventListener("click", (e) => {
+  if (e.target === driveImportModal) closeDriveImportModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !driveImportModal.classList.contains("hidden")) closeDriveImportModal();
 });
 
 /* ---------------------------------------------------------------------

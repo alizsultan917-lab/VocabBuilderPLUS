@@ -829,6 +829,7 @@
       <button type="button" id="export-pdf-btn" class="btn btn-secondary btn-small">Export PDF</button>
       <button type="button" id="import-btn" class="btn btn-secondary btn-small">Import JSON</button>
       <input type="file" id="import-file-input" accept="application/json" class="hidden">
+      <button type="button" id="import-drive-btn" class="btn btn-secondary btn-small hidden" title="Import a JSON file this app has saved to your Google Drive">Import from Drive</button>
       <button type="button" id="delete-all-btn" class="btn btn-danger btn-small">Delete All</button>
       <span class="export-dest-group">
         <label class="export-dest-check" title="Download the file to this device">
@@ -963,6 +964,26 @@
     <div class="modal-actions">
       <button id="sync-direction-cancel-btn" class="btn btn-secondary" type="button">Cancel</button>
       <button id="sync-direction-confirm-btn" class="btn btn-danger" type="button" disabled>Confirm &amp; Overwrite</button>
+    </div>
+  </div>
+</div>
+
+<!-- IMPORT FROM GOOGLE DRIVE -->
+<div id="drive-import-modal" class="modal hidden">
+  <div class="modal-content">
+    <h3>Import from Google Drive</h3>
+    <p class="confirm-prompt-text">
+      Pick a JSON file to merge into your register (duplicates are skipped automatically).
+      This only lists files this app itself created in your Drive — its own backups, plus
+      anything you've saved there via the "Save to Drive" export option — since Drive access
+      here is limited to files the app created.
+    </p>
+    <div id="drive-import-list" class="drive-import-list">
+      <p class="drive-import-status">Loading files from Google Drive…</p>
+    </div>
+    <div class="modal-actions">
+      <button id="drive-import-cancel-btn" class="btn btn-secondary" type="button">Close</button>
+      <button id="drive-import-refresh-btn" class="btn btn-secondary" type="button">Refresh</button>
     </div>
   </div>
 </div>
