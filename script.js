@@ -802,6 +802,18 @@ async function tryRestoreFolderConnection() {
 // the old code happily overwrote the folder's real file with that empty
 // in-memory list. Now: disk is only ever overwritten when there's
 // nothing on disk to lose, or when the person explicitly confirms it.
+// Shared typed-confirmation gate for genuinely destructive, irreversible
+// actions (permanently erasing data from the register, the connected
+// folder, or Drive). A single OK/Cancel click is too easy to hit by
+// accident — this makes the person actually type the word before
+// anything is actually removed. Returns false (safe default) unless the
+// typed word matches exactly.
+function confirmDestructiveAction(message, word = "DELETE") {
+  if (!confirm(message)) return false;
+  const typed = prompt(`Type ${word} to confirm — this cannot be undone.`);
+  return typed === word;
+}
+
 async function resolveEntriesOnConnect(diskEntries) {
   const currentEntries = entries.slice();
 
@@ -829,7 +841,17 @@ async function resolveEntriesOnConnect(diskEntries) {
       `(recommended — this is usually the complete, safe copy).\n` +
       `Click Cancel to keep what's currently in the app instead and overwrite the folder with it.`
   );
-  return useDisk ? diskEntries : currentEntries;
+  if (useDisk) return diskEntries;
+
+  // Keeping the app's copy here means permanently overwriting the folder's
+  // differing data — that's exactly the kind of accidental data loss this
+  // whole flow exists to prevent, so it needs a typed confirmation. If it
+  // isn't given, fall back to the safe option (the folder's copy) instead
+  // of leaving things ambiguous.
+  const confirmed = confirmDestructiveAction(
+    `Keeping the app's current data will permanently erase the ${diskEntries.length} differing word${diskEntries.length === 1 ? "" : "s"} already saved in this folder.`
+  );
+  return confirmed ? currentEntries : diskEntries;
 }
 
 // After entries are resolved, also check for a settings backup (layout,
@@ -8344,7 +8366,12 @@ function prefillLastBookPage() {
 function deleteEntry(id) {
   const entry = entries.find((e) => e.id === id);
   if (!entry) return;
-  if (!confirm(`Delete "${entry.word}" from your register?`)) return;
+  if (
+    !confirmDestructiveAction(
+      `Delete "${entry.word}" from your register? This also removes it from your connected folder and/or Drive.`
+    )
+  )
+    return;
 
   entries = entries.filter((e) => e.id !== id);
   saveEntries();
