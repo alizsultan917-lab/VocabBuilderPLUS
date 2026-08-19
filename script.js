@@ -272,6 +272,7 @@ const AI_CONFIG = {
 // ~5-10MB browser quota. Only Chrome/Edge (desktop) support this API; other
 // browsers automatically keep using localStorage (see supportsFileSystemAccess).
 const ENTRIES_FILE_NAME = "vocabulary-entries.json";
+const SETTINGS_FILE_NAME = "app-settings-backup.json";
 const HANDLE_DB_NAME = "litVocabFSHandles";
 const HANDLE_DB_STORE = "handles";
 const HANDLE_DB_KEY = "vocabFolder";
@@ -690,6 +691,90 @@ async function writeEntriesToDisk(list) {
   }
 }
 
+/* -------------------------------------------------------------------
+   SETTINGS BACKUP TO DISK — survives clearing browser/site data.
+   -------------------------------------------------------------------
+   Everything in this app besides the vocab entries themselves (layout,
+   colors, fish tank prefs, panel sizes, etc.) lives only in localStorage
+   under keys prefixed "litVocab" or "vocabRegister_". Browser data
+   clears (or a "clear cookies and site data" action) wipe that clean,
+   which used to mean reconnecting a folder only brought entries back,
+   not customization. This mirrors those same keys into a JSON file
+   inside the connected folder, so restoring them is as simple as
+   reading a file back — no separate "settings folder" needed, they
+   ride along with the same folder already storing entries.
+
+   The AI API key is deliberately excluded: it's a credential, not a
+   display/layout preference, and shouldn't be written to a plaintext
+   file that might get synced, backed up, or shared elsewhere.
+   ------------------------------------------------------------------- */
+const SETTINGS_KEY_PREFIXES = ["litVocab", "vocabRegister_"];
+const SETTINGS_EXCLUDED_KEYS = new Set([STORAGE_KEY, AI_SETTINGS_KEY_STORAGE]);
+
+function isBackedUpSettingsKey(key) {
+  if (!key || SETTINGS_EXCLUDED_KEYS.has(key)) return false;
+  return SETTINGS_KEY_PREFIXES.some((p) => key.startsWith(p));
+}
+
+function collectAllSettings() {
+  const out = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (isBackedUpSettingsKey(key)) out[key] = localStorage.getItem(key);
+  }
+  return out;
+}
+
+function applySettingsSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return;
+  Object.keys(snapshot).forEach((key) => {
+    if (isBackedUpSettingsKey(key)) _origLocalStorageSetItem(key, snapshot[key]);
+  });
+}
+
+async function writeSettingsToDisk() {
+  if (!usingDiskStorage || !vocabDirHandle) return;
+  try {
+    const fileHandle = await vocabDirHandle.getFileHandle(SETTINGS_FILE_NAME, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(collectAllSettings(), null, 2));
+    await writable.close();
+  } catch (err) {
+    console.error("Failed to back up settings to folder:", err);
+  }
+}
+
+async function readSettingsFromDisk() {
+  if (!vocabDirHandle) return null;
+  try {
+    const fileHandle = await vocabDirHandle.getFileHandle(SETTINGS_FILE_NAME, { create: true });
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    return text.trim() ? JSON.parse(text) : null;
+  } catch (err) {
+    console.error("Failed to read settings backup from folder:", err);
+    return null;
+  }
+}
+
+let settingsBackupTimer = null;
+function scheduleSettingsBackup() {
+  if (!usingDiskStorage || !vocabDirHandle) return;
+  clearTimeout(settingsBackupTimer);
+  settingsBackupTimer = setTimeout(writeSettingsToDisk, 800);
+}
+
+// Every settings write anywhere in this file goes through
+// localStorage.setItem — dozens of independent toggles/sliders each call
+// it directly. Rather than editing every one of them to also queue a
+// disk write, wrap the method once here: any write to a tracked key
+// transparently schedules a debounced backup to the connected folder.
+const _origLocalStorageSetItem = localStorage.setItem.bind(localStorage);
+localStorage.setItem = function (key, value) {
+  _origLocalStorageSetItem(key, value);
+  if (isBackedUpSettingsKey(key)) scheduleSettingsBackup();
+};
+
 // On page load: silently reconnect to a previously chosen folder if the
 // browser still has permission. If permission needs re-confirming, the
 // handle is kept around so the "Reconnect Folder" button works in one
@@ -703,6 +788,65 @@ async function tryRestoreFolderConnection() {
   const granted = await verifyFolderPermission(handle, false);
   usingDiskStorage = granted;
   return granted;
+}
+
+// Decide what to do when a folder is (re)connected and BOTH the folder
+// on disk and the app's in-memory state might have entries. This is the
+// fix for the data-loss bug: the old code always trusted in-memory
+// `entries` and wrote it to disk, no questions asked. That's fine on a
+// totally fresh connection, but it's catastrophic in the exact scenario
+// that caused the data loss — browser/site data gets cleared, which
+// wipes BOTH the remembered folder handle (IndexedDB) AND the
+// localStorage mirror, so the app reloads with zero entries in memory.
+// The person then reconnects the *same* folder expecting recovery, and
+// the old code happily overwrote the folder's real file with that empty
+// in-memory list. Now: disk is only ever overwritten when there's
+// nothing on disk to lose, or when the person explicitly confirms it.
+async function resolveEntriesOnConnect(diskEntries) {
+  const currentEntries = entries.slice();
+
+  if (diskEntries.length === 0) {
+    // Nothing on disk yet (brand-new folder) — safe to seed it with
+    // whatever the app currently has, even if that's also empty.
+    return currentEntries;
+  }
+  if (currentEntries.length === 0) {
+    // Disk has data, app doesn't (e.g. site data was cleared) — load
+    // the folder's copy back in. Never overwrite it in this case.
+    return diskEntries;
+  }
+
+  const diskIds = new Set(diskEntries.map((e) => e.id));
+  const currentIds = new Set(currentEntries.map((e) => e.id));
+  const sameSet =
+    diskIds.size === currentIds.size && [...diskIds].every((id) => currentIds.has(id));
+  if (sameSet) return currentEntries; // already in sync, nothing to resolve
+
+  const useDisk = confirm(
+    `This folder already has ${diskEntries.length} saved word${diskEntries.length === 1 ? "" : "s"}, ` +
+      `and the app currently has ${currentEntries.length} that don't match it.\n\n` +
+      `Click OK to load the folder's ${diskEntries.length} word${diskEntries.length === 1 ? "" : "s"} into the app ` +
+      `(recommended — this is usually the complete, safe copy).\n` +
+      `Click Cancel to keep what's currently in the app instead and overwrite the folder with it.`
+  );
+  return useDisk ? diskEntries : currentEntries;
+}
+
+// After entries are resolved, also check for a settings backup (layout,
+// colors, fish tank prefs, etc. — see the settings-backup block above)
+// and offer to restore it. Reloads the page on restore, since dozens of
+// features read their setting from localStorage once at load time.
+async function offerSettingsRestore() {
+  const diskSettings = await readSettingsFromDisk();
+  if (!diskSettings || Object.keys(diskSettings).length === 0) return false;
+  const restore = confirm(
+    "This folder also has a saved app-settings backup (layout, colors, and other customization).\n\n" +
+      "Click OK to restore those settings now (the page will reload).\n" +
+      "Click Cancel to keep your current settings."
+  );
+  if (!restore) return false;
+  applySettingsSnapshot(diskSettings);
+  return true;
 }
 
 async function chooseStorageFolder() {
@@ -721,17 +865,25 @@ async function chooseStorageFolder() {
       return;
     }
 
-    // Carry over whatever is currently loaded (browser storage, or a
-    // previous folder) into the newly chosen folder so nothing is lost.
-    const currentEntries = entries.slice();
-
     vocabDirHandle = handle;
+    const diskEntries = await readEntriesFromDisk();
+    entries = await resolveEntriesOnConnect(diskEntries);
+
     usingDiskStorage = true;
     await idbSetHandle(handle);
-    await writeEntriesToDisk(currentEntries);
+    await writeEntriesToDisk(entries);
+    scheduleSettingsBackup(); // seed a settings backup for this folder right away
 
+    const willReload = await offerSettingsRestore();
+    refreshBookFilterOptions();
+    refreshBookDatalist();
+    renderTable();
     updateStorageStatusUI();
     storagePanel.classList.add("hidden");
+    if (willReload) {
+      location.reload();
+      return;
+    }
     alert(`Connected! Your words will now be saved to the "${handle.name}" folder on your computer.`);
   } catch (err) {
     if (err?.name !== "AbortError") {
@@ -751,12 +903,21 @@ async function reconnectStorageFolder() {
   }
 
   usingDiskStorage = true;
-  entries = await readEntriesFromDisk();
+  const diskEntries = await readEntriesFromDisk();
+  entries = await resolveEntriesOnConnect(diskEntries);
+  // resolveEntriesOnConnect can return the in-memory copy even though
+  // disk had different data (person chose to keep app state) — make
+  // sure that choice actually lands back on disk instead of leaving the
+  // folder holding the un-chosen version.
+  await writeEntriesToDisk(entries);
+
+  const willReload = await offerSettingsRestore();
   refreshBookFilterOptions();
   refreshBookDatalist();
   renderTable();
   updateStorageStatusUI();
   storagePanel.classList.add("hidden");
+  if (willReload) location.reload();
 }
 
 function updateStorageStatusUI() {
