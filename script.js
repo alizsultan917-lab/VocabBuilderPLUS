@@ -755,6 +755,20 @@ const SETTINGS_EXCLUDED_KEYS = new Set([
   AI_SETTINGS_KEY_STORAGE,
   DRIVE_FILE_ID_STORAGE,
   DRIVE_SETTINGS_FILE_ID_STORAGE,
+  // Same reasoning as the two IDs above: this is internal bookkeeping
+  // ("did we ever successfully connect Drive"), not a user-facing
+  // setting. It also gets written by connectGoogleDrive() at the exact
+  // moment usingCloudStorage flips true — right before that same call
+  // pulls a settings snapshot down from Drive. If this key were backed
+  // up, that write would schedule a debounced writeSettingsToDrive()
+  // (see scheduleDriveSettingsBackup) that can land WHILE the pull is
+  // still in flight (slow network, a re-auth prompt, etc.), pushing this
+  // device's stale/default settings over the real backup a moment before
+  // it's read back. The pull then "succeeds" but only hands back the
+  // settings that were just clobbered, so restoring settings onto a
+  // fresh device silently does nothing. Keeping it out of the snapshot
+  // removes the trigger entirely.
+  DRIVE_AUTOCONNECT_STORAGE,
 ]);
 
 function isBackedUpSettingsKey(key) {
@@ -817,8 +831,15 @@ function scheduleSettingsBackup() {
 // version; which side "wins" only applies to entries — see
 // applySyncDirection).
 let driveSettingsBackupTimer = null;
+// Set for the duration of a drive-wins settings PULL (see applySyncDirection)
+// so a debounced push can't sneak in and overwrite the backup a moment
+// before it's read back down. Belt-and-suspenders alongside excluding
+// DRIVE_AUTOCONNECT_STORAGE from the snapshot above — this also protects
+// "Sync Now" / drive-wins pulls triggered later in a session, once other
+// settings changes may legitimately have pending backups queued.
+let drivePullInProgress = false;
 function scheduleDriveSettingsBackup() {
-  if (!usingCloudStorage) return;
+  if (!usingCloudStorage || drivePullInProgress) return;
   clearTimeout(driveSettingsBackupTimer);
   driveSettingsBackupTimer = setTimeout(writeSettingsToDrive, 800);
 }
@@ -2037,7 +2058,15 @@ async function applySyncDirection(direction, opts = {}) {
       };
     }
 
+    let settingsWarning = "";
     if (pullSettings) {
+      // Block any debounced settings PUSH for the duration of this pull —
+      // otherwise a write queued a moment earlier (e.g. connectGoogleDrive
+      // flipping usingCloudStorage / DRIVE_AUTOCONNECT_STORAGE right before
+      // calling us) can land mid-pull and overwrite the real backup with
+      // this device's stale settings a moment before we read it back down.
+      drivePullInProgress = true;
+      clearTimeout(driveSettingsBackupTimer);
       try {
         let driveSettings;
         try {
@@ -2053,17 +2082,23 @@ async function applySyncDirection(direction, opts = {}) {
           const before = JSON.stringify(collectAllSettings());
           applySettingsSnapshot(driveSettings);
           if (JSON.stringify(collectAllSettings()) !== before && reloadOnSettingsChange) {
+            drivePullInProgress = false;
             location.reload();
             return { message: "" }; // page is reloading; nothing left to alert
           }
         }
+        // driveSettings === null just means no backup exists yet on Drive
+        // (nothing to restore) — not a failure, so no warning for that case.
       } catch (err) {
         console.warn("Couldn't read settings backup from Google Drive:", err);
+        settingsWarning = ` Settings weren't restored, though — (${err.message || "unknown error"}). Try Connect Google Drive again.`;
+      } finally {
+        drivePullInProgress = false;
       }
     }
 
     return {
-      message: `Google Drive is now the source of truth: ${pulledCount} word${pulledCount === 1 ? "" : "s"} loaded onto this device.`,
+      message: `Google Drive is now the source of truth: ${pulledCount} word${pulledCount === 1 ? "" : "s"} loaded onto this device.${settingsWarning}`,
     };
   }
 
