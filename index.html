@@ -573,6 +573,17 @@
           <label class="storage-check-row"><input type="checkbox" id="sync-local-checkbox" checked><span>Local folder</span></label>
           <label class="storage-check-row"><input type="checkbox" id="sync-cloud-checkbox" checked><span>Google Drive</span></label>
         </div>
+
+        <div id="sync-direction-row" class="storage-sync-options hidden">
+          <hr class="storage-divider">
+          <p class="storage-sync-hint">If your local words and Google Drive ever disagree, which one should win?</p>
+          <label class="storage-check-row"><input type="radio" name="sync-direction" id="sync-direction-local-radio"><span>💻 This device overwrites Google Drive</span></label>
+          <label class="storage-check-row"><input type="radio" name="sync-direction" id="sync-direction-drive-radio"><span>☁️ Google Drive overwrites this device</span></label>
+          <p class="storage-sync-hint">Saved automatically — applied every time without asking again. Change it here anytime (requires typing a confirmation phrase).</p>
+          <div class="storage-panel-actions">
+            <button type="button" id="sync-now-btn" class="btn btn-secondary btn-small">Sync Now</button>
+          </div>
+        </div>
       </div>
     </div>
 

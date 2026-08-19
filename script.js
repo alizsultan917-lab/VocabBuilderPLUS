@@ -301,6 +301,25 @@ const DEFAULT_DRIVE_CLIENT_ID = "49962736437-2f722m8oj7v34ddcm79vh9asu3bpasiu.ap
 const DRIVE_FILE_ID_STORAGE = "litVocabDriveFileId";
 const DRIVE_SYNC_LOCAL_STORAGE = "litVocabSyncLocal";
 const DRIVE_SYNC_CLOUD_STORAGE = "litVocabSyncCloud";
+
+// Settings backup file on Drive — mirrors the SETTINGS_FILE_NAME backup
+// already written to a connected local folder (see the "SETTINGS BACKUP
+// TO DISK" block below), so layout/colors/fish-tank prefs etc. survive
+// even when only Drive (not a local folder) is connected.
+const DRIVE_SETTINGS_FILE_NAME = "app-settings-backup.json";
+const DRIVE_SETTINGS_FILE_ID_STORAGE = "litVocabDriveSettingsFileId";
+let driveSettingsFileId = localStorage.getItem(DRIVE_SETTINGS_FILE_ID_STORAGE) || null;
+
+// SYNC DIRECTION — decides who wins when this device (browser storage or
+// a connected local folder) and Google Drive disagree: "local-wins"
+// (the default, and this app's original behavior) pushes this device's
+// copy up to Drive, overwriting it; "drive-wins" pulls Drive's copy down
+// instead, overwriting this device. Changing it requires an explicit
+// confirm() plus typing an exact phrase (see changeSyncDirection) so a
+// stray click can never silently wipe out one side's words. Once set,
+// it's remembered and applied automatically on every future connect or
+// reconnect — it never asks again.
+const SYNC_DIRECTION_STORAGE = "litVocabSyncDirection";
 // Set once a connection succeeds (manually or silently restored), cleared
 // only on an explicit "Disconnect". Its presence on page load is what
 // tells init() to attempt a *silent* (no popup) reconnect, so Drive
@@ -465,6 +484,10 @@ const copyOriginBtn = document.getElementById("copy-origin-btn");
 const syncBothRow = document.getElementById("sync-both-row");
 const syncLocalCheckbox = document.getElementById("sync-local-checkbox");
 const syncCloudCheckbox = document.getElementById("sync-cloud-checkbox");
+const syncDirectionRow = document.getElementById("sync-direction-row");
+const syncDirectionLocalRadio = document.getElementById("sync-direction-local-radio");
+const syncDirectionDriveRadio = document.getElementById("sync-direction-drive-radio");
+const syncNowBtn = document.getElementById("sync-now-btn");
 
 const customizeToggleBtn = document.getElementById("customize-toggle-btn");
 const customizePanel = document.getElementById("customize-panel");
@@ -764,15 +787,32 @@ function scheduleSettingsBackup() {
   settingsBackupTimer = setTimeout(writeSettingsToDisk, 800);
 }
 
+// Same idea as scheduleSettingsBackup above, but for Google Drive — keeps
+// a live settings backup on Drive too, independent of the local-folder
+// one, and independent of the local/drive sync-direction preference
+// (this is a one-way backup of THIS device's settings, same as the disk
+// version; which side "wins" only applies to entries — see
+// applySyncDirection).
+let driveSettingsBackupTimer = null;
+function scheduleDriveSettingsBackup() {
+  if (!usingCloudStorage) return;
+  clearTimeout(driveSettingsBackupTimer);
+  driveSettingsBackupTimer = setTimeout(writeSettingsToDrive, 800);
+}
+
 // Every settings write anywhere in this file goes through
 // localStorage.setItem — dozens of independent toggles/sliders each call
 // it directly. Rather than editing every one of them to also queue a
-// disk write, wrap the method once here: any write to a tracked key
-// transparently schedules a debounced backup to the connected folder.
+// disk/Drive write, wrap the method once here: any write to a tracked
+// key transparently schedules a debounced backup to the connected
+// folder and/or Drive.
 const _origLocalStorageSetItem = localStorage.setItem.bind(localStorage);
 localStorage.setItem = function (key, value) {
   _origLocalStorageSetItem(key, value);
-  if (isBackedUpSettingsKey(key)) scheduleSettingsBackup();
+  if (isBackedUpSettingsKey(key)) {
+    scheduleSettingsBackup();
+    scheduleDriveSettingsBackup();
+  }
 };
 
 // On page load: silently reconnect to a previously chosen folder if the
@@ -1566,6 +1606,25 @@ function setSyncPref(key, value) {
   }
 }
 
+// "local-wins" (default) matches this app's original, always-push
+// behavior. Only ever returns "drive-wins" if the person explicitly
+// confirmed that choice through changeSyncDirection's two-step confirm.
+function getSyncDirection() {
+  try {
+    return localStorage.getItem(SYNC_DIRECTION_STORAGE) === "drive-wins" ? "drive-wins" : "local-wins";
+  } catch (err) {
+    return "local-wins";
+  }
+}
+
+function setSyncDirection(direction) {
+  try {
+    localStorage.setItem(SYNC_DIRECTION_STORAGE, direction);
+  } catch (err) {
+    // non-fatal
+  }
+}
+
 // Google's OAuth/Identity Services flatly refuses to authorize pages
 // opened directly from disk (file:///...) — it requires a real http(s)
 // origin. Opening this file by double-clicking it, or via "File > Open",
@@ -1742,6 +1801,181 @@ async function writeEntriesToDrive(list) {
     driveSessionExpired = true;
     updateStorageStatusUI();
   }
+}
+
+/* ----- Drive settings backup — same shape as the entries functions
+   above, but for a second, separate JSON file so a settings write can
+   never clobber the entries file or vice versa. ----- */
+async function findDriveSettingsFileId() {
+  const q = encodeURIComponent(`name = '${DRIVE_SETTINGS_FILE_NAME}' and trashed = false`);
+  const res = await driveApiFetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&fields=files(id,name)`
+  );
+  if (!res.ok) throw new Error(`Drive search failed (${res.status})`);
+  const data = await res.json();
+  return data.files && data.files.length ? data.files[0].id : null;
+}
+
+async function createDriveSettingsFile(snapshot) {
+  const metadata = { name: DRIVE_SETTINGS_FILE_NAME, mimeType: "application/json" };
+  const boundary = "vocabSettingsBoundary";
+  const body =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(snapshot)}\r\n--${boundary}--`;
+
+  const res = await driveApiFetch(
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
+    { method: "POST", headers: { "Content-Type": `multipart/related; boundary=${boundary}` }, body }
+  );
+  if (!res.ok) throw new Error(`Drive create failed (${res.status})`);
+  const data = await res.json();
+  return data.id;
+}
+
+async function readSettingsFromDrive() {
+  driveSettingsFileId = driveSettingsFileId || (await findDriveSettingsFileId());
+  if (!driveSettingsFileId) return null;
+  let res = await driveApiFetch(`https://www.googleapis.com/drive/v3/files/${driveSettingsFileId}?alt=media`);
+  if (res.status === 404) {
+    driveSettingsFileId = null;
+    localStorage.removeItem(DRIVE_SETTINGS_FILE_ID_STORAGE);
+    driveSettingsFileId = await findDriveSettingsFileId();
+    if (!driveSettingsFileId) return null;
+    res = await driveApiFetch(`https://www.googleapis.com/drive/v3/files/${driveSettingsFileId}?alt=media`);
+  }
+  if (!res.ok) throw new Error(`Drive settings read failed (${res.status})`);
+  localStorage.setItem(DRIVE_SETTINGS_FILE_ID_STORAGE, driveSettingsFileId);
+  const text = await res.text();
+  return text.trim() ? JSON.parse(text) : null;
+}
+
+async function driveSettingsWriteAttempt(snapshot) {
+  if (!driveSettingsFileId) driveSettingsFileId = await findDriveSettingsFileId();
+  if (!driveSettingsFileId) {
+    driveSettingsFileId = await createDriveSettingsFile(snapshot);
+  } else {
+    const res = await driveApiFetch(
+      `https://www.googleapis.com/upload/drive/v3/files/${driveSettingsFileId}?uploadType=media`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(snapshot) }
+    );
+    if (res.status === 404) {
+      driveSettingsFileId = null;
+      localStorage.removeItem(DRIVE_SETTINGS_FILE_ID_STORAGE);
+      driveSettingsFileId = await findDriveSettingsFileId();
+      if (!driveSettingsFileId) {
+        driveSettingsFileId = await createDriveSettingsFile(snapshot);
+      } else {
+        const retryRes = await driveApiFetch(
+          `https://www.googleapis.com/upload/drive/v3/files/${driveSettingsFileId}?uploadType=media`,
+          { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(snapshot) }
+        );
+        if (!retryRes.ok) throw new Error(`Drive settings update failed (${retryRes.status})`);
+      }
+    } else if (!res.ok) {
+      throw new Error(`Drive settings update failed (${res.status})`);
+    }
+  }
+  localStorage.setItem(DRIVE_SETTINGS_FILE_ID_STORAGE, driveSettingsFileId);
+}
+
+async function writeSettingsToDrive() {
+  if (!usingCloudStorage) return;
+  try {
+    await driveSettingsWriteAttempt(collectAllSettings());
+  } catch (err) {
+    // Same silent-recovery approach as writeEntriesToDrive: a 401 usually
+    // just means the token quietly died between refreshes.
+    const looksLikeAuthFailure = /\b401\b/.test(err.message || "") || /^invalid_grant$/.test(err.message || "");
+    if (looksLikeAuthFailure) {
+      try {
+        await requestDriveToken(false);
+        scheduleDriveTokenRefresh();
+        await driveSettingsWriteAttempt(collectAllSettings());
+        return;
+      } catch (retryErr) {
+        console.warn("Google Drive: settings backup retry after auth failure also failed:", retryErr);
+      }
+    }
+    console.error("Failed to back up settings to Google Drive:", err);
+  }
+}
+
+// Applies the given sync direction RIGHT NOW: "local-wins" pushes this
+// device's entries (and a settings snapshot) up to Drive, overwriting
+// whatever's there; "drive-wins" pulls Drive's entries (and, if present,
+// its settings backup) down over this device instead. Shared by
+// changeSyncDirection's confirm flow, the "Sync Now" button, and every
+// automatic Drive connect/reconnect, so the person's saved preference is
+// honored consistently everywhere instead of each call site reimplementing
+// it slightly differently.
+//
+// Settings are only ever PULLED here on an explicit connect/Sync Now
+// action (never during a silent background reconnect) because applying
+// them can require a page reload — see the "SETTINGS BACKUP TO DISK"
+// comment above for why. reloadOnSettingsChange lets a caller opt into
+// that reload; callers that skip it (silent background sync) simply
+// leave the newly-pulled settings to take effect next time the page
+// loads on its own.
+async function applySyncDirection(direction, opts = {}) {
+  const { reloadOnSettingsChange = false, pullSettings = false } = opts;
+  if (!usingCloudStorage) return { message: "Connect Google Drive first." };
+
+  if (direction === "drive-wins") {
+    let pulledCount = 0;
+    try {
+      const remote = await perfTimeAsync("Folder / Drive Sync", () => readEntriesFromDrive());
+      entries = remote;
+      pulledCount = entries.length;
+      if (usingDiskStorage && vocabDirHandle) {
+        await perfTimeAsync("Folder / Drive Sync", () => writeEntriesToDisk(entries));
+      }
+      perfTime("Local Storage I/O", saveEntriesToLocalStorage);
+      refreshBookFilterOptions();
+      refreshBookDatalist();
+      renderTable();
+      updateStorageStatusUI();
+    } catch (err) {
+      console.error("Failed to pull entries from Google Drive:", err);
+      return { message: "Couldn't read Google Drive's entries — nothing here was changed." };
+    }
+
+    if (pullSettings) {
+      try {
+        const driveSettings = await readSettingsFromDrive();
+        if (driveSettings && Object.keys(driveSettings).length) {
+          const before = JSON.stringify(collectAllSettings());
+          applySettingsSnapshot(driveSettings);
+          if (JSON.stringify(collectAllSettings()) !== before && reloadOnSettingsChange) {
+            location.reload();
+            return { message: "" }; // page is reloading; nothing left to alert
+          }
+        }
+      } catch (err) {
+        console.warn("Couldn't read settings backup from Google Drive:", err);
+      }
+    }
+
+    return {
+      message: `Google Drive is now the source of truth: ${pulledCount} word${pulledCount === 1 ? "" : "s"} loaded onto this device.`,
+    };
+  }
+
+  // local-wins (default)
+  let summary = null;
+  try {
+    const remote = await readEntriesFromDrive();
+    summary = summarizeDriveSync(entries, remote);
+  } catch (err) {
+    console.warn("Couldn't read existing Drive contents before syncing (will still overwrite):", err);
+  }
+  saveEntries(); // overwrites Drive with local entries (and disk, per sync prefs) + localStorage mirror
+  writeSettingsToDrive(); // seed/refresh the Drive settings backup right away
+  updateStorageStatusUI();
+  return {
+    message: summary
+      ? `This device is now the source of truth: Google Drive updated — ${summary.kept} kept, ${summary.added} added, ${summary.removed} removed.`
+      : "This device's words have been pushed to Google Drive.",
+  };
 }
 
 // Turns whatever requestDriveToken rejected with into a message a
@@ -1970,28 +2204,21 @@ async function connectGoogleDrive() {
     scheduleDriveTokenRefresh();
     localStorage.setItem(DRIVE_AUTOCONNECT_STORAGE, "1");
 
-    // Your local copy (this browser, or your chosen folder) is the source
-    // of truth. Rather than merging in whatever's already on Drive —
-    // which could silently mix in stale or unwanted remote-only entries —
-    // Drive gets overwritten to match local exactly: anything missing
-    // locally is dropped from Drive, anything local-only gets added, and
-    // anything already matching is left alone. Nothing local is ever
-    // deleted or replaced by this.
-    let summary = null;
-    try {
-      const remote = await readEntriesFromDrive();
-      summary = summarizeDriveSync(entries, remote);
-    } catch (err) {
-      console.warn("Couldn't read existing Drive contents before syncing (will still overwrite):", err);
-    }
-    saveEntries(); // overwrites Drive with local entries (and disk, per sync prefs) + localStorage mirror
+    // Which side wins a disagreement is governed by the saved sync
+    // direction preference (see applySyncDirection) — "local-wins" is the
+    // default and matches this app's original behavior of always pushing
+    // local up over Drive; "drive-wins" only ever applies once the person
+    // has explicitly confirmed it via changeSyncDirection. Either way,
+    // this is an explicit, on-screen "Connect" click, so it's safe to
+    // also pull down (and, if needed, reload for) a Drive settings
+    // backup here.
+    const result = await applySyncDirection(getSyncDirection(), {
+      reloadOnSettingsChange: true,
+      pullSettings: true,
+    });
 
     updateStorageStatusUI();
-    alert(
-      summary
-        ? `Connected! Google Drive now matches this device: ${summary.kept} kept, ${summary.added} added, ${summary.removed} removed.`
-        : "Connected! Your words can now be saved to Google Drive."
-    );
+    if (result.message) alert(`Connected! ${result.message}`);
   } catch (err) {
     console.error("Google Drive connection failed:", err);
     const message = driveErrorMessage(err);
@@ -2029,6 +2256,78 @@ changeClientIdBtn.addEventListener("click", changeDriveClientId);
 
 syncLocalCheckbox.addEventListener("change", () => setSyncPref(DRIVE_SYNC_LOCAL_STORAGE, syncLocalCheckbox.checked));
 syncCloudCheckbox.addEventListener("change", () => setSyncPref(DRIVE_SYNC_CLOUD_STORAGE, syncCloudCheckbox.checked));
+
+function updateSyncDirectionUI() {
+  const dir = getSyncDirection();
+  syncDirectionLocalRadio.checked = dir === "local-wins";
+  syncDirectionDriveRadio.checked = dir === "drive-wins";
+}
+
+const SYNC_DIRECTION_LABEL = {
+  "local-wins": "this device overwrites Google Drive",
+  "drive-wins": "Google Drive overwrites this device",
+};
+
+// Two-step confirmation before a sync-direction change ever takes
+// effect, matching the same "confirm(), then type an exact phrase"
+// pattern already used elsewhere in this app for destructive bulk
+// actions (see the Delete All handler): an explicit confirm() dialog
+// spelling out what will get overwritten, THEN a typed phrase that has
+// to match exactly. Only after both steps succeed is the choice saved
+// (so it's remembered and auto-applied from then on) and, if Drive is
+// already connected, applied immediately.
+async function changeSyncDirection(newDirection) {
+  const current = getSyncDirection();
+  if (newDirection === current) return;
+
+  const hasFolder = usingDiskStorage && vocabDirHandle;
+  const firstConfirm = confirm(
+    `Change sync direction so ${SYNC_DIRECTION_LABEL[newDirection]}?\n\n` +
+      (newDirection === "drive-wins"
+        ? `This will immediately replace the words on this device${hasFolder ? " (and your local folder)" : ""} with whatever is currently on Google Drive. Anything here that isn't on Drive will be lost.`
+        : `This will immediately replace the words on Google Drive with what's on this device${hasFolder ? " (and your local folder)" : ""}. Anything on Drive that isn't here will be lost.`) +
+      `\n\nThis app will remember this choice and apply it automatically every time from now on — it won't ask again unless you change it here.`
+  );
+  if (!firstConfirm) {
+    updateSyncDirectionUI(); // revert the radio button to the current setting
+    return;
+  }
+
+  const phrase = newDirection === "drive-wins" ? "DRIVE WINS" : "LOCAL WINS";
+  const typed = prompt(`Type ${phrase} to confirm.`);
+  if (typed !== phrase) {
+    alert("Sync direction unchanged — nothing was overwritten.");
+    updateSyncDirectionUI();
+    return;
+  }
+
+  setSyncDirection(newDirection);
+  updateSyncDirectionUI();
+
+  if (!usingCloudStorage) {
+    alert("Saved — this will apply the next time Google Drive is connected.");
+    return;
+  }
+
+  const result = await applySyncDirection(newDirection, { reloadOnSettingsChange: true, pullSettings: true });
+  if (result.message) alert(result.message);
+}
+
+syncDirectionLocalRadio.addEventListener("change", () => {
+  if (syncDirectionLocalRadio.checked) changeSyncDirection("local-wins");
+});
+syncDirectionDriveRadio.addEventListener("change", () => {
+  if (syncDirectionDriveRadio.checked) changeSyncDirection("drive-wins");
+});
+
+syncNowBtn.addEventListener("click", async () => {
+  if (!usingCloudStorage) {
+    alert("Connect Google Drive first.");
+    return;
+  }
+  const result = await applySyncDirection(getSyncDirection(), { reloadOnSettingsChange: true, pullSettings: true });
+  if (result.message) alert(result.message);
+});
 
 function updateCloudStatusUI() {
   if (usingCloudStorage) {
@@ -2071,6 +2370,12 @@ function updateCloudStatusUI() {
 
   exportDriveCheckWrap.classList.toggle("hidden", !usingCloudStorage);
   if (!usingCloudStorage) exportDriveCheckbox.checked = false;
+
+  // Sync direction matters any time Drive is connected — not only when a
+  // local folder is ALSO connected — since browser storage always counts
+  // as "local" for this purpose.
+  syncDirectionRow.classList.toggle("hidden", !usingCloudStorage);
+  if (usingCloudStorage) updateSyncDirectionUI();
 }
 
 async function loadEntries() {
@@ -2173,7 +2478,14 @@ async function syncDriveOnLoad() {
   const driveRestored = await tryRestoreDriveConnection();
   if (!driveRestored) return;
   try {
-    saveEntries(); // overwrites Drive with local entries (and disk, per sync prefs) + localStorage mirror
+    // Respects the saved sync direction preference automatically — no
+    // prompt, no re-asking. Settings are deliberately NOT pulled here
+    // (pullSettings defaults to false): this runs silently in the
+    // background after the page has already loaded and other code has
+    // already read localStorage, so applying a settings snapshot now
+    // would need an unexpected mid-session reload. A settings pull only
+    // ever happens on an explicit "Connect"/"Sync Now" click instead.
+    await applySyncDirection(getSyncDirection());
     updateStorageStatusUI();
   } catch (err) {
     console.error("Failed to sync with Google Drive on load:", err);
