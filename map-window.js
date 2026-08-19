@@ -933,6 +933,7 @@
   const importDiskBtn = document.getElementById("mw-import-disk-btn");
   const importFilesInput = document.getElementById("mw-import-files-input");
   const importDriveBtn = document.getElementById("mw-import-drive-btn");
+  const importDriveBrowseBtn = document.getElementById("mw-import-drive-browse-btn");
   const importDriveSelect = document.getElementById("mw-import-drive-select");
   const importDriveConfirmBtn = document.getElementById("mw-import-drive-confirm-btn");
   const importStatusEl = document.getElementById("mw-import-status");
@@ -4301,6 +4302,137 @@
       showImportStatus("Couldn't import from Drive — see the console for details.");
     }
   });
+
+  /* ----------------------------------------------------------------------
+     IMPORT FROM DRIVE — GOOGLE PICKER (Feature 4b)
+     ------------------------------------------------------------------
+     The "Import from Drive (app-saved)" flow above only ever finds files
+     this app itself already wrote to Drive — under the drive.file scope
+     it's granted, that's the *only* thing it's allowed to see, by design
+     (the app can never browse someone's whole Drive on its own). A map
+     bundle saved by hand into a folder — uploaded through Drive's own
+     website, or moved there after the fact — was never touched by this
+     app, so it's invisible to that flow no matter how it's searched.
+
+     Google's Picker is the standard fix: it's Google's own file browser,
+     running with the person's full Drive visibility, and whatever they
+     explicitly select inside it becomes visible to the app's existing
+     drive.file token from that point on — permanently, for those exact
+     files. So the person can navigate into their own folder, ctrl/cmd-
+     click the image and its .json together, and this app can then read
+     just those two files through the very same driveApiFetch() calls
+     used everywhere else on this page.
+  ---------------------------------------------------------------------- */
+  let mwPickerApiPromise = null;
+  function loadDrivePickerApi() {
+    if (window.google?.picker) return Promise.resolve();
+    if (mwPickerApiPromise) return mwPickerApiPromise;
+    mwPickerApiPromise = new Promise((resolve, reject) => {
+      if (!window.gapi) {
+        reject(new Error("Google's API loader hasn't finished loading yet — wait a moment and try again."));
+        return;
+      }
+      gapi.load("picker", {
+        callback: () => resolve(),
+        onerror: () => reject(new Error("Couldn't load Google Picker.")),
+      });
+    }).catch((err) => {
+      mwPickerApiPromise = null; // let a retry try loading again
+      throw err;
+    });
+    return mwPickerApiPromise;
+  }
+
+  // The Picker wants the Cloud project's numeric app ID, which is just
+  // the digits before the first "-" in the OAuth Client ID already used
+  // to connect Drive.
+  function driveAppIdFromClientId() {
+    const clientId = typeof getDriveClientId === "function" ? getDriveClientId() : "";
+    return (clientId.split("-")[0] || "").trim();
+  }
+
+  function isJsonPickerDoc(doc) {
+    return /\.json$/i.test(doc?.name || "") || doc?.mimeType === "application/json";
+  }
+  function isImagePickerDoc(doc) {
+    return /^image\//.test(doc?.mimeType || "") || /\.(png|jpe?g|webp)$/i.test(doc?.name || "");
+  }
+
+  async function handleDrivePickerPicked(data) {
+    if (data.action !== google.picker.Action.PICKED) return; // cancelled
+    const docs = data.docs || [];
+    const jsonDocs = docs.filter(isJsonPickerDoc);
+    const imageDocs = docs.filter((d) => isImagePickerDoc(d) && !isJsonPickerDoc(d));
+
+    if (!jsonDocs.length && !imageDocs.length) {
+      showImportStatus("Couldn't recognize those files — pick one map image (.png/.jpg/.webp) and its .json metadata file together.");
+      return;
+    }
+    if (!imageDocs.length) {
+      showImportStatus("Missing the map image — select it together with the .json file (ctrl/cmd-click both in Drive's picker).");
+      return;
+    }
+    if (!jsonDocs.length) {
+      showImportStatus("Missing the .json metadata file — select it together with the map image (ctrl/cmd-click both in Drive's picker).");
+      return;
+    }
+    if (imageDocs.length > 1 || jsonDocs.length > 1) {
+      showImportStatus("Pick just one image and one .json file at a time — select exactly that pair and try again.");
+      return;
+    }
+
+    showImportStatus("Downloading from Drive…");
+    try {
+      const bundle = await driveDownloadJson(jsonDocs[0].id);
+      if (!bundle || typeof bundle !== "object") {
+        showImportStatus("Couldn't import — that .json file isn't a valid map bundle exported from this app.");
+        return;
+      }
+      const ext = extFromFile({ name: imageDocs[0].name, type: imageDocs[0].mimeType }) || bundle.ext || "png";
+      const blob = await driveDownloadBinary(imageDocs[0].id);
+      const result = await finishMapImport(blob, ext, bundle);
+      showImportStatus(
+        result.ok
+          ? `Imported "${result.label}" from Drive — it's now the active map, fully editable.`
+          : result.message || "Couldn't import that pair."
+      );
+    } catch (err) {
+      console.error("Map Window: Drive Picker import failed:", err);
+      showImportStatus("Couldn't import from Drive — see the console for details.");
+    }
+  }
+
+  function openDriveImportPicker() {
+    if (!usingCloudStorage || !driveAccessToken) {
+      showImportStatus("Connect Google Drive first (Storage settings, above the vocabulary table) to browse it.");
+      return;
+    }
+    showImportStatus("Opening Google Drive…");
+    loadDrivePickerApi()
+      .then(() => {
+        const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+          .setIncludeFolders(true) // lets the person navigate into any folder, including ones they made themselves
+          .setSelectFolderEnabled(false) // folders are for navigating into, not selecting as the result
+          .setMimeTypes("application/json,text/plain,image/png,image/jpeg,image/webp");
+        const appId = driveAppIdFromClientId();
+        const builder = new google.picker.PickerBuilder()
+          .setOAuthToken(driveAccessToken)
+          .addView(view)
+          .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+          .setTitle("Select the map image + its .json file (ctrl/cmd-click both)")
+          .setCallback(handleDrivePickerPicked);
+        if (appId) builder.setAppId(appId);
+        const picker = builder.build();
+        picker.setVisible(true);
+        showImportStatus("Navigate to the folder, then ctrl/cmd-click the image and its .json file together and click Select.");
+      })
+      .catch((err) => {
+        console.error("Map Window: Drive Picker failed to load:", err);
+        showImportStatus("Couldn't open Google Drive's file browser — see the console for details.");
+      });
+  }
+
+  importDriveBrowseBtn?.addEventListener("click", openDriveImportPicker);
 
   /* ----------------------------------------------------------------------
      LOCAL FOLDER — connect a real folder on disk for map images to live

@@ -43,6 +43,7 @@
 <link rel="stylesheet" href="map-window.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
 </head>
 <body>
 
@@ -1198,12 +1199,16 @@
       <p id="mw-export-data-status" class="storage-sync-hint hidden"></p>
 
       <p class="mw-settings-section-title">Import a map bundle</p>
-      <p class="storage-sync-hint">Bring in a map (image + its <code>.json</code> metadata) exported from this app on another device — its paths, symbols, and markers come back fully editable, not flattened. In the picker, select both the image and the <code>.json</code> file together (ctrl/cmd-click to select two files).</p>
+      <p class="storage-sync-hint">Bring in a map (image + its <code>.json</code> metadata) exported from this app on another device — its paths, symbols, and markers come back fully editable, not flattened. In a picker, select both the image and the <code>.json</code> file together (ctrl/cmd-click to select two files).</p>
       <div class="mw-folder-row">
         <button type="button" id="mw-import-disk-btn" class="btn btn-secondary btn-small">📥 Import from Disk…</button>
-        <button type="button" id="mw-import-drive-btn" class="btn btn-secondary btn-small">☁️ Import from Drive…</button>
+        <button type="button" id="mw-import-drive-browse-btn" class="btn btn-secondary btn-small">📂 Browse Drive Folder…</button>
       </div>
+      <p class="storage-sync-hint">"Browse Drive Folder" opens Google's own file browser so you can navigate into <em>any</em> folder in your Drive — including ones you made yourself outside this app — and pick the pair directly. That's the one to use if a map set you saved into a Drive folder isn't showing up any other way.</p>
       <input type="file" id="mw-import-files-input" accept="image/png,image/jpeg,image/webp,application/json,.json" multiple class="hidden">
+      <div class="mw-folder-row">
+        <button type="button" id="mw-import-drive-btn" class="btn btn-secondary btn-small">☁️ Import from Drive (app-saved)…</button>
+      </div>
       <div class="mw-folder-row">
         <select id="mw-import-drive-select" class="mw-region-select hidden"></select>
         <button type="button" id="mw-import-drive-confirm-btn" class="btn btn-secondary btn-small hidden">Import Selected</button>
