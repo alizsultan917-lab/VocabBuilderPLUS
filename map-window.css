@@ -172,7 +172,8 @@ body.has-wallpaper .mw-header {
    very top of the window, with these two floating pieces resting on
    top of it rather than pushing it down. */
 .mw-header.mw-header--micro {
-  position: relative;
+  position: sticky;
+  top: 0;
   background: transparent;
   box-shadow: none;
   padding: 0;
