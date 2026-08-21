@@ -185,6 +185,37 @@
         </div>
 
         <p class="storage-sync-hint">Changes apply immediately to your register below — 0 (off) to 10 each.</p>
+
+        <div class="limits-group">
+          <h4 class="limits-group-title">Volume</h4>
+
+          <div class="slider-field-row">
+            <div class="slider-field-label">
+              <label for="system-volume-input">Computer (System) Volume</label>
+              <span id="system-volume-value" class="slider-value">Not available</span>
+            </div>
+            <input type="range" id="system-volume-input" min="0" max="100" step="1" value="50" disabled>
+            <p class="storage-sync-hint">Browsers deliberately can't read or change your computer's master volume — any website being able to do that would be a security problem. Use your taskbar, keyboard media keys, or system volume mixer for that (the control circled in your screenshot). This slider is shown for reference only.</p>
+          </div>
+
+          <div class="slider-field-row">
+            <div class="slider-field-label">
+              <label for="app-volume-input">In-App Volume</label>
+              <span id="app-volume-value" class="slider-value">100%</span>
+            </div>
+            <input type="range" id="app-volume-input" min="0" max="100" step="1">
+            <p class="storage-sync-hint">Controls how loud pronunciation audio and speech play inside this app specifically, on top of your computer's own volume — turn this down without touching anything else on your machine.</p>
+          </div>
+
+          <div class="slider-field-row">
+            <div class="slider-field-label">
+              <label for="volume-boost-input">Volume Booster</label>
+              <span id="volume-boost-value" class="slider-value">100%</span>
+            </div>
+            <input type="range" id="volume-boost-input" min="100" max="500" step="10">
+            <p class="storage-sync-hint">Pushes recorded dictionary audio clips louder than their normal maximum (up to 5×) — handy on quiet speakers. Doesn't affect the on-device/Google fallback voices used when no recorded clip exists; those are capped at 100% by the browser itself.</p>
+          </div>
+        </div>
       </div>
     </div>
 

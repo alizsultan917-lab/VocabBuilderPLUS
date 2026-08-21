@@ -1060,6 +1060,12 @@ body.has-wallpaper .vaw-header {
   padding: 0;
 }
 
+.slider-field-row input[type="range"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  accent-color: var(--ink-soft);
+}
+
 /* ---------- Liquid Interface: transparency / blur / tint controls ---------- */
 .glass-controls {
   margin: -0.15rem 0 0.7rem;
