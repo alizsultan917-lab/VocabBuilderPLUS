@@ -3132,6 +3132,38 @@
   });
 
   /* ----------------------------------------------------------------------
+     ENTER IN THE SEARCH BAR -> "Search this on YouTube.com" (🌐), not the
+     in-window search. A form's native Enter-to-submit behavior always
+     resolves to its default submit button (here, the 🔎 button — that's
+     what "submit" fired above would have run), so the redirect has to
+     happen at keydown, before that default fires, not inside the submit
+     handler itself (by the time a submit event exists, the browser has
+     already picked 🔎, and there's no way to tell "Enter" apart from an
+     actual click on it from inside that handler).
+     Capture phase + stopImmediatePropagation so the form's own submit
+     listener above never runs for this keypress — the in-window search
+     stays reachable, just only via an explicit click on 🔎 now. The 🌐
+     button gets a brief orange flash (see .yw-key-triggered in
+     youtube-window.css) so what just fired is visually obvious.
+  ---------------------------------------------------------------------- */
+  searchInput?.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key !== "Enter" || e.isComposing) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      searchExternalBtn?.classList.remove("yw-key-triggered");
+      void searchExternalBtn?.offsetWidth; // restart the flash animation on repeat presses
+      searchExternalBtn?.classList.add("yw-key-triggered");
+      searchExternalBtn?.click();
+    },
+    { capture: true }
+  );
+  searchExternalBtn?.addEventListener("animationend", (e) => {
+    if (e.animationName === "yw-external-key-flash") searchExternalBtn.classList.remove("yw-key-triggered");
+  });
+
+  /* ----------------------------------------------------------------------
      SEARCH ON YOUTUBE.COM (Gemini Bridge extension) — sends whatever is
      currently typed in the search bar to the extension, which opens/
      reuses a real youtube.com tab and shows actual search results there

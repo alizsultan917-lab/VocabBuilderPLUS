@@ -6822,8 +6822,10 @@ function adjustAccentForContrast(hsl) {
 function applySmartAccentColors(hsl) {
   const root = document.documentElement.style;
   const props = ["--accent-color", "--accent-color-deep", "--accent-color-soft", "--accent-color-pale", "--button-highlight-bg", "--progress-bar-fill"];
+  const effective = hsl || { h: DEFAULT_CUSTOM_ACCENT_HUE, s: DEFAULT_CUSTOM_ACCENT_SAT, l: DEFAULT_CUSTOM_ACCENT_LIGHT };
   if (!hsl) {
     props.forEach((p) => root.removeProperty(p));
+    syncAccentColorToExtension(effective);
     return;
   }
   const { h, s, l } = hsl;
@@ -6836,6 +6838,25 @@ function applySmartAccentColors(hsl) {
   root.setProperty("--accent-color-pale", fmt(h, Math.max(15, s - 25), clampL(l + 42)));
   root.setProperty("--button-highlight-bg", accent);
   root.setProperty("--progress-bar-fill", accent);
+  syncAccentColorToExtension(effective);
+}
+
+// Relays the app's current effective accent color (Custom Accent Color
+// if it's on, otherwise the smart-extracted or default theme color — the
+// same value applySmartAccentColors() just applied to --accent-color) to
+// the Gemini Bridge extension, if installed. content-youtube.js uses this
+// to highlight the keyboard-focused video/channel card in the extension's
+// own arrow-key browser on youtube.com in the same color the app uses
+// everywhere else. See bridge-app.js/background.js for the relay and
+// content-youtube.js for where it lands. Fires every time the accent is
+// (re)computed — on load, on a Custom Accent Color change, on a Smart
+// Color-Extraction re-sample — same "keep it silently current" pattern
+// as syncTabSwitchKeysToExtension(). Entirely inert with no error if the
+// extension isn't installed, same as every other postMessage bridge call.
+function syncAccentColorToExtension(hsl) {
+  const clampL = (n) => Math.max(4, Math.min(96, n));
+  const accentColor = `hsl(${hsl.h.toFixed(1)}, ${hsl.s.toFixed(1)}%, ${clampL(hsl.l).toFixed(1)}%)`;
+  window.postMessage({ type: "SYNC_ACCENT_COLOR", accentColor }, window.location.origin);
 }
 
 // ---- 🌈 Custom Accent Color: manual override, wide-spectrum wheel -------

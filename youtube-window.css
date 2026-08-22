@@ -1085,6 +1085,30 @@ html[data-wallpaper-tone="dark"] body.has-wallpaper .yw-footer {
   cursor: default;
 }
 
+/* Pressing Enter in the search bar now triggers this button instead of
+   the in-window 🔎 search (see the searchInput keydown handler in
+   youtube-window.js) — this flash is the visual confirmation of *that*,
+   distinct from a plain mouse click: a quick orange pulse so it's clear
+   which button just fired without having to watch the status line. */
+@keyframes yw-external-key-flash {
+  0% {
+    background: #ff9500;
+    box-shadow: 0 0 0 0 rgba(255, 149, 0, 0.55);
+  }
+  60% {
+    background: #ff9500;
+    box-shadow: 0 0 0 9px rgba(255, 149, 0, 0);
+  }
+  100% {
+    background: #ff0000;
+    box-shadow: 0 0 0 0 rgba(255, 149, 0, 0);
+  }
+}
+
+.yw-search-external-btn.yw-key-triggered {
+  animation: yw-external-key-flash 0.55s ease-out;
+}
+
 .yw-status {
   font-size: 0.72rem;
   color: var(--ink-soft);
