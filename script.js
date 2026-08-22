@@ -399,6 +399,13 @@ const pageSingleGroup = document.getElementById("page-single-group");
 const pageDualGroup = document.getElementById("page-dual-group");
 const mergePageBarsToggle = document.getElementById("merge-page-bars-toggle");
 const showScrollbarToggle = document.getElementById("show-scrollbar-toggle");
+const hideAudioWindowControlsToggle = document.getElementById("hide-audio-window-controls-toggle");
+const hideFormButtonsToggle = document.getElementById("hide-form-buttons-toggle");
+const showAddEntryBtnToggle = document.getElementById("show-add-entry-btn-toggle");
+const showFetchAiBtnToggle = document.getElementById("show-fetch-ai-btn-toggle");
+const showAiSettingsBtnToggle = document.getElementById("show-ai-settings-btn-toggle");
+const showSearchGeminiBtnToggle = document.getElementById("show-search-gemini-btn-toggle");
+const showBookTitleFieldToggle = document.getElementById("show-book-title-field-toggle");
 
 const topageConfirmModal = document.getElementById("topage-confirm-modal");
 const topageConfirmOkBtn = document.getElementById("topage-confirm-ok-btn");
@@ -3099,6 +3106,122 @@ if (showScrollbarToggle) {
   });
 }
 setShowScrollbar(getShowScrollbar());
+
+/* ---------------------------------------------------------------------
+   AUDIO WINDOW — HIDE CONTROL BUTTONS (⚙️ Fetch limits → Audio Window).
+   On: hides the US/UK, Prev/Next, and Remove-from-Window button rows in
+   the 🎧 Audio Window (#vocab-audio-window), shrinking it to just the
+   word + definitions — for anyone driving it via keyboard hotkeys
+   instead of the on-screen buttons. Looks up the audio window element
+   fresh each time rather than relying on the `vocabAudioWindow` const
+   declared later in this file, so it works regardless of load order.
+   Persisted so the choice survives a refresh.
+--------------------------------------------------------------------- */
+const HIDE_AUDIO_WINDOW_CONTROLS_STORAGE = "litVocabHideAudioWindowControls";
+
+function getHideAudioWindowControls() {
+  try {
+    return localStorage.getItem(HIDE_AUDIO_WINDOW_CONTROLS_STORAGE) === "true"; // default: off (buttons shown)
+  } catch (err) {
+    return false;
+  }
+}
+
+function setHideAudioWindowControls(hide) {
+  const win = document.getElementById("vocab-audio-window");
+  if (win) win.classList.toggle("vaw-compact", hide);
+  if (hideAudioWindowControlsToggle) hideAudioWindowControlsToggle.checked = hide;
+  try {
+    localStorage.setItem(HIDE_AUDIO_WINDOW_CONTROLS_STORAGE, String(hide));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+if (hideAudioWindowControlsToggle) {
+  hideAudioWindowControlsToggle.addEventListener("change", () => {
+    setHideAudioWindowControls(hideAudioWindowControlsToggle.checked);
+  });
+}
+setHideAudioWindowControls(getHideAudioWindowControls());
+
+/* ---------------------------------------------------------------------
+   ADD WORD FORM BUTTONS — SHOW/HIDE (⚙️ Fetch limits → Add Word Form
+   Buttons). Five independently-hideable items in the Add Word form:
+   the Add Entry button, the Fetch with AI button, the AI Settings link,
+   the Search Gemini button, and the Book Title field. A "Hide All"
+   master switch overrides all five at once; when it's off, each item
+   follows its own tick. Elements are looked up fresh (not via consts
+   declared later in this file) so this works regardless of load order.
+   Persisted so the choice survives a refresh.
+--------------------------------------------------------------------- */
+const FORM_BUTTONS_VISIBILITY_STORAGE = "litVocabFormButtonsVisibility";
+
+const FORM_BUTTON_VISIBILITY_ITEMS = [
+  { id: "entry-form-submit-btn", key: "addEntry", toggle: () => showAddEntryBtnToggle },
+  { id: "ai-fetch-btn", key: "fetchAi", toggle: () => showFetchAiBtnToggle },
+  { id: "ai-settings-btn", key: "aiSettings", toggle: () => showAiSettingsBtnToggle },
+  { id: "search-gemini-btn", key: "searchGemini", toggle: () => showSearchGeminiBtnToggle },
+  { id: "book-title-form-group", key: "bookTitle", toggle: () => showBookTitleFieldToggle },
+];
+
+function getFormButtonsVisibilityState() {
+  const defaults = { hideAll: false, addEntry: true, fetchAi: true, aiSettings: true, searchGemini: true, bookTitle: true };
+  try {
+    const raw = localStorage.getItem(FORM_BUTTONS_VISIBILITY_STORAGE);
+    if (!raw) return defaults;
+    return Object.assign(defaults, JSON.parse(raw));
+  } catch (err) {
+    return defaults;
+  }
+}
+
+function saveFormButtonsVisibilityState(state) {
+  try {
+    localStorage.setItem(FORM_BUTTONS_VISIBILITY_STORAGE, JSON.stringify(state));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function applyFormButtonsVisibility(state) {
+  if (hideFormButtonsToggle) hideFormButtonsToggle.checked = state.hideAll;
+
+  FORM_BUTTON_VISIBILITY_ITEMS.forEach(({ id, key, toggle }) => {
+    const el = document.getElementById(id);
+    const individuallyVisible = state[key] !== false;
+    if (el) el.style.display = state.hideAll || !individuallyVisible ? "none" : "";
+
+    const toggleEl = toggle();
+    if (toggleEl) {
+      toggleEl.checked = individuallyVisible;
+      toggleEl.disabled = state.hideAll;
+      const row = toggleEl.closest(".form-buttons-visibility-row");
+      if (row) row.classList.toggle("is-disabled", state.hideAll);
+    }
+  });
+}
+
+let formButtonsVisibilityState = getFormButtonsVisibilityState();
+applyFormButtonsVisibility(formButtonsVisibilityState);
+
+if (hideFormButtonsToggle) {
+  hideFormButtonsToggle.addEventListener("change", () => {
+    formButtonsVisibilityState.hideAll = hideFormButtonsToggle.checked;
+    saveFormButtonsVisibilityState(formButtonsVisibilityState);
+    applyFormButtonsVisibility(formButtonsVisibilityState);
+  });
+}
+
+FORM_BUTTON_VISIBILITY_ITEMS.forEach(({ key, toggle }) => {
+  const toggleEl = toggle();
+  if (!toggleEl) return;
+  toggleEl.addEventListener("change", () => {
+    formButtonsVisibilityState[key] = toggleEl.checked;
+    saveFormButtonsVisibilityState(formButtonsVisibilityState);
+    applyFormButtonsVisibility(formButtonsVisibilityState);
+  });
+});
 
 /* ---------------------------------------------------------------------
    DISPLAY SIZES — search bar width, definition text size, and the size

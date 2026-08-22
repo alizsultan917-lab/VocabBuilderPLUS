@@ -536,6 +536,16 @@ body.has-wallpaper .vaw-header {
   flex: 1;
 }
 
+/* Compact mode: toggled via ⚙️ Fetch limits → Audio Window → "Hide Control
+   Buttons". Hides the US/UK, Prev/Next, and Remove rows so the window
+   shrinks to just the word + definitions — for keyboard-hotkey users who
+   don't need the on-screen buttons. */
+.vocab-audio-window.vaw-compact .vaw-pron-row,
+.vocab-audio-window.vaw-compact .vaw-cycle-row,
+.vocab-audio-window.vaw-compact .vaw-delete-row {
+  display: none;
+}
+
 /* ---------- Audio window body controls: track the active accent ---------
    .icon-btn/.btn-secondary normally hardcode the app's fixed --border/
    --blue-pale/--blue-deep tokens rather than --accent-color-*, so on
@@ -980,6 +990,40 @@ body.has-wallpaper .vaw-header {
   text-transform: uppercase;
   letter-spacing: 0.4px;
   color: var(--ink-soft);
+}
+
+/* ---------- "Add Word Form Buttons" individual show/hide ticks ---------- */
+.form-buttons-visibility-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--border);
+}
+
+.form-buttons-visibility-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.form-buttons-visibility-row input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+.form-buttons-visibility-row.is-disabled {
+  opacity: 0.5;
+}
+
+.form-buttons-visibility-row.is-disabled input[type="checkbox"] {
+  cursor: not-allowed;
 }
 
 /* ---------- Bucket labels in the main entries table ---------- */

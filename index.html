@@ -171,6 +171,57 @@
         </div>
 
         <div class="limits-group">
+          <h4 class="limits-group-title">Audio Window</h4>
+          <div class="bubbly-toggle-row">
+            <div class="bubbly-toggle-label">
+              <span class="bubbly-toggle-title">Hide Control Buttons</span>
+              <span class="bubbly-toggle-hint">On: hides the US/UK, Prev/Next, and Remove buttons in the 🎧 Audio Window so it shrinks to just the word and definition — handy if you drive it with keyboard hotkeys instead. Off shows all buttons as before.</span>
+            </div>
+            <label class="switch" for="hide-audio-window-controls-toggle">
+              <input type="checkbox" id="hide-audio-window-controls-toggle">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="limits-group">
+          <h4 class="limits-group-title">Add Word Form Buttons</h4>
+          <div class="bubbly-toggle-row">
+            <div class="bubbly-toggle-label">
+              <span class="bubbly-toggle-title">Hide All</span>
+              <span class="bubbly-toggle-hint">Hides Add Entry, Fetch with AI, AI Settings, Search Gemini, and the Book Title field all at once. Turn this off to show/hide each one individually below.</span>
+            </div>
+            <label class="switch" for="hide-form-buttons-toggle">
+              <input type="checkbox" id="hide-form-buttons-toggle">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+
+          <div class="form-buttons-visibility-list">
+            <label class="form-buttons-visibility-row">
+              <input type="checkbox" id="show-add-entry-btn-toggle" checked>
+              <span>Add Entry</span>
+            </label>
+            <label class="form-buttons-visibility-row">
+              <input type="checkbox" id="show-fetch-ai-btn-toggle" checked>
+              <span>Fetch with AI</span>
+            </label>
+            <label class="form-buttons-visibility-row">
+              <input type="checkbox" id="show-ai-settings-btn-toggle" checked>
+              <span>AI Settings</span>
+            </label>
+            <label class="form-buttons-visibility-row">
+              <input type="checkbox" id="show-search-gemini-btn-toggle" checked>
+              <span>Search Gemini</span>
+            </label>
+            <label class="form-buttons-visibility-row">
+              <input type="checkbox" id="show-book-title-field-toggle" checked>
+              <span>Book Title</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="limits-group">
           <h4 class="limits-group-title">Definitions</h4>
           <div class="limits-field-row">
             <label for="system-def-limit-input">System (Dictionary)</label>
@@ -769,7 +820,7 @@
           <span id="vaw-pending-tag" class="tag tag-manual hidden" title="This word will also be saved into the 🎧 Audio Window when you click Add Entry">🎧 Will also save to Audio Window</span>
 
           <!-- Book title lives here, right beside the action buttons -->
-          <div class="form-group">
+          <div class="form-group" id="book-title-form-group">
             <label for="book-input">Book Title</label>
             <input type="text" id="book-input" required placeholder="e.g. The Great Gatsby" list="book-suggestions">
             <datalist id="book-suggestions"></datalist>
