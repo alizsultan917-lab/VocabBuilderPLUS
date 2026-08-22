@@ -405,6 +405,7 @@ const showAddEntryBtnToggle = document.getElementById("show-add-entry-btn-toggle
 const showFetchAiBtnToggle = document.getElementById("show-fetch-ai-btn-toggle");
 const showAiSettingsBtnToggle = document.getElementById("show-ai-settings-btn-toggle");
 const showSearchGeminiBtnToggle = document.getElementById("show-search-gemini-btn-toggle");
+const showRestartGeminiBtnToggle = document.getElementById("show-restart-gemini-btn-toggle");
 const showBookTitleFieldToggle = document.getElementById("show-book-title-field-toggle");
 
 const topageConfirmModal = document.getElementById("topage-confirm-modal");
@@ -3162,11 +3163,12 @@ const FORM_BUTTON_VISIBILITY_ITEMS = [
   { id: "ai-fetch-btn", key: "fetchAi", toggle: () => showFetchAiBtnToggle },
   { id: "ai-settings-btn", key: "aiSettings", toggle: () => showAiSettingsBtnToggle },
   { id: "search-gemini-btn", key: "searchGemini", toggle: () => showSearchGeminiBtnToggle },
+  { id: "restart-gemini-tab-btn", key: "restartGemini", toggle: () => showRestartGeminiBtnToggle },
   { id: "book-title-form-group", key: "bookTitle", toggle: () => showBookTitleFieldToggle },
 ];
 
 function getFormButtonsVisibilityState() {
-  const defaults = { hideAll: false, addEntry: true, fetchAi: true, aiSettings: true, searchGemini: true, bookTitle: true };
+  const defaults = { hideAll: false, addEntry: true, fetchAi: true, aiSettings: true, searchGemini: true, restartGemini: true, bookTitle: true };
   try {
     const raw = localStorage.getItem(FORM_BUTTONS_VISIBILITY_STORAGE);
     if (!raw) return defaults;
@@ -10732,6 +10734,18 @@ if (searchGeminiBtn) {
   });
 }
 
+// "Restart Gemini Tab" button — asks the extension to close whatever
+// Gemini tab(s) are currently open and open a fresh one. Pure tab
+// management (no word needed, nothing typed into the new tab) — meant
+// for when a Gemini tab has gotten stuck or broken and the fastest fix
+// is a clean one instead of hunting down and closing it yourself.
+const restartGeminiTabBtn = document.getElementById("restart-gemini-tab-btn");
+if (restartGeminiTabBtn) {
+  restartGeminiTabBtn.addEventListener("click", () => {
+    window.postMessage({ type: "RESTART_GEMINI_TAB" }, window.location.origin);
+  });
+}
+
 // Gemini's "direct URL to a representative image" is frequently a
 // hallucinated/dead link — LLMs are unreliable at producing real,
 // resolvable image URLs. Probe it with a throwaway Image() first; if it
@@ -10850,6 +10864,28 @@ window.addEventListener("message", (event) => {
     "The Gemini Bridge extension isn't responding — this usually happens right after it's been " +
       "reloaded/updated. Please refresh this page (and the Gemini tab) and try again."
   );
+});
+
+// Receives a video URL relayed by the extension after you picked a
+// video on the youtube.com tab opened by the YouTube Window's 🌐
+// button (the "Search on YouTube.com" round trip). By the time this
+// arrives the extension has already closed that tab and focused this
+// one — all that's left to do here is actually load the video.
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  if (event.origin !== window.location.origin) return;
+  if (!event.data || event.data.type !== "YOUTUBE_VIDEO_SELECTED") return;
+
+  console.log("[VocabBridge] script.js received YOUTUBE_VIDEO_SELECTED:", event.data.payload);
+
+  try {
+    const url = event.data.payload && typeof event.data.payload.url === "string" ? event.data.payload.url : "";
+    if (url && window.YouTubeWindow && typeof window.YouTubeWindow.loadVideo === "function") {
+      window.YouTubeWindow.loadVideo(url, { source: "bridge" });
+    }
+  } catch (err) {
+    console.error("[VocabBridge] Ignored a malformed YOUTUBE_VIDEO_SELECTED message:", err);
+  }
 });
 
 // Handshake: tells the extension (if installed) that resetFormPendingState/
@@ -11331,6 +11367,7 @@ definitionsList.addEventListener("click", (e) => {
 
     focusGeminiTab: ["F7"],
     focusAppTab: ["F8"],
+    restartGeminiTab: ["Backquote"],
 
     // Focus mappings — jump straight into the Word / Page bars. Only
     // "From Page" had a dedicated binding before; "To Page" (the other
@@ -11393,6 +11430,7 @@ definitionsList.addEventListener("click", (e) => {
     { key: "manualBackup", label: "Manual Backup / Save Layout (💾 Storage)", group: "Header Bar" },
 
     { key: "searchGemini", label: "Search Gemini", group: "Main Actions" },
+    { key: "restartGeminiTab", label: "Restart Gemini Tab (Close & Reopen)", group: "Main Actions" },
     { key: "fetchAi", label: "Fetch with AI", group: "Main Actions" },
     { key: "addEntry", label: "Add Entry", group: "Main Actions" },
     { key: "addManualDefinition", label: "Add Manual Definition", group: "Main Actions" },
@@ -11908,6 +11946,7 @@ definitionsList.addEventListener("click", (e) => {
       [document.getElementById("entry-form-submit-btn"), "addEntry", "Add Entry"],
       [aiFetchBtn, "fetchAi", "Fetch with AI"],
       [typeof searchGeminiBtn !== "undefined" ? searchGeminiBtn : null, "searchGemini", "Search Gemini"],
+      [typeof restartGeminiTabBtn !== "undefined" ? restartGeminiTabBtn : null, "restartGeminiTab", "Restart Gemini Tab"],
       [addDefinitionBtn, "addManualDefinition", "Add this definition"],
       [addImageBtn, "addManualImage", "Add this image"],
       [pronUsBtn, "playUs", "Play American pronunciation"],
@@ -12156,6 +12195,11 @@ definitionsList.addEventListener("click", (e) => {
       case "searchGemini":
         e.preventDefault();
         if (typeof searchGeminiBtn !== "undefined") searchGeminiBtn?.click();
+        break;
+
+      case "restartGeminiTab":
+        e.preventDefault();
+        if (typeof restartGeminiTabBtn !== "undefined") restartGeminiTabBtn?.click();
         break;
 
       case "fetchAi":

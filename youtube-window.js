@@ -531,6 +531,8 @@
   const YW_STATE_STORAGE = "vocabRegister_youtubeWindowState"; // { left, top, width, height }
   const YW_API_KEY_STORAGE = "vocabRegister_youtubeApiKey"; // user's own free YouTube Data API v3 key
   const YW_LOOP_STORAGE = "vocabRegister_youtubeLoopEnabled"; // "true" | "false"
+  const YW_VOLUME_STORAGE = "vocabRegister_youtubeVolume"; // 0-100, last slider value
+  const YW_MUTED_STORAGE = "vocabRegister_youtubeMuted"; // "true" | "false"
 
   const YW_MIN_WIDTH = 320;
   const YW_MIN_HEIGHT = 220;
@@ -570,9 +572,18 @@
   const titleEl = document.getElementById("yw-title");
   const playDotEl = document.getElementById("yw-play-dot");
   const loopBtn = document.getElementById("yw-loop-btn");
+  const volumeSlider = document.getElementById("yw-volume-slider");
+  const muteBtn = document.getElementById("yw-mute-btn");
   const openExternalBtn = document.getElementById("yw-open-external-btn");
   const settingsBtn = document.getElementById("yw-settings-btn");
   const settingsPanel = document.getElementById("yw-settings-panel");
+  // Escape the youtube window's `overflow: hidden` (and its transform,
+  // which would otherwise pin `position: fixed` right back to it too) by
+  // parking the panel directly under <body>. positionSettingsPanel()
+  // below then places it with real fixed coordinates every time it opens.
+  if (settingsPanel && settingsPanel.parentElement !== document.body) {
+    document.body.appendChild(settingsPanel);
+  }
   const apiKeyInput = document.getElementById("yw-api-key-input");
   const apiKeySaveBtn = document.getElementById("yw-api-key-save-btn");
   const apiKeyStatusEl = document.getElementById("yw-api-key-status");
@@ -587,6 +598,7 @@
   const emptyStateTextEl = document.getElementById("yw-empty-state-text");
   const searchForm = document.getElementById("yw-search-form");
   const searchInput = document.getElementById("yw-search-input");
+  const searchExternalBtn = document.getElementById("yw-search-external-btn");
   const tabVideosBtn = document.getElementById("yw-tab-videos-btn");
   const tabChannelsBtn = document.getElementById("yw-tab-channels-btn");
   const statusEl = document.getElementById("yw-status");
@@ -613,6 +625,12 @@
   let pendingChannelQuery = null; // an oldest/newest channel lookup typed before a key was configured
   let pendingChannelSearchTerm = null; // a channel *search* (Channels tab) typed before a key was configured
   let loopEnabled = loadJson(YW_LOOP_STORAGE, false) === true;
+  let playerReady = false; // true once the current YT.Player has fired onReady
+  let playerVolume = (() => {
+    const v = loadJson(YW_VOLUME_STORAGE, 100);
+    return typeof v === "number" && Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 100;
+  })();
+  let playerMuted = loadJson(YW_MUTED_STORAGE, false) === true;
 
   // Part 4: which search mode the footer's tabs are on. Purely a UI/routing
   // flag — it never owns any results itself, so switching it back and forth
@@ -1111,6 +1129,7 @@
       }
       player = null;
     }
+    playerReady = false;
     const target = document.getElementById("yw-iframe-target");
     if (target) target.remove();
   }
@@ -1189,11 +1208,84 @@
         origin: window.location.origin || undefined,
       },
       events: {
+        onReady: onPlayerReady,
         onStateChange: onPlayerStateChange,
         onError: onPlayerError,
       },
     });
   }
+
+  // Fires once per YT.Player instance, when it's actually ready to accept
+  // setVolume()/mute() calls (calling those before this fires either
+  // throws or silently no-ops, depending on browser). Applies whatever
+  // volume/mute state the slider already has. The player instance is
+  // reused across loadVideoById() calls (see mountPlayer above), so its
+  // volume carries over to later videos on its own — no need to reapply.
+  function onPlayerReady() {
+    playerReady = true;
+    try {
+      player.setVolume(playerVolume);
+      if (playerMuted) player.mute();
+      else player.unMute();
+    } catch {
+      /* non-fatal */
+    }
+    reflectVolumeUI();
+  }
+
+  // Keeps the slider's thumb position and the mute button's icon/label in
+  // sync with playerVolume/playerMuted — called after any change to
+  // either, from either the slider, the mute button, or a fresh player
+  // becoming ready.
+  function reflectVolumeUI() {
+    const effectiveVolume = playerMuted ? 0 : playerVolume;
+    if (volumeSlider) volumeSlider.value = String(effectiveVolume);
+    if (muteBtn) {
+      const icon = effectiveVolume === 0 ? "🔇" : effectiveVolume < 50 ? "🔉" : "🔊";
+      muteBtn.textContent = icon;
+      muteBtn.setAttribute("aria-pressed", String(playerMuted));
+      muteBtn.title = playerMuted ? "Unmute" : "Mute";
+      muteBtn.setAttribute("aria-label", playerMuted ? "Unmute" : "Mute");
+    }
+  }
+  reflectVolumeUI(); // reflect the restored state immediately, before any player exists
+
+  volumeSlider?.addEventListener("input", () => {
+    const v = Math.min(100, Math.max(0, parseInt(volumeSlider.value, 10) || 0));
+    playerVolume = v || playerVolume || 100; // never let the *stored* volume collapse to 0 from a mute
+    playerMuted = v === 0;
+    saveJson(YW_VOLUME_STORAGE, playerVolume);
+    saveJson(YW_MUTED_STORAGE, playerMuted);
+    if (playerReady && player) {
+      try {
+        player.setVolume(v);
+        if (v === 0) player.mute();
+        else player.unMute();
+      } catch {
+        /* non-fatal */
+      }
+    }
+    reflectVolumeUI();
+  });
+
+  muteBtn?.addEventListener("click", () => {
+    playerMuted = !playerMuted;
+    if (!playerMuted && playerVolume === 0) playerVolume = 100; // unmuting from a zeroed slider restores audible volume
+    saveJson(YW_MUTED_STORAGE, playerMuted);
+    saveJson(YW_VOLUME_STORAGE, playerVolume);
+    if (playerReady && player) {
+      try {
+        if (playerMuted) player.mute();
+        else {
+          player.unMute();
+          player.setVolume(playerVolume);
+        }
+      } catch {
+        /* non-fatal */
+      }
+    }
+    reflectVolumeUI();
+  });
 
   function setPlayingIndicator(on) {
     playDotEl?.classList.toggle("hidden", !on);
@@ -2794,8 +2886,27 @@
   // it used to, every one of those callers would also fire a video
   // search when the key was saved, alongside whatever it actually meant
   // to do.
+  // Places the (now body-level) settings panel under the ⚙ button using
+  // real fixed-viewport coordinates, and caps its own max-height to
+  // whatever vertical space is actually left in the viewport below it —
+  // so it always gets an internal scrollbar instead of being cut off
+  // with no way to reach the rest of its content.
+  function positionSettingsPanel() {
+    if (!settingsPanel || !settingsBtn) return;
+    const btnRect = settingsBtn.getBoundingClientRect();
+    const margin = 6;
+    const top = btnRect.bottom + margin;
+    const right = Math.max(8, window.innerWidth - btnRect.right);
+    const availableHeight = window.innerHeight - top - 12;
+    settingsPanel.style.top = `${Math.max(8, top)}px`;
+    settingsPanel.style.right = `${right}px`;
+    settingsPanel.style.left = "auto";
+    settingsPanel.style.maxHeight = `${Math.max(140, availableHeight)}px`;
+  }
+
   function openSettingsPanel(prefillQuery) {
     settingsPanel?.classList.remove("hidden");
+    positionSettingsPanel();
     settingsBtn?.setAttribute("aria-expanded", "true");
     if (apiKeyStatusEl) {
       apiKeyStatusEl.textContent = prefillQuery
@@ -3021,6 +3132,30 @@
   });
 
   /* ----------------------------------------------------------------------
+     SEARCH ON YOUTUBE.COM (Gemini Bridge extension) — sends whatever is
+     currently typed in the search bar to the extension, which opens/
+     reuses a real youtube.com tab and shows actual search results there
+     (thumbnails, channel branding, live badges — everything the in-
+     window API-key results can't replicate). The moment a video is
+     picked on that tab, the extension relays its URL back here (see the
+     YOUTUBE_VIDEO_SELECTED listener in script.js), the tab closes
+     itself, and focus returns to this app automatically — no manual
+     copy/paste, no manual tab-switching. Entirely inert with no error
+     if the extension isn't installed; this only ever talks over
+     window.postMessage, same as the Search Gemini button.
+  ---------------------------------------------------------------------- */
+  searchExternalBtn?.addEventListener("click", () => {
+    const q = (searchInput?.value || "").trim();
+    if (!q) {
+      showStatus("Type something to search first.", 2000);
+      searchInput?.focus();
+      return;
+    }
+    window.postMessage({ type: "YOUTUBE_SEARCH_EXTERNAL", query: q }, window.location.origin);
+    showStatus(`Opening YouTube.com for “${escapeHtml(q)}”… pick a video there and you'll land right back here.`, 4000);
+  });
+
+  /* ----------------------------------------------------------------------
      CHANNEL FINDER WIRING
   ---------------------------------------------------------------------- */
   channelToggleBtn?.addEventListener("click", () => {
@@ -3072,7 +3207,8 @@
     let startTop = 0;
 
     dragHandle.addEventListener("mousedown", (e) => {
-      if (e.target.closest(".icon-btn")) return;
+      if (!e.target.closest(".yw-drag-grip")) return;
+      closeSettingsPanel();
       dragging = true;
       const rect = win.getBoundingClientRect();
       startX = e.clientX;
@@ -3187,6 +3323,7 @@
     if (win.offsetWidth > capW) win.style.width = `${Math.max(YW_MIN_WIDTH, capW)}px`;
     if (win.offsetHeight > capH) win.style.height = `${Math.max(YW_MIN_HEIGHT, capH)}px`;
     clampToViewport();
+    if (settingsPanel && !settingsPanel.classList.contains("hidden")) positionSettingsPanel();
   });
 
   /* ----------------------------------------------------------------------

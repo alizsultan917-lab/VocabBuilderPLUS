@@ -210,7 +210,7 @@
           <div class="bubbly-toggle-row">
             <div class="bubbly-toggle-label">
               <span class="bubbly-toggle-title">Hide All</span>
-              <span class="bubbly-toggle-hint">Hides Add Entry, Fetch with AI, AI Settings, Search Gemini, and the Book Title field all at once. Turn this off to show/hide each one individually below.</span>
+              <span class="bubbly-toggle-hint">Hides Add Entry, Fetch with AI, AI Settings, Search Gemini, Restart Gemini Tab, and the Book Title field all at once. Turn this off to show/hide each one individually below.</span>
             </div>
             <label class="switch" for="hide-form-buttons-toggle">
               <input type="checkbox" id="hide-form-buttons-toggle">
@@ -234,6 +234,10 @@
             <label class="form-buttons-visibility-row">
               <input type="checkbox" id="show-search-gemini-btn-toggle" checked>
               <span>Search Gemini</span>
+            </label>
+            <label class="form-buttons-visibility-row">
+              <input type="checkbox" id="show-restart-gemini-btn-toggle" checked>
+              <span>Restart Gemini Tab</span>
             </label>
             <label class="form-buttons-visibility-row">
               <input type="checkbox" id="show-book-title-field-toggle" checked>
@@ -836,6 +840,9 @@
             <button type="button" id="search-gemini-btn" class="btn btn-gemini" title="Opens Gemini in another tab and searches this word (requires the Gemini Bridge extension)">
               <span class="gemini-btn-icon">✨</span> <span class="gemini-btn-label">Search Gemini</span>
             </button>
+            <button type="button" id="restart-gemini-tab-btn" class="btn btn-gemini" title="Closes the current Gemini tab (if one is open) and opens a fresh one (requires the Gemini Bridge extension)">
+              <span class="gemini-btn-icon">🔄</span> <span class="gemini-btn-label">Restart Gemini Tab</span>
+            </button>
           </div>
           <span id="ai-fetch-status" class="ai-fetch-status hidden"></span>
           <span id="vaw-pending-tag" class="tag tag-manual hidden" title="This word will also be saved into the 🎧 Audio Window when you click Add Entry">🎧 Will also save to Audio Window</span>
@@ -1388,13 +1395,17 @@
      youtube-window.js stores in localStorage) — nothing ever opens in a
      new tab; picking a result plays it in the same window. -->
 <div id="vocab-youtube-window" class="vocab-youtube-window hidden" aria-hidden="true">
-  <div class="yw-header" id="yw-drag-handle" title="Drag to move">
+  <div class="yw-header" id="yw-drag-handle">
     <div class="yw-header-main">
-      <span class="yw-drag-grip" aria-hidden="true">⠿</span>
+      <span class="yw-drag-grip" id="yw-drag-grip" aria-hidden="true" title="Drag to move">⠿</span>
       <span id="yw-play-dot" class="yw-play-dot hidden" title="Playing">🔊</span>
       <span id="yw-title" class="yw-title">YouTube</span>
     </div>
     <div class="yw-header-actions">
+      <div class="yw-volume-control" id="yw-volume-control">
+        <button type="button" id="yw-mute-btn" class="icon-btn" title="Mute" aria-label="Mute" aria-pressed="false">🔊</button>
+        <input type="range" id="yw-volume-slider" class="yw-volume-slider" min="0" max="100" step="1" value="100" aria-label="YouTube volume" title="Volume">
+      </div>
       <button type="button" id="yw-loop-btn" class="icon-btn" title="Loop this video: off" aria-pressed="false" aria-label="Loop this video">🔁</button>
       <button type="button" id="yw-open-external-btn" class="icon-btn" title="Open on YouTube.com — for Like, Subscribe, Save, Download, and everything else only Google's own site can do" aria-label="Open this video on YouTube.com" disabled>↗</button>
       <button type="button" id="yw-settings-btn" class="icon-btn" title="YouTube search settings" aria-label="YouTube search settings" aria-haspopup="true" aria-expanded="false">⚙</button>
@@ -1442,6 +1453,7 @@
     <form id="yw-search-form" class="yw-search-form">
       <input type="text" id="yw-search-input" class="yw-search-input" placeholder="Search YouTube…" autocomplete="off" spellcheck="false" aria-label="Search YouTube or paste a video link">
       <button type="submit" id="yw-search-btn" class="yw-search-btn" title="Search / load link" aria-label="Search or load link">🔎</button>
+      <button type="button" id="yw-search-external-btn" class="yw-search-btn yw-search-external-btn" title="Search this on YouTube.com in a new tab — pick a video there and it's brought back here automatically (requires the Gemini Bridge extension)" aria-label="Search on YouTube.com in a new tab">🌐</button>
     </form>
     <button type="button" id="yw-channel-toggle-btn" class="yw-channel-toggle-btn">📺 Channel: oldest / newest video ▾</button>
     <div id="yw-channel-form" class="yw-channel-form hidden">
