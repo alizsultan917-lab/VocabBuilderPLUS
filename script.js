@@ -85,7 +85,7 @@ const GLASS_TRANSPARENCY_STORAGE = "litVocabGlassTransparency";
 const GLASS_BLUR_STORAGE = "litVocabGlassBlur";
 const GLASS_TINT_STORAGE = "litVocabGlassTint";
 const APP_VOLUME_STORAGE = "litVocabAppVolume";
-const VOLUME_BOOST_STORAGE = "litVocabVolumeBoost";
+const APP_BRIGHTNESS_STORAGE = "litVocabAppBrightness";
 // 🤍 Panel Whiteness — extra white backing layered only on panels/cards
 // (see the --panel-whiteness-main/--panel-whiteness-sub rules in
 // style.css), independent of the three glass keys above so it can
@@ -248,15 +248,12 @@ const GLASS_TINT_MAX = 100;
 const DEFAULT_APP_VOLUME = 100; // % — 0 = silent, 100 = normal/native max
 const APP_VOLUME_MIN = 0;
 const APP_VOLUME_MAX = 100;
-// The booster goes ABOVE 100% by routing recorded dictionary audio clips
-// through a Web Audio GainNode (a plain <audio>.volume is hard-capped at
-// 1.0 by every browser — there's no way past that without Web Audio).
-// Only applies to those recorded clips; the on-device/Google-Translate
-// fallback voices are still capped at 100% by the SpeechSynthesis API
-// itself, with no Web Audio route available for them.
-const DEFAULT_VOLUME_BOOST = 100; // % of normal — 100 = no boost, 500 = 5x
-const VOLUME_BOOST_MIN = 100;
-const VOLUME_BOOST_MAX = 500;
+// In-app brightness — a CSS filter over the app's own rendered content,
+// same idea as In-App Volume: it can't touch the screen's actual
+// backlight (no webpage can), it just dims/brightens what's drawn here.
+const DEFAULT_APP_BRIGHTNESS = 100; // % — 100 = normal, <100 dimmer, >100 brighter
+const APP_BRIGHTNESS_MIN = 50;
+const APP_BRIGHTNESS_MAX = 150;
 
 const LOOKUP_TIMEOUT_MS = 8000;
 
@@ -532,11 +529,10 @@ const manualDefLimitInput = document.getElementById("manual-def-limit-input");
 const systemImgLimitInput = document.getElementById("system-img-limit-input");
 const aiImgLimitInput = document.getElementById("ai-img-limit-input");
 const manualImgLimitInput = document.getElementById("manual-img-limit-input");
-const systemVolumeInput = document.getElementById("system-volume-input");
 const appVolumeInput = document.getElementById("app-volume-input");
 const appVolumeValue = document.getElementById("app-volume-value");
-const volumeBoostInput = document.getElementById("volume-boost-input");
-const volumeBoostValue = document.getElementById("volume-boost-value");
+const appBrightnessInput = document.getElementById("app-brightness-input");
+const appBrightnessValue = document.getElementById("app-brightness-value");
 
 const displayToggleBtn = document.getElementById("display-toggle-btn");
 const displayPanel = document.getElementById("display-panel");
@@ -3023,10 +3019,10 @@ function initFetchLimitsUI() {
     appVolumeInput.value = av;
     appVolumeValue.textContent = `${av}%`;
   }
-  if (volumeBoostInput) {
-    const vb = getVolumeBoost();
-    volumeBoostInput.value = vb;
-    volumeBoostValue.textContent = `${vb}%`;
+  if (appBrightnessInput) {
+    const ab = getAppBrightness();
+    appBrightnessInput.value = ab;
+    appBrightnessValue.textContent = `${ab}%`;
   }
 }
 
@@ -6013,22 +6009,19 @@ function initFishField() {
 }
 
 /* ---------------------------------------------------------------------
-   VOLUME — three controls, but only two are things a webpage can
-   actually do (see the "Computer (System) Volume" slider in
-   index.html, which is deliberately disabled — no browser API exists
-   for a page to read or change the OS/master volume; that's a
-   security boundary, not a missing feature here):
+   VOLUME — In-App Volume applies to both recorded dictionary audio
+   clips and the SpeechSynthesis fallback voices. There is deliberately
+   no "boost past 100%" control here: a plain <audio>.volume tops out at
+   1.0 in every browser, and pushing recorded clips louder than that
+   requires routing them through the Web Audio API — which sounded like
+   a nice option, but doesn't help the SpeechSynthesis fallback voices
+   used whenever a word has no recorded clip (there's no Web Audio hook
+   for synthesized speech at all), so it ended up doing nothing for a
+   lot of real words and was removed rather than sit there half-working.
 
-     1. In-App Volume (0-100%) — applies to both recorded dictionary
-        audio clips and the SpeechSynthesis fallback voices.
-     2. Volume Booster (100-500%) — pushes recorded audio clips louder
-        than their normal maximum via a Web Audio GainNode. Native
-        <audio>.volume cannot exceed 1.0 in any browser, so boosting
-        past 100% only works by routing playback through Web Audio
-        instead of relying on that property. This does NOT extend to
-        the on-device/Google Translate fallback voices — the
-        SpeechSynthesis API has no Web Audio hook, so those stay
-        capped at whatever In-App Volume is set to.
+   The "Computer (System) Volume" slider in index.html stays disabled
+   for the same kind of reason — no browser API lets a webpage read or
+   change the OS/master volume at all.
 --------------------------------------------------------------------- */
 function getAppVolume() {
   try {
@@ -6047,77 +6040,30 @@ function setAppVolume(n) {
   }
 }
 
-function getVolumeBoost() {
+function getAppBrightness() {
   try {
-    const v = parseInt(localStorage.getItem(VOLUME_BOOST_STORAGE), 10);
-    return Number.isFinite(v) ? clampRange(v, VOLUME_BOOST_MIN, VOLUME_BOOST_MAX, DEFAULT_VOLUME_BOOST) : DEFAULT_VOLUME_BOOST;
+    const v = parseInt(localStorage.getItem(APP_BRIGHTNESS_STORAGE), 10);
+    return Number.isFinite(v) ? clampRange(v, APP_BRIGHTNESS_MIN, APP_BRIGHTNESS_MAX, DEFAULT_APP_BRIGHTNESS) : DEFAULT_APP_BRIGHTNESS;
   } catch (err) {
-    return DEFAULT_VOLUME_BOOST;
+    return DEFAULT_APP_BRIGHTNESS;
   }
 }
 
-function setVolumeBoost(n) {
+function setAppBrightness(n) {
   try {
-    localStorage.setItem(VOLUME_BOOST_STORAGE, String(clampRange(n, VOLUME_BOOST_MIN, VOLUME_BOOST_MAX, DEFAULT_VOLUME_BOOST)));
+    localStorage.setItem(APP_BRIGHTNESS_STORAGE, String(clampRange(n, APP_BRIGHTNESS_MIN, APP_BRIGHTNESS_MAX, DEFAULT_APP_BRIGHTNESS)));
   } catch (err) {
     // non-fatal
   }
 }
 
-// One shared AudioContext, created lazily on first playback (creating one
-// before any user gesture would leave it "suspended" in most browsers).
-let sharedAudioCtx = null;
-function getSharedAudioCtx() {
-  const Ctor = window.AudioContext || window.webkitAudioContext;
-  if (!Ctor) return null;
-  if (!sharedAudioCtx) sharedAudioCtx = new Ctor();
-  if (sharedAudioCtx.state === "suspended") sharedAudioCtx.resume().catch(() => {});
-  return sharedAudioCtx;
+// Applied as a CSS filter on the root element (see the `html { filter:
+// brightness(var(--app-brightness)) }` rule in style.css) — purely
+// visual, purely client-side, and independent of the disabled "Computer
+// (System) Volume"-style hardware controls above.
+function applyAppBrightness(n) {
+  document.documentElement.style.setProperty("--app-brightness", (clampRange(n, APP_BRIGHTNESS_MIN, APP_BRIGHTNESS_MAX, DEFAULT_APP_BRIGHTNESS) / 100).toFixed(2));
 }
-
-// Routes a freshly-created <audio> element through a GainNode set to
-// (In-App Volume × Volume Booster) BEFORE it starts playing, so a boost
-// above 100% actually takes effect — a plain `audio.volume = 1.5` is
-// silently clamped back to 1 by the browser and does nothing. Each
-// <audio> element can only ever be wired into Web Audio once, which is
-// fine here since tryPlayAudio()/preloadAudioUrl() always create a new
-// element per clip rather than reusing one.
-function applyVolumeToAudioElement(audioEl) {
-  const level = (getAppVolume() / 100) * (getVolumeBoost() / 100);
-  try {
-    const ctx = getSharedAudioCtx();
-    if (!ctx) throw new Error("Web Audio unavailable");
-    const source = ctx.createMediaElementSource(audioEl);
-    const gainNode = ctx.createGain();
-    gainNode.gain.value = level;
-    source.connect(gainNode).connect(ctx.destination);
-    // The native property is capped at 1 anyway; leave it there and let
-    // the GainNode do the real work so boosting past 100% isn't undone.
-    audioEl.volume = 1;
-  } catch (err) {
-    // Web Audio blocked/unsupported (or CORS on the clip prevents
-    // createMediaElementSource) — fall back to native volume, which
-    // still honors In-App Volume, just without any boost past 100%.
-    audioEl.volume = Math.min(1, level);
-  }
-}
-
-// Unlock/pre-warm the shared AudioContext (used for the volume booster)
-// on the very first interaction anywhere on the page, so by the time
-// someone actually clicks a pronounce button it's already running
-// instead of racing its own unlock — see the "suspended" handling in
-// tryPlayAudio() for why that race mattered.
-function primeSharedAudioCtx() {
-  try {
-    getSharedAudioCtx();
-  } catch (err) {
-    console.warn("AudioContext warm-up failed:", err);
-  }
-  document.removeEventListener("pointerdown", primeSharedAudioCtx);
-  document.removeEventListener("keydown", primeSharedAudioCtx);
-}
-document.addEventListener("pointerdown", primeSharedAudioCtx, { once: true });
-document.addEventListener("keydown", primeSharedAudioCtx, { once: true });
 
 // The three glass sliders — transparency, blur, and tint — only make
 // sense once Liquid Interface is on, so they're read/written the same
@@ -7197,12 +7143,17 @@ if (appVolumeInput) {
   });
 }
 
-if (volumeBoostInput) {
-  volumeBoostInput.addEventListener("input", () => {
-    volumeBoostValue.textContent = `${volumeBoostInput.value}%`;
-    setVolumeBoost(volumeBoostInput.value);
+if (appBrightnessInput) {
+  appBrightnessInput.addEventListener("input", () => {
+    appBrightnessValue.textContent = `${appBrightnessInput.value}%`;
+    setAppBrightness(appBrightnessInput.value);
+    applyAppBrightness(appBrightnessInput.value);
   });
 }
+// Apply the saved brightness immediately on load, not just once the
+// panel is opened, so a returning visitor sees their chosen level
+// right away instead of the default until they revisit the panel.
+applyAppBrightness(getAppBrightness());
 
 glassTransparencyInput.addEventListener("input", () => {
   glassTransparencyValue.textContent = `${glassTransparencyInput.value}%`;
@@ -9239,10 +9190,9 @@ function speakWithBrowserTTS(word, accent, voice = pickVoice(accent)) {
     }
   }
   utterance.rate = 0.9;
-  // SpeechSynthesisUtterance.volume is 0-1 and browsers clamp anything
-  // above 1 right back down to 1 — so In-App Volume applies here, but
-  // the Volume Booster (which needs Web Audio) has nothing to attach to
-  // for synthesized speech and is intentionally not applied.
+  // SpeechSynthesisUtterance.volume is 0-1 — browsers clamp anything
+  // above 1 back down to 1, so In-App Volume applies (0-100%) but
+  // there's no way to go louder than "normal" for synthesized speech.
   utterance.volume = getAppVolume() / 100;
   window.speechSynthesis.speak(utterance);
 }
@@ -9290,7 +9240,7 @@ function preloadAudioUrl(url) {
 function tryPlayAudio(url) {
   return new Promise((resolve, reject) => {
     const audio = new Audio(url);
-    applyVolumeToAudioElement(audio); // In-App Volume + Volume Booster (see VOLUME section above)
+    audio.volume = getAppVolume() / 100; // In-App Volume (see VOLUME section above)
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
@@ -9305,21 +9255,7 @@ function tryPlayAudio(url) {
       fn(arg);
     };
     audio.addEventListener("error", () => finish(reject, new Error("load error")), { once: true });
-    // IMPORTANT: if the shared AudioContext used for volume boosting is
-    // still "suspended" (true the very first time it's created, and
-    // sometimes again after the tab loses focus), starting playback
-    // before resume() finishes means the audio renders total silence for
-    // however long the unlock takes — the clip plays "into the void."
-    // Wait for resume to actually settle first so nothing gets swallowed.
-    const ctx = sharedAudioCtx;
-    const startPlayback = () => {
-      audio.play().then(() => finish(resolve)).catch((err) => finish(reject, err));
-    };
-    if (ctx && ctx.state === "suspended") {
-      ctx.resume().then(startPlayback).catch(startPlayback);
-    } else {
-      startPlayback();
-    }
+    audio.play().then(() => finish(resolve)).catch((err) => finish(reject, err));
   });
 }
 

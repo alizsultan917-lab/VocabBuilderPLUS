@@ -129,6 +129,14 @@
    half of this fix (percentage-based saved offsets). */
 html {
   scrollbar-gutter: stable;
+  /* In-App Brightness (⚙️ Fetch limits → Volume & Brightness). Applied
+     here rather than on body: a CSS filter creates a new containing
+     block for any fixed-position descendant (the header, the floating
+     Audio/Map windows, modals) — putting it on `html`, which always
+     matches the viewport, means those stay positioned exactly as
+     before instead of shifting if it were applied to a lower element. */
+  filter: brightness(var(--app-brightness, 1));
+  transition: filter 0.15s ease;
 }
 
 /* Scrollbar visibility toggle (⚙️ Fetch limits → Scrollbar → Show Scrollbar).
