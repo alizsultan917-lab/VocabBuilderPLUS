@@ -10735,14 +10735,19 @@ if (searchGeminiBtn) {
 }
 
 // "Restart Gemini Tab" button — asks the extension to close whatever
-// Gemini tab(s) are currently open and open a fresh one. Pure tab
-// management (no word needed, nothing typed into the new tab) — meant
-// for when a Gemini tab has gotten stuck or broken and the fastest fix
-// is a clean one instead of hunting down and closing it yourself.
+// Gemini tab(s) are currently open and open a fresh one. Tab management
+// first and foremost (works fine with the word bar empty — meant for
+// when a Gemini tab has gotten stuck or broken and the fastest fix is a
+// clean one instead of hunting down and closing it yourself), but if
+// there's a word currently in the word bar, it's sent along too so the
+// extension types that word's prompt into the freshly-opened tab, same
+// as clicking "Search Gemini" right after the restart.
 const restartGeminiTabBtn = document.getElementById("restart-gemini-tab-btn");
 if (restartGeminiTabBtn) {
   restartGeminiTabBtn.addEventListener("click", () => {
-    window.postMessage({ type: "RESTART_GEMINI_TAB" }, window.location.origin);
+    const word = wordInput.value.trim();
+    const bookTitle = bookInput.value.trim();
+    window.postMessage({ type: "RESTART_GEMINI_TAB", word, bookTitle }, window.location.origin);
   });
 }
 
