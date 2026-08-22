@@ -10954,6 +10954,16 @@ window.addEventListener("message", (event) => {
   appReadyAckReceived = true;
   clearInterval(appReadyInterval);
   console.log("[VocabBridge] script.js handshake acknowledged by extension!");
+
+  // The very first SYNC_ACCENT_COLOR postMessage (fired from
+  // applySmartAccentColors() during this page's initial load) almost
+  // always goes out before bridge-app.js has finished loading — same
+  // "content script isn't listening yet" race the APP_READY_MAX_ATTEMPTS
+  // poll above exists to solve for Gemini scrapes. Now that the ack
+  // proves bridge-app.js really is listening, re-run the accent pipeline
+  // so the extension gets the color that was lost, instead of quietly
+  // keeping content-youtube.js's #1a73e8 fallback forever.
+  applySmartAccent();
 });
 
 /* =========================================================================
