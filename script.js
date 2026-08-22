@@ -6102,6 +6102,23 @@ function applyVolumeToAudioElement(audioEl) {
   }
 }
 
+// Unlock/pre-warm the shared AudioContext (used for the volume booster)
+// on the very first interaction anywhere on the page, so by the time
+// someone actually clicks a pronounce button it's already running
+// instead of racing its own unlock — see the "suspended" handling in
+// tryPlayAudio() for why that race mattered.
+function primeSharedAudioCtx() {
+  try {
+    getSharedAudioCtx();
+  } catch (err) {
+    console.warn("AudioContext warm-up failed:", err);
+  }
+  document.removeEventListener("pointerdown", primeSharedAudioCtx);
+  document.removeEventListener("keydown", primeSharedAudioCtx);
+}
+document.addEventListener("pointerdown", primeSharedAudioCtx, { once: true });
+document.addEventListener("keydown", primeSharedAudioCtx, { once: true });
+
 // The three glass sliders — transparency, blur, and tint — only make
 // sense once Liquid Interface is on, so they're read/written the same
 // way as the other display prefs but applied as CSS custom properties
@@ -9288,7 +9305,21 @@ function tryPlayAudio(url) {
       fn(arg);
     };
     audio.addEventListener("error", () => finish(reject, new Error("load error")), { once: true });
-    audio.play().then(() => finish(resolve)).catch((err) => finish(reject, err));
+    // IMPORTANT: if the shared AudioContext used for volume boosting is
+    // still "suspended" (true the very first time it's created, and
+    // sometimes again after the tab loses focus), starting playback
+    // before resume() finishes means the audio renders total silence for
+    // however long the unlock takes — the clip plays "into the void."
+    // Wait for resume to actually settle first so nothing gets swallowed.
+    const ctx = sharedAudioCtx;
+    const startPlayback = () => {
+      audio.play().then(() => finish(resolve)).catch((err) => finish(reject, err));
+    };
+    if (ctx && ctx.state === "suspended") {
+      ctx.resume().then(startPlayback).catch(startPlayback);
+    } else {
+      startPlayback();
+    }
   });
 }
 
