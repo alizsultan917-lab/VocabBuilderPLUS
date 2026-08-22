@@ -1,0 +1,1060 @@
+/* =========================================================================
+   youtube-window.css
+   -------------------------------------------------------------------------
+   Styling for #vocab-youtube-window (see youtube-window.js). Deliberately
+   mirrors .vocab-map-window / .vocab-audio-window's structure and
+   variables — same --radius/--shadow-lift/--accent-color-* tokens, same
+   open/close transition shape, same header-bar drag affordance — so all
+   three floating windows read as one consistent system. Kept minimal on
+   purpose: header, one video area, one search bar. Nothing else.
+   ========================================================================= */
+
+/* ---------- ▶ YouTube Window master toggle (ON state) ---------- */
+#youtube-window-toggle-btn.active {
+  background: var(--accent-color);
+  border-color: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3);
+}
+
+/* A thin pulsing ring means "hidden but still playing" — the window is
+   closed from view but the iframe (and its audio) is still alive. Distinct
+   from .active so the header icon can tell the two states apart at a
+   glance. */
+#youtube-window-toggle-btn.yw-playing-hidden {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--accent-color-soft, #7fa8cc);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 35%, transparent);
+  animation: yw-toggle-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes yw-toggle-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-color) 25%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-color) 40%, transparent); }
+}
+
+.vocab-youtube-window {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  top: auto;
+  left: auto;
+  width: 420px;
+  height: 320px;
+  min-width: 320px;
+  min-height: 220px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  z-index: 98;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  box-shadow: var(--shadow-lift);
+  overflow: hidden;
+
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(10px) scale(0.97);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
+}
+
+.vocab-youtube-window.yw-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0s;
+}
+
+/* Minimize/hide (▤): the panel disappears from view but is deliberately
+   NOT display:none / visibility:hidden — either of those suspends media
+   playback in most browsers. Instead it's squashed to a corner pixel and
+   made non-interactive/invisible via opacity, which keeps the iframe
+   "on screen" as far as the browser's media pipeline is concerned, so
+   YouTube audio/video keeps playing behind the scenes. */
+.vocab-youtube-window.yw-minimized {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 2px !important;
+  height: 2px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  transition: opacity 0.15s ease;
+}
+
+html[data-wallpaper-tone="light"] body.has-wallpaper .vocab-youtube-window {
+  background: var(--accent-color-pale);
+  border-color: var(--accent-color-soft);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--accent-color-deep) 30%, transparent);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html[data-wallpaper-tone="dark"] body.has-wallpaper .vocab-youtube-window {
+  background: var(--accent-color-deep);
+  border-color: color-mix(in srgb, var(--accent-color-soft) 55%, white);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--accent-color-deep) 55%, black);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* ---------- Header ---------- */
+body.has-wallpaper .yw-header {
+  background: linear-gradient(135deg, var(--accent-color-deep), var(--accent-color) 65%, var(--accent-color-soft));
+}
+
+.yw-header {
+  position: relative;
+  z-index: 3;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.6rem;
+  background: linear-gradient(135deg, var(--blue-deep), var(--blue) 65%, #2f78bd);
+  color: #fff;
+  cursor: grab;
+  user-select: none;
+}
+
+.yw-header.yw-dragging,
+.yw-header:active {
+  cursor: grabbing;
+}
+
+.yw-header-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.yw-drag-grip {
+  opacity: 0.6;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.yw-play-dot {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.yw-title {
+  font-family: "Playfair Display", Georgia, serif;
+  font-weight: 700;
+  font-size: 0.98rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.yw-header-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.yw-header-actions .icon-btn {
+  width: 24px;
+  height: 24px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  margin-right: 0;
+  border: none;
+}
+
+.yw-header-actions .icon-btn:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+/* ---------- Settings panel (API key) — small dropdown under the header ---------- */
+.yw-settings-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 8px;
+  z-index: 5;
+  width: min(280px, calc(100% - 16px));
+  padding: 0.65rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--shadow-lift);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.yw-header {
+  position: relative;
+}
+
+.yw-settings-panel.hidden {
+  display: none;
+}
+
+.yw-settings-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.yw-settings-row {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.yw-api-key-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+  font-family: inherit;
+  color: var(--ink);
+}
+
+.yw-api-key-input:focus {
+  outline: none;
+  border-color: var(--accent-color-soft, var(--blue-soft));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 18%, transparent);
+}
+
+.yw-settings-hint {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--ink-soft);
+}
+
+.yw-settings-hint.hidden {
+  display: none;
+}
+
+.yw-settings-hint a {
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
+/* ---------- Quota / estimated API usage area (Part 9) — lives inside
+   the settings panel (reuses that surface rather than opening a new
+   one), a small labeled stat grid rather than one run-on sentence, so
+   "estimated requests / cached / avoided / this session" are each
+   legible at a glance. Explicitly labeled "Estimated API usage" and
+   captioned as browser-local, never Google's own counter — see the
+   quota engine's own comments in youtube-window.js for why. ---------- */
+.yw-quota-status {
+  margin-top: 0.15rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--border);
+}
+
+.yw-quota-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.yw-quota-caveat {
+  font-weight: 400;
+  font-style: italic;
+}
+
+.yw-quota-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem 0.5rem;
+}
+
+.yw-quota-stat {
+  min-width: 0;
+  padding: 0.3rem 0.4rem;
+  border-radius: 8px;
+  background: var(--blue-pale, rgba(37, 99, 168, 0.08));
+}
+
+.yw-quota-stat strong {
+  display: block;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.yw-quota-stat span {
+  display: block;
+  font-size: 0.65rem;
+  color: var(--ink-soft);
+  line-height: 1.3;
+}
+
+.yw-quota-warning {
+  margin: 0.45rem 0 0;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+/* ---------- Loop toggle / open-on-YouTube header buttons ---------- */
+.yw-header-actions .icon-btn#yw-loop-btn[aria-pressed="true"] {
+  background: #fff;
+  color: var(--accent-color, var(--blue));
+}
+
+.yw-header-actions .icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.yw-header-actions .icon-btn:disabled:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* ---------- Channel oldest/newest finder ---------- */
+.yw-channel-toggle-btn {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+  padding: 0.1rem 0;
+  cursor: pointer;
+}
+
+.yw-channel-toggle-btn:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.yw-channel-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.yw-channel-form.hidden {
+  display: none;
+}
+
+/* ---------- Search results list (rendered in-window, never a new tab) ---------- */
+.yw-results {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.yw-results.hidden {
+  display: none;
+}
+
+.yw-results-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.2rem 0.3rem 0.4rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.78rem;
+}
+
+.yw-results-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yw-results-clear-btn {
+  flex-shrink: 0;
+  border: none;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.yw-results-clear-btn:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.yw-result-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.35rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: #fff;
+  transition: background 0.12s ease;
+}
+
+.yw-result-item:hover,
+.yw-result-item:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+  outline: none;
+}
+
+.yw-result-thumb {
+  flex-shrink: 0;
+  width: 88px;
+  height: 50px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.yw-result-text {
+  min-width: 0;
+}
+
+.yw-result-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.yw-result-channel {
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.65);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Result card metadata (Part 3: search) ---------- */
+.yw-result-meta {
+  margin-top: 0.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.yw-result-meta:empty {
+  display: none;
+}
+
+.yw-result-meta-dot {
+  opacity: 0.5;
+}
+
+.yw-result-duration {
+  font-variant-numeric: tabular-nums;
+}
+
+.yw-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.yw-live-badge-live {
+  background: rgba(220, 50, 50, 0.85);
+  color: #fff;
+}
+
+.yw-live-badge-upcoming {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.yw-result-desc {
+  margin-top: 0.2rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* ---------- Pagination footer ---------- */
+.yw-results-footer {
+  padding: 0.2rem 0.3rem 0.4rem;
+}
+
+.yw-results-loadmore-btn {
+  width: 100%;
+  padding: 0.45rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.yw-results-loadmore-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.yw-results-end {
+  margin: 0;
+  padding: 0.3rem 0;
+  text-align: center;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.yw-results-message {
+  padding: 1rem 0.6rem;
+  text-align: center;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.75);
+  line-height: 1.4;
+}
+
+.yw-results-retry-btn {
+  display: block;
+  margin: 0 auto;
+}
+
+/* ---------- Back-to-results pill, floated over the player (Part 3) ---------- */
+.yw-back-to-results-btn {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 4;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: none;
+  background: rgba(20, 30, 45, 0.65);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, opacity 0.12s ease;
+}
+
+.yw-back-to-results-btn:hover {
+  background: rgba(20, 30, 45, 0.85);
+}
+
+.yw-back-to-results-btn.hidden {
+  display: none;
+}
+
+/* ---------- Video / content area ---------- */
+.yw-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #0b0f14;
+}
+
+.yw-video-wrap,
+.yw-video-wrap iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.yw-empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 1.25rem;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.yw-empty-state .yw-empty-icon {
+  font-size: 1.8rem;
+  opacity: 0.8;
+}
+
+.yw-empty-state p {
+  margin: 0;
+  font-size: 0.85rem;
+  max-width: 26em;
+  line-height: 1.4;
+}
+
+.yw-empty-state.hidden {
+  display: none;
+}
+
+.yw-video-wrap.hidden {
+  display: none;
+}
+
+/* ---------- Search-mode tabs (Videos / Channels — Part 4) ---------- */
+.yw-search-tabs {
+  display: flex;
+  gap: 0.3rem;
+  margin-bottom: 0.1rem;
+}
+
+.yw-tab-btn {
+  flex: 1;
+  padding: 0.32rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.yw-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.yw-tab-btn.active {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: #fff;
+}
+
+html[data-wallpaper-tone="dark"] body.has-wallpaper .yw-tab-btn {
+  background: color-mix(in srgb, var(--accent-color-deep) 55%, black);
+  border-color: color-mix(in srgb, var(--accent-color-soft) 40%, transparent);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+html[data-wallpaper-tone="dark"] body.has-wallpaper .yw-tab-btn.active {
+  background: var(--accent-color);
+  color: #fff;
+}
+
+/* ---------- Channel result cards (search results list, Channels tab) ---------- */
+.yw-channel-thumb {
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.yw-channel-result-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yw-channel-result-id {
+  margin-top: 0.1rem;
+  font-size: 0.66rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: rgba(255, 255, 255, 0.45);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yw-channel-result-stats {
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.65);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.yw-channel-result-stats span:not(:last-child)::after {
+  content: "·";
+  margin-left: 0.3rem;
+  opacity: 0.5;
+}
+
+.yw-channel-result-desc {
+  margin-top: 0.2rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* ---------- Channel detail view (opens inside the window, Part 4) ---------- */
+.yw-channel-detail {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.5rem 0.6rem 0.8rem;
+  color: #fff;
+}
+
+.yw-channel-detail.hidden {
+  display: none;
+}
+
+.yw-channel-detail-back-btn {
+  border: none;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.yw-channel-detail-back-btn:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.yw-channel-detail-header {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  margin-top: 0.6rem;
+}
+
+.yw-channel-detail-header > div {
+  min-width: 0;
+}
+
+.yw-channel-detail-avatar {
+  flex-shrink: 0;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.yw-channel-detail-name {
+  font-family: "Playfair Display", Georgia, serif;
+  font-weight: 700;
+  font-size: 1.05rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.yw-channel-detail-handle {
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.yw-channel-detail-id {
+  margin-top: 0.2rem;
+  font-size: 0.68rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: rgba(255, 255, 255, 0.4);
+  word-break: break-all;
+}
+
+.yw-channel-detail-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  margin-top: 0.75rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.yw-channel-detail-stat {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.yw-channel-detail-stat strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.yw-channel-detail-desc {
+  margin-top: 0.7rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.78);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.yw-channel-detail-loading,
+.yw-channel-detail-message {
+  padding: 1rem 0.3rem;
+  text-align: center;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.75);
+  line-height: 1.4;
+}
+
+/* ---------- Channel video browser (Part 5) — lives inside the channel
+   detail view, below the stats/description. Video cards reuse the
+   existing .yw-result-item / .yw-result-thumb / .yw-result-text family
+   from the video search results (same visual language, no new classes
+   needed for the cards themselves). ---------- */
+.yw-channel-videos {
+  margin-top: 0.85rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.yw-channel-videos-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.15rem;
+}
+
+.yw-channel-videos-head h4 {
+  margin: 0;
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+/* Sort controls (Part 6) — shared button style for both the channel
+   video browser's Newest/Oldest/Most popular row and the video search
+   results' Relevance/Newest/Most popular row below. */
+.yw-channel-sort,
+.yw-search-sort {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.yw-search-sort {
+  padding: 0 0.3rem 0.4rem;
+}
+
+.yw-channel-sort-btn {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.16rem 0.5rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.yw-channel-sort-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.yw-channel-sort-btn.active {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  cursor: default;
+}
+
+/* Truncation caveat (Part 6) — shown above a channel's Oldest/Most
+   popular video list only when the channel had more uploads than the
+   full-catalog scan could cover, so the ordering isn't claimed as
+   globally accurate. Reuses .yw-results-message's sizing, just left-
+   aligned and slightly dimmer since it's a caveat, not primary content. */
+.yw-channel-sort-truncated {
+  text-align: left;
+  padding: 0.3rem 0.3rem 0.6rem;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.72rem;
+}
+
+/* ---------- Footer: search / URL bar ---------- */
+.yw-footer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  background: rgba(255, 255, 255, 0.6);
+  border-top: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+html[data-wallpaper-tone="dark"] body.has-wallpaper .yw-footer {
+  background: color-mix(in srgb, var(--accent-color-deep) 70%, black);
+  border-top-color: color-mix(in srgb, var(--accent-color-soft) 40%, transparent);
+}
+
+.yw-search-form {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.yw-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-size: 0.85rem;
+  font-family: inherit;
+  color: var(--ink);
+}
+
+.yw-search-input:focus {
+  outline: none;
+  border-color: var(--accent-color-soft, var(--blue-soft));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 18%, transparent);
+}
+
+.yw-search-btn {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent-color);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+
+.yw-search-btn:hover {
+  background: var(--accent-color-deep);
+}
+
+.yw-search-btn:active {
+  transform: scale(0.94);
+}
+
+.yw-status {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  min-height: 1em;
+  line-height: 1.3;
+}
+
+.yw-status.hidden {
+  display: none;
+}
+
+.yw-status a {
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
+/* ---------- Resize handle (bottom-right corner grip) ---------- */
+.yw-resize-handle {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  cursor: nwse-resize;
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(20, 30, 45, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 4;
+  user-select: none;
+  touch-action: none;
+  opacity: 0.75;
+  transition: background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+}
+
+.yw-resize-handle svg {
+  display: block;
+  pointer-events: none;
+}
+
+.yw-resize-handle:hover {
+  opacity: 1;
+  background: rgba(20, 30, 45, 0.58);
+  transform: scale(1.06);
+}
+
+.yw-resize-handle.yw-resizing {
+  opacity: 1;
+  background: var(--accent-color);
+  transform: scale(1.1);
+}
+
+.yw-resize-tooltip {
+  position: absolute;
+  right: 36px;
+  bottom: 10px;
+  z-index: 4;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(20, 30, 45, 0.78);
+  color: #fff;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.yw-resize-tooltip.hidden {
+  display: none;
+}
+
+/* ---------- Small screens: keep it usable, not just shrink it blindly ---------- */
+@media (max-width: 480px) {
+  .vocab-youtube-window {
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+    max-width: none;
+  }
+}

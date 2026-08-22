@@ -28,16 +28,30 @@
     https://content.googleapis.com because the Picker itself renders
     in an iframe served from those origins, not from apis.google.com —
     without these the Picker script loads but its window never appears.
+  - frame-src also includes https://www.youtube.com and
+    https://www.youtube-nocookie.com for the floating YouTube window
+    (youtube-window.js). Only YouTube's dedicated /embed/<id> player
+    endpoint is ever loaded there — YouTube's own watch/search pages
+    send X-Frame-Options: SAMEORIGIN and refuse to render in a frame
+    on any other origin regardless of what this CSP allows.
+  - script-src includes https://www.youtube.com because
+    youtube-window.js's mountPlayer() lazily injects
+    https://www.youtube.com/iframe_api the first time a video plays —
+    the official IFrame Player API script, needed so the window can
+    read real playback state (used today for the Loop toggle and the
+    play indicator, and by the richer player controls planned for the
+    ongoing YouTube Window upgrade). Without this the script tag is
+    silently blocked and the player falls back to a dead state.
 -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' https://cdnjs.cloudflare.com https://accounts.google.com https://apis.google.com;
+  script-src 'self' https://cdnjs.cloudflare.com https://accounts.google.com https://apis.google.com https://www.youtube.com;
   style-src 'self' https://fonts.googleapis.com 'unsafe-inline';
   font-src 'self' https://fonts.gstatic.com;
   img-src 'self' https: data: blob:;
   media-src 'self' https: blob: data:;
   connect-src *;
-  frame-src https://accounts.google.com https://docs.google.com https://drive.google.com https://content.googleapis.com;
+  frame-src https://accounts.google.com https://docs.google.com https://drive.google.com https://content.googleapis.com https://www.youtube.com https://www.youtube-nocookie.com;
   object-src 'none';
   base-uri 'self';
   form-action 'self';
@@ -48,6 +62,7 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="wallpaper-enhancements.css">
 <link rel="stylesheet" href="map-window.css">
+<link rel="stylesheet" href="youtube-window.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://apis.google.com/js/api.js" async defer></script>
@@ -108,6 +123,12 @@
     <div id="map-window-widget" class="storage-widget">
       <button type="button" id="map-window-toggle-btn" class="storage-toggle-btn" title="Map Window: OFF" aria-pressed="false">
         <span class="storage-icon">🗺️</span>
+      </button>
+    </div>
+
+    <div id="youtube-window-widget" class="storage-widget">
+      <button type="button" id="youtube-window-toggle-btn" class="storage-toggle-btn" title="YouTube Window: OFF" aria-pressed="false" aria-label="Toggle YouTube window">
+        <span class="storage-icon" aria-hidden="true">▶️</span>
       </button>
     </div>
 
@@ -1356,6 +1377,82 @@
   </div>
 </div>
 
+<!-- ▶ FLOATING YOUTUBE WINDOW — a minimalist, detachable YouTube mini-player.
+     Gated behind the "YouTube Window" master toggle
+     (#youtube-window-toggle-btn), same pattern as the Audio and Map
+     windows above. Hidden by default; all behavior lives in
+     youtube-window.js (loaded after map-window.js). Draggable via the
+     header bar, resizable via the corner handle, position/size restored
+     from localStorage on load. Search results render right here (via the
+     YouTube Data API, using a free key the person supplies once and
+     youtube-window.js stores in localStorage) — nothing ever opens in a
+     new tab; picking a result plays it in the same window. -->
+<div id="vocab-youtube-window" class="vocab-youtube-window hidden" aria-hidden="true">
+  <div class="yw-header" id="yw-drag-handle" title="Drag to move">
+    <div class="yw-header-main">
+      <span class="yw-drag-grip" aria-hidden="true">⠿</span>
+      <span id="yw-play-dot" class="yw-play-dot hidden" title="Playing">🔊</span>
+      <span id="yw-title" class="yw-title">YouTube</span>
+    </div>
+    <div class="yw-header-actions">
+      <button type="button" id="yw-loop-btn" class="icon-btn" title="Loop this video: off" aria-pressed="false" aria-label="Loop this video">🔁</button>
+      <button type="button" id="yw-open-external-btn" class="icon-btn" title="Open on YouTube.com — for Like, Subscribe, Save, Download, and everything else only Google's own site can do" aria-label="Open this video on YouTube.com" disabled>↗</button>
+      <button type="button" id="yw-settings-btn" class="icon-btn" title="YouTube search settings" aria-label="YouTube search settings" aria-haspopup="true" aria-expanded="false">⚙</button>
+      <button type="button" id="yw-hide-btn" class="icon-btn" title="Hide window — keeps playing in the background" aria-label="Hide YouTube window">▤</button>
+      <button type="button" id="yw-close-btn" class="icon-btn" title="Close — stops playback" aria-label="Close YouTube window">✕</button>
+    </div>
+  </div>
+
+  <div id="yw-settings-panel" class="yw-settings-panel hidden">
+    <label for="yw-api-key-input" class="yw-settings-label">YouTube Data API key</label>
+    <div class="yw-settings-row">
+      <input type="password" id="yw-api-key-input" class="yw-api-key-input" placeholder="Paste your API key…" autocomplete="off" spellcheck="false">
+      <button type="button" id="yw-api-key-save-btn" class="btn btn-secondary btn-small">Save</button>
+    </div>
+    <p class="yw-settings-hint">Needed once so search results can load right here instead of leaving the app. Free — in <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener noreferrer">Google Cloud Console</a> enable "YouTube Data API v3" and create a key. Stored only in this browser.</p>
+    <p id="yw-api-key-status" class="yw-settings-hint hidden"></p>
+    <div id="yw-quota-status" class="yw-quota-status" aria-live="polite"></div>
+  </div>
+
+  <div class="yw-body" id="yw-body">
+    <div id="yw-video-wrap" class="yw-video-wrap hidden"></div>
+    <div id="yw-results" class="yw-results hidden"></div>
+    <div id="yw-channel-detail" class="yw-channel-detail hidden"></div>
+    <div id="yw-empty-state" class="yw-empty-state">
+      <span class="yw-empty-icon" aria-hidden="true">▶️</span>
+      <p id="yw-empty-state-text">Search YouTube below, or paste a video link — it'll play right here with full controls.</p>
+    </div>
+    <div id="yw-resize-handle" class="yw-resize-handle" title="Drag to resize">
+      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">
+
+        <path d="M14 2 L2 14 M14 7 L7 14 M14 12 L12 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div id="yw-resize-tooltip" class="yw-resize-tooltip hidden"></div>
+  </div>
+
+  <div class="yw-footer">
+    <!-- Videos / Channels search-mode tabs (Part 4). Each keeps its own
+         state object (searchState / channelSearchState) in youtube-window.js
+         — switching tabs never clears or re-fetches the other's results. -->
+    <div class="yw-search-tabs" id="yw-search-tabs" role="tablist" aria-label="Search mode">
+      <button type="button" id="yw-tab-videos-btn" class="yw-tab-btn active" role="tab" aria-selected="true">🎬 Videos</button>
+      <button type="button" id="yw-tab-channels-btn" class="yw-tab-btn" role="tab" aria-selected="false">📺 Channels</button>
+    </div>
+    <form id="yw-search-form" class="yw-search-form">
+      <input type="text" id="yw-search-input" class="yw-search-input" placeholder="Search YouTube…" autocomplete="off" spellcheck="false" aria-label="Search YouTube or paste a video link">
+      <button type="submit" id="yw-search-btn" class="yw-search-btn" title="Search / load link" aria-label="Search or load link">🔎</button>
+    </form>
+    <button type="button" id="yw-channel-toggle-btn" class="yw-channel-toggle-btn">📺 Channel: oldest / newest video ▾</button>
+    <div id="yw-channel-form" class="yw-channel-form hidden">
+      <input type="text" id="yw-channel-input" class="yw-search-input" placeholder="Channel name, @handle, or URL…" autocomplete="off" spellcheck="false" aria-label="Channel name or URL">
+      <button type="button" id="yw-channel-oldest-btn" class="btn btn-secondary btn-small" data-order="oldest">Oldest</button>
+      <button type="button" id="yw-channel-newest-btn" class="btn btn-secondary btn-small" data-order="newest">Newest</button>
+    </div>
+    <p id="yw-status" class="yw-status hidden"></p>
+  </div>
+</div>
+
 <footer class="site-footer">
   <p>Stored on your device · <span id="footer-total">0</span> words registered</p>
 </footer>
@@ -1380,6 +1477,7 @@
   onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@twemoji/api@latest/dist/twemoji.min.js';s.crossOrigin='anonymous';this.after(s);"></script>
 <script src="map-symbols-data.js"></script>
 <script src="map-window.js"></script>
+<script src="youtube-window.js"></script>
 <script src="perf-monitor.js"></script>
 </body>
 </html>
