@@ -1474,34 +1474,122 @@
       <span id="yw-title" class="yw-title">YouTube</span>
     </div>
     <div class="yw-header-actions">
-      <div class="yw-volume-control" id="yw-volume-control">
+      <div class="yw-volume-control" id="yw-volume-control" data-compact-key="volume">
         <button type="button" id="yw-mute-btn" class="icon-btn" title="Mute" aria-label="Mute" aria-pressed="false">🔊</button>
         <input type="range" id="yw-volume-slider" class="yw-volume-slider" min="0" max="100" step="1" value="100" aria-label="YouTube volume" title="Volume">
       </div>
-      <button type="button" id="yw-loop-btn" class="icon-btn" title="Loop this video: off" aria-pressed="false" aria-label="Loop this video">🔁</button>
-      <button type="button" id="yw-open-external-btn" class="icon-btn" title="Open on YouTube.com — for Like, Subscribe, Save, Download, and everything else only Google's own site can do" aria-label="Open this video on YouTube.com" disabled>↗</button>
+      <button type="button" id="yw-loop-btn" class="icon-btn" title="Loop this video: off" aria-pressed="false" aria-label="Loop this video" data-compact-key="loop">🔁</button>
+      <button type="button" id="yw-open-external-btn" class="icon-btn" title="Open on YouTube.com — for Like, Subscribe, Save, Download, and everything else only Google's own site can do" aria-label="Open this video on YouTube.com" disabled data-compact-key="external">↗</button>
       <!-- Playlist Part 2B1 — "+ Add to Playlist" for whatever's currently
            playing. Wrapped in a position:relative div so the picker
            popover (built in youtube-window.js) can anchor under it, same
            in-flow approach as the ⋮ playlist-row menu. Disabled/enabled
            the same way #yw-open-external-btn already is. -->
-      <div class="yw-header-add-wrap" id="yw-header-add-wrap">
+      <div class="yw-header-add-wrap" id="yw-header-add-wrap" data-compact-key="add">
         <button type="button" id="yw-add-current-btn" class="icon-btn" title="Add to Playlist" aria-label="Add current video to a playlist" aria-haspopup="true" aria-expanded="false" disabled>＋</button>
       </div>
-      <button type="button" id="yw-playlists-btn" class="icon-btn" title="My Playlists" aria-label="My Playlists" aria-pressed="false">🎵</button>
+      <button type="button" id="yw-playlists-btn" class="icon-btn" title="My Playlists" aria-label="My Playlists" aria-pressed="false" data-compact-key="playlists">🎵</button>
       <!-- Part 6 — layout mode. Player-focused (default) always shows the
            video when a track starts; Playlist-focused keeps the playlist
            list on screen instead, with the docked transport bar (below)
            supplying playback controls either way. Display-only — never
            changes what plays. -->
-      <button type="button" id="yw-layout-toggle-btn" class="icon-btn" title="Layout: Player-focused — click for Playlist-focused" aria-label="Switch to playlist-focused layout" aria-pressed="false">▣</button>
+      <button type="button" id="yw-layout-toggle-btn" class="icon-btn" title="Layout: Player-focused — click for Playlist-focused" aria-label="Switch to playlist-focused layout" aria-pressed="false" data-compact-key="layout">▣</button>
+      <!-- Compact Mode (Settings > Compact Mode) always keeps ⚙ itself
+           reachable — it's deliberately never gated behind its own
+           tick-list, or turning Compact Mode on could lock the panel
+           that turns it back off out of reach. It still only appears on
+           hover, same as everything else in the header, once Compact
+           Mode is on (see .yw-compact rules in youtube-window.css). -->
       <button type="button" id="yw-settings-btn" class="icon-btn" title="YouTube search settings" aria-label="YouTube search settings" aria-haspopup="true" aria-expanded="false">⚙</button>
-      <button type="button" id="yw-hide-btn" class="icon-btn" title="Hide window — keeps playing in the background" aria-label="Hide YouTube window">▤</button>
-      <button type="button" id="yw-close-btn" class="icon-btn" title="Close — stops playback" aria-label="Close YouTube window">✕</button>
+      <button type="button" id="yw-hide-btn" class="icon-btn" title="Hide window — keeps playing in the background" aria-label="Hide YouTube window" data-compact-key="hide">▤</button>
+      <button type="button" id="yw-close-btn" class="icon-btn" title="Close — stops playback" aria-label="Close YouTube window" data-compact-key="close">✕</button>
     </div>
   </div>
 
   <div id="yw-settings-panel" class="yw-settings-panel hidden">
+    <!-- ---------------------------------------------------------------
+         HEADER BAR — standalone toggle, independent of Compact Mode.
+         When on, the header is invisible (not even a sliver) until the
+         mouse moves over where it sits at the top of the window; move
+         away and it hides again. Reuses the same storage flag
+         (compactSettings.headerBarMode / #yw-compact-header-bar-toggle)
+         Compact Mode's own "Classic header bar" option used to live
+         under, but applyCompactMode() now applies the .yw-compact-bar
+         class off this toggle alone — Compact Mode no longer needs to
+         be on for it to take effect. See youtube-window.js and the
+         .yw-compact-bar rules in youtube-window.css. ---------------- -->
+    <div class="yw-settings-section" id="yw-header-bar-settings-section">
+      <p class="yw-settings-label">Header Bar</p>
+      <div class="bubbly-toggle-row">
+        <div class="bubbly-toggle-label">
+          <span class="bubbly-toggle-title">Auto-hide header (hover to reveal)</span>
+          <span class="bubbly-toggle-hint">Off (default): the header is always visible. On: the header has zero hint of itself (nothing at all, not even a sliver) until your mouse moves over where it sits, right at the top of the window — then it appears with the title and buttons, and hides again the instant your mouse leaves. Works whether or not Compact Mode below is on.</span>
+        </div>
+        <label class="switch" for="yw-compact-header-bar-toggle">
+          <input type="checkbox" id="yw-compact-header-bar-toggle">
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+        </label>
+      </div>
+    </div>
+    <hr class="yw-settings-divider">
+
+    <!-- ---------------------------------------------------------------
+         COMPACT MODE — collapses the header down to just ⚙ (plus
+         whatever's ticked below), each only appearing on hover, and
+         tucks the search bar away behind the "Focus YouTube Window
+         Search Bar" shortcut. See the "Compact Mode" block in
+         youtube-window.js and the .yw-compact rules in
+         youtube-window.css. --------------------------------------- -->
+    <div class="yw-settings-section" id="yw-compact-settings-section">
+      <p class="yw-settings-label">Compact Mode</p>
+      <div class="bubbly-toggle-row">
+        <div class="bubbly-toggle-label">
+          <span class="bubbly-toggle-title">Enable Compact Mode</span>
+          <span class="bubbly-toggle-hint">The video fills the whole window — no header or footer bar. Controls float on top of it instead, tucked into the top-right corner (out of the way of YouTube's own bottom controls) and only appear when you hover/tap the small grip there, drag it, or press the search shortcut.</span>
+        </div>
+        <label class="switch" for="yw-compact-mode-toggle">
+          <input type="checkbox" id="yw-compact-mode-toggle">
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+        </label>
+      </div>
+
+      <div id="yw-compact-options" class="yw-compact-options hidden">
+        <p class="yw-settings-hint">⚙ always stays reachable on hover so you can get back in here. Everything below only applies while Compact Mode is on.</p>
+
+        <p class="yw-settings-label yw-compact-sublabel">Header buttons allowed in compact mode</p>
+        <p class="yw-settings-hint">Ticked buttons appear right next to ⚙ when you hover the header. Unticked ones stay tucked away — use the quick actions below instead.</p>
+        <div class="yw-compact-tick-list" id="yw-compact-tick-list">
+          <label class="yw-compact-tick"><input type="checkbox" data-compact-tick="volume" checked><span>🔊 Volume</span></label>
+          <label class="yw-compact-tick"><input type="checkbox" data-compact-tick="loop" checked><span>🔁 Loop</span></label>
+          <label class="yw-compact-tick"><input type="checkbox" data-compact-tick="external" checked><span>↗ Open on YouTube.com</span></label>
+          <label class="yw-compact-tick"><input type="checkbox" data-compact-tick="add" checked><span>＋ Add to Playlist</span></label>
+          <label class="yw-compact-tick"><input type="checkbox" data-compact-tick="playlists" checked><span>🎵 My Playlists</span></label>
+          <label class="yw-compact-tick"><input type="checkbox" data-compact-tick="layout" checked><span>▣ Layout</span></label>
+          <label class="yw-compact-tick"><input type="checkbox" data-compact-tick="hide" checked><span>▤ Hide Window</span></label>
+          <label class="yw-compact-tick"><input type="checkbox" data-compact-tick="close"><span>✕ Close Window</span></label>
+        </div>
+        <div class="yw-compact-quick-actions" id="yw-compact-quick-actions">
+          <button type="button" id="yw-compact-hide-btn" class="btn btn-secondary btn-small">▤ Hide Window</button>
+          <button type="button" id="yw-compact-close-btn" class="btn btn-secondary btn-small">✕ Close Window</button>
+        </div>
+
+        <hr class="yw-settings-divider">
+
+        <p class="yw-settings-label yw-compact-sublabel">Search bar</p>
+        <p class="yw-settings-hint">Only appears when you press “Focus YouTube Window Search Bar” — set that key in ⌨️ Keyboard Shortcuts. Choose when it disappears again if you don't end up searching.</p>
+        <div class="yw-compact-tick-list yw-compact-radio-list" id="yw-compact-hide-mode-group" role="radiogroup" aria-label="Search bar auto-hide behavior">
+          <label class="yw-compact-tick"><input type="radio" name="yw-compact-hide-mode" id="yw-compact-hide-mode-timer" value="timer" checked><span>Auto-hide after a delay</span></label>
+          <label class="yw-compact-tick"><input type="radio" name="yw-compact-hide-mode" id="yw-compact-hide-mode-search" value="onlyAfterSearch"><span>Only after search</span></label>
+        </div>
+        <div id="yw-compact-delay-row" class="yw-compact-delay-row">
+          <input type="range" id="yw-compact-delay-slider" class="yw-compact-delay-slider" min="5" max="120" step="1" value="10" aria-label="Search bar auto-hide delay, in seconds, from 5 seconds to 2 minutes">
+          <span id="yw-compact-delay-value" class="yw-compact-delay-value">10s</span>
+        </div>
+      </div>
+    </div>
+    <hr class="yw-settings-divider">
+
     <div class="yw-settings-row yw-stay-tab-row" id="yw-stay-tab-row" title="When off (default): picking a video opens it on the YouTube.com tab, its link is sent back here, then that tab closes and you're returned to this app. When on: picking a video never opens it there — only its link is copied back here — and the YouTube.com tab stays open on the results page so you can keep picking more videos from it.">
       <label class="switch yw-stay-tab-switch" for="yw-stay-tab-toggle">
         <input type="checkbox" id="yw-stay-tab-toggle">
@@ -1544,24 +1632,35 @@
     <div id="yw-resize-tooltip" class="yw-resize-tooltip hidden"></div>
   </div>
 
-  <div class="yw-footer">
-    <!-- Videos / Channels search-mode tabs (Part 4). Each keeps its own
-         state object (searchState / channelSearchState) in youtube-window.js
-         — switching tabs never clears or re-fetches the other's results. -->
-    <div class="yw-search-tabs" id="yw-search-tabs" role="tablist" aria-label="Search mode">
-      <button type="button" id="yw-tab-videos-btn" class="yw-tab-btn active" role="tab" aria-selected="true">🎬 Videos</button>
-      <button type="button" id="yw-tab-channels-btn" class="yw-tab-btn" role="tab" aria-selected="false">📺 Channels</button>
-    </div>
-    <form id="yw-search-form" class="yw-search-form">
-      <input type="text" id="yw-search-input" class="yw-search-input" placeholder="Search YouTube…" autocomplete="off" spellcheck="false" aria-label="Search YouTube or paste a video link">
-      <button type="submit" id="yw-search-btn" class="yw-search-btn" title="Search / load link" aria-label="Search or load link">🔎</button>
-      <button type="button" id="yw-search-external-btn" class="yw-search-btn yw-search-external-btn" title="Search this on YouTube.com in a new tab — pick a video there and it's brought back here automatically (requires the Gemini Bridge extension)" aria-label="Search on YouTube.com in a new tab">🌐</button>
-    </form>
-    <button type="button" id="yw-channel-toggle-btn" class="yw-channel-toggle-btn">📺 Channel: oldest / newest video ▾</button>
-    <div id="yw-channel-form" class="yw-channel-form hidden">
-      <input type="text" id="yw-channel-input" class="yw-search-input" placeholder="Channel name, @handle, or URL…" autocomplete="off" spellcheck="false" aria-label="Channel name or URL">
-      <button type="button" id="yw-channel-oldest-btn" class="btn btn-secondary btn-small" data-order="oldest">Oldest</button>
-      <button type="button" id="yw-channel-newest-btn" class="btn btn-secondary btn-small" data-order="newest">Newest</button>
+  <div class="yw-footer" id="yw-footer">
+    <!-- Compact Mode (Settings > Compact Mode) — everything below that's
+         about typing/picking a search stays grouped in this one wrapper
+         so it can be shown/hidden as a unit: hidden by default in
+         compact mode, revealed only by the "Focus YouTube Window Search
+         Bar" shortcut (see focusSearch() in youtube-window.js), then
+         auto-hidden again per the delay/"only after search" choice in
+         ⚙ Settings. #yw-status stays OUTSIDE this wrapper on purpose —
+         playback/error status lines (e.g. "Error 153") should still be
+         readable even while the search area itself is tucked away. -->
+    <div id="yw-footer-search-area" class="yw-footer-search-area">
+      <!-- Videos / Channels search-mode tabs (Part 4). Each keeps its own
+           state object (searchState / channelSearchState) in youtube-window.js
+           — switching tabs never clears or re-fetches the other's results. -->
+      <div class="yw-search-tabs" id="yw-search-tabs" role="tablist" aria-label="Search mode">
+        <button type="button" id="yw-tab-videos-btn" class="yw-tab-btn active" role="tab" aria-selected="true">🎬 Videos</button>
+        <button type="button" id="yw-tab-channels-btn" class="yw-tab-btn" role="tab" aria-selected="false">📺 Channels</button>
+      </div>
+      <form id="yw-search-form" class="yw-search-form">
+        <input type="text" id="yw-search-input" class="yw-search-input" placeholder="Search YouTube…" autocomplete="off" spellcheck="false" aria-label="Search YouTube or paste a video link">
+        <button type="submit" id="yw-search-btn" class="yw-search-btn" title="Search / load link" aria-label="Search or load link">🔎</button>
+        <button type="button" id="yw-search-external-btn" class="yw-search-btn yw-search-external-btn" title="Search this on YouTube.com in a new tab — pick a video there and it's brought back here automatically (requires the Gemini Bridge extension)" aria-label="Search on YouTube.com in a new tab">🌐</button>
+      </form>
+      <button type="button" id="yw-channel-toggle-btn" class="yw-channel-toggle-btn">📺 Channel: oldest / newest video ▾</button>
+      <div id="yw-channel-form" class="yw-channel-form hidden">
+        <input type="text" id="yw-channel-input" class="yw-search-input" placeholder="Channel name, @handle, or URL…" autocomplete="off" spellcheck="false" aria-label="Channel name or URL">
+        <button type="button" id="yw-channel-oldest-btn" class="btn btn-secondary btn-small" data-order="oldest">Oldest</button>
+        <button type="button" id="yw-channel-newest-btn" class="btn btn-secondary btn-small" data-order="newest">Newest</button>
+      </div>
     </div>
     <p id="yw-status" class="yw-status hidden"></p>
   </div>

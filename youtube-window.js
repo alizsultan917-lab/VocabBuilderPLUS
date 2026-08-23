@@ -1214,6 +1214,11 @@
   // background.js/content-youtube.js), synced over the same postMessage
   // bridge as SYNC_ACCENT_COLOR/SYNC_SHORTCUT_KEYS.
   const YW_STAY_ON_TAB_STORAGE = "vocabRegister_youtubeStayOnTab"; // "true" | "false"
+  // Compact Mode (⚙ Settings > Compact Mode) — { enabled, allowed:
+  // { volume/loop/external/add/playlists/layout/hide/close: bool },
+  // hideMode: "timer" | "onlyAfterSearch", hideSeconds: 5-120 (seconds) }.
+  // See loadCompactSettings() below.
+  const YW_COMPACT_STORAGE = "vocabRegister_youtubeCompactSettings";
 
   const YW_MIN_WIDTH = 320;
   const YW_MIN_HEIGHT = 220;
@@ -1250,6 +1255,11 @@
   if (!toggleBtn || !win) return; // markup not present — nothing to wire up
 
   const dragHandle = document.getElementById("yw-drag-handle");
+  // Compact Mode — the grip doubles as the one always-reachable hover/
+  // tap target that reveals the floating header pill (see the
+  // .yw-compact .yw-drag-grip rules in youtube-window.css and the tap
+  // handler near initDrag() below).
+  const dragGrip = document.getElementById("yw-drag-grip");
   const titleEl = document.getElementById("yw-title");
   const playDotEl = document.getElementById("yw-play-dot");
   const loopBtn = document.getElementById("yw-loop-btn");
@@ -1291,6 +1301,34 @@
   const channelToggleBtn = document.getElementById("yw-channel-toggle-btn");
   const channelForm = document.getElementById("yw-channel-form");
   const channelInput = document.getElementById("yw-channel-input");
+
+  // Compact Mode — settings panel controls + the footer search wrapper.
+  const compactModeToggle = document.getElementById("yw-compact-mode-toggle");
+  const compactHeaderBarToggle = document.getElementById("yw-compact-header-bar-toggle");
+  const compactOptionsEl = document.getElementById("yw-compact-options");
+  const compactTickInputs = Array.from(document.querySelectorAll("#yw-compact-tick-list [data-compact-tick]"));
+  const compactHideModeRadios = Array.from(document.querySelectorAll("input[name='yw-compact-hide-mode']"));
+  const compactDelayRow = document.getElementById("yw-compact-delay-row");
+  const compactDelaySlider = document.getElementById("yw-compact-delay-slider");
+  const compactDelayValueEl = document.getElementById("yw-compact-delay-value");
+  const compactQuickHideBtn = document.getElementById("yw-compact-hide-btn");
+  const compactQuickCloseBtn = document.getElementById("yw-compact-close-btn");
+  const footerSearchArea = document.getElementById("yw-footer-search-area");
+  // Compact Mode — the footer wrapper itself (search area + status line)
+  // is now toggled active/inactive as a whole; see updateFooterActiveState().
+  const footerEl = document.getElementById("yw-footer");
+  // Header buttons a person can grant/revoke hover-visibility to in
+  // compact mode, keyed the same as each element's [data-compact-key].
+  const compactButtonEls = {
+    volume: document.getElementById("yw-volume-control"),
+    loop: document.getElementById("yw-loop-btn"),
+    external: document.getElementById("yw-open-external-btn"),
+    add: document.getElementById("yw-header-add-wrap"),
+    playlists: document.getElementById("yw-playlists-btn"),
+    layout: document.getElementById("yw-layout-toggle-btn"),
+    hide: document.getElementById("yw-hide-btn"),
+    close: document.getElementById("yw-close-btn"),
+  };
 
   // Playlist Part 2A — library/detail views, header entry point, and the
   // two modals (create/rename, delete confirm). The modals live outside
@@ -1366,6 +1404,65 @@
   // flag — it never owns any results itself, so switching it back and forth
   // can't corrupt either `searchState` (videos) or `channelSearchState`.
   let activeSearchMode = "videos"; // "videos" | "channels"
+
+  /* ----------------------------------------------------------------------
+     COMPACT MODE — the video fills the entire window; nothing is
+     reserved above or below it. The header (⚙, plus whatever's ticked
+     "allowed" below) floats as a small top-right pill directly on the
+     video, revealed only by hovering/dragging/tapping its grip dot or
+     having ⚙'s own panel open. The footer (search bar + status line)
+     floats the same way at the bottom, but only appears when it
+     actually has something to show — the search area (after the "Focus
+     YouTube Window Search Bar" shortcut) or a status message — never on
+     hover. One master toggle drives both; see the .yw-compact rules in
+     youtube-window.css and applyCompactMode()/showFooterSearchArea()/
+     updateFooterActiveState() below.
+  ---------------------------------------------------------------------- */
+  const YW_COMPACT_BUTTON_KEYS = ["volume", "loop", "external", "add", "playlists", "layout", "hide", "close"];
+  const YW_COMPACT_DELAY_MIN = 5; // seconds
+  const YW_COMPACT_DELAY_MAX = 120; // seconds (2 min) — slider is a continuous 1s-step range now, not a preset list
+
+  function defaultCompactAllowed() {
+    // Every header button defaults to "allowed" except Close — closing
+    // from a hover-revealed header is easy to hit by accident right next
+    // to Hide/Settings, so it starts off opt-in; the quick-action "✕
+    // Close Window" button in ⚙ Settings always works regardless.
+    const allowed = {};
+    YW_COMPACT_BUTTON_KEYS.forEach((key) => {
+      allowed[key] = key !== "close";
+    });
+    return allowed;
+  }
+
+  function loadCompactSettings() {
+    const raw = loadJson(YW_COMPACT_STORAGE, null);
+    const allowed = defaultCompactAllowed();
+    if (raw && raw.allowed && typeof raw.allowed === "object") {
+      YW_COMPACT_BUTTON_KEYS.forEach((key) => {
+        if (typeof raw.allowed[key] === "boolean") allowed[key] = raw.allowed[key];
+      });
+    }
+    return {
+      enabled: !!(raw && raw.enabled),
+      allowed,
+      // Off by default — the top-right corner pill. On switches to a
+      // full-width header bar that stays completely invisible (no grip,
+      // no hint at all) until the mouse is over where it sits. See the
+      // .yw-compact-bar rules in youtube-window.css.
+      headerBarMode: !!(raw && raw.headerBarMode),
+      hideMode: raw && raw.hideMode === "onlyAfterSearch" ? "onlyAfterSearch" : "timer",
+      hideSeconds:
+        raw && Number.isFinite(raw.hideSeconds) && raw.hideSeconds >= YW_COMPACT_DELAY_MIN && raw.hideSeconds <= YW_COMPACT_DELAY_MAX
+          ? raw.hideSeconds
+          : 10,
+    };
+  }
+
+  let compactSettings = loadCompactSettings();
+
+  function saveCompactSettings() {
+    saveJson(YW_COMPACT_STORAGE, compactSettings);
+  }
 
   /* ----------------------------------------------------------------------
      YOUTUBE API LAYER (Part 2) — the one place every YouTube Data API v3
@@ -1811,9 +1908,13 @@
     if (!statusEl) return;
     statusEl.innerHTML = html;
     statusEl.classList.toggle("hidden", !html);
+    updateFooterActiveState();
     if (statusTimer) clearTimeout(statusTimer);
     if (autoHideMs) {
-      statusTimer = setTimeout(() => statusEl.classList.add("hidden"), autoHideMs);
+      statusTimer = setTimeout(() => {
+        statusEl.classList.add("hidden");
+        updateFooterActiveState();
+      }, autoHideMs);
     }
   }
 
@@ -2193,6 +2294,117 @@
   }
 
   /* ----------------------------------------------------------------------
+     COMPACT MODE — apply state to the DOM, reflect it into the settings
+     panel's controls, and drive the footer search area's reveal/hide.
+  ---------------------------------------------------------------------- */
+  function applyCompactMode() {
+    win.classList.toggle("yw-compact", compactSettings.enabled);
+    // "Classic header bar" (hover-to-reveal header) is now a standalone
+    // toggle, independent of Compact Mode — see the Header Bar settings
+    // section in index.html. It no longer requires compactSettings.enabled.
+    win.classList.toggle("yw-compact-bar", compactSettings.headerBarMode);
+    YW_COMPACT_BUTTON_KEYS.forEach((key) => {
+      const el = compactButtonEls[key];
+      if (!el) return;
+      el.classList.toggle("yw-compact-allowed", !!compactSettings.allowed[key]);
+    });
+    if (!compactSettings.enabled) {
+      // Leaving compact mode: the search area should just be a normal,
+      // always-visible part of the footer again — drop any leftover
+      // "revealed" state/timer from before it was turned off.
+      clearFooterHideTimer();
+      footerSearchArea?.classList.remove("yw-search-area-visible");
+      dragHandle?.classList.remove("yw-revealed");
+    }
+    // The footer overlay's active/inactive state depends on compact mode
+    // itself (inactive-by-default only applies while compact is on), so
+    // re-derive it any time compact mode flips either way.
+    updateFooterActiveState();
+  }
+
+  // Compact Mode — the footer wrapper (search area + status line) floats
+  // over the video with zero footprint until there's actually something
+  // in it worth showing. "Something worth showing" is exactly: the
+  // search area was explicitly revealed (via the search shortcut), or
+  // the status line currently has a real message in it (e.g. "Error
+  // 153"). Called from showFooterSearchArea()/hideFooterSearchArea() and
+  // from showStatus() (both when a message is set and when its auto-hide
+  // timer clears it) so the overlay never lags behind what's actually
+  // inside it. Outside compact mode this is a no-op — the footer is just
+  // a normal, always-visible part of the layout there.
+  function updateFooterActiveState() {
+    if (!footerEl) return;
+    if (!compactSettings.enabled) {
+      footerEl.classList.remove("yw-footer-active");
+      return;
+    }
+    const searchVisible = !!footerSearchArea?.classList.contains("yw-search-area-visible");
+    const hasStatus = !!statusEl && !statusEl.classList.contains("hidden") && statusEl.textContent.trim() !== "";
+    footerEl.classList.toggle("yw-footer-active", searchVisible || hasStatus);
+  }
+
+  function formatCompactDelayLabel(seconds) {
+    if (seconds < 60) return `${seconds}s`;
+    const mins = Math.floor(seconds / 60);
+    const rem = seconds % 60;
+    return rem === 0 ? `${mins} min` : `${mins}m ${rem}s`;
+  }
+
+  function reflectCompactSettingsUI() {
+    if (compactModeToggle) compactModeToggle.checked = compactSettings.enabled;
+    if (compactHeaderBarToggle) compactHeaderBarToggle.checked = compactSettings.headerBarMode;
+    compactOptionsEl?.classList.toggle("hidden", !compactSettings.enabled);
+    compactTickInputs.forEach((input) => {
+      const key = input.dataset.compactTick;
+      input.checked = !!compactSettings.allowed[key];
+    });
+    compactHideModeRadios.forEach((radio) => {
+      radio.checked = radio.value === compactSettings.hideMode;
+    });
+    if (compactDelaySlider) compactDelaySlider.value = String(compactSettings.hideSeconds);
+    if (compactDelayValueEl) compactDelayValueEl.textContent = formatCompactDelayLabel(compactSettings.hideSeconds);
+    compactDelayRow?.classList.toggle("yw-compact-delay-disabled", compactSettings.hideMode === "onlyAfterSearch");
+  }
+
+  // FOOTER SEARCH AREA (Compact Mode) — hidden by default while compact
+  // mode is on; revealed only by showFooterSearchArea() (called from
+  // focusSearch(), i.e. the "Focus YouTube Window Search Bar" shortcut —
+  // never by hover, per the spec), then hidden again either the moment a
+  // real search fires (hideFooterSearchArea(), called from search()/
+  // searchChannelsQuery()/findChannelVideo() below) or, in "Auto-hide
+  // after a delay" mode, once compactSettings.hideSeconds elapses with no
+  // search at all.
+  let footerHideTimer = null;
+  function clearFooterHideTimer() {
+    if (footerHideTimer) {
+      clearTimeout(footerHideTimer);
+      footerHideTimer = null;
+    }
+  }
+  function showFooterSearchArea() {
+    if (!compactSettings.enabled || !footerSearchArea) return;
+    footerSearchArea.classList.add("yw-search-area-visible");
+    updateFooterActiveState();
+    clearFooterHideTimer();
+    if (compactSettings.hideMode === "timer") {
+      footerHideTimer = setTimeout(() => {
+        hideFooterSearchArea();
+      }, compactSettings.hideSeconds * 1000);
+    }
+  }
+  function hideFooterSearchArea() {
+    clearFooterHideTimer();
+    footerSearchArea?.classList.remove("yw-search-area-visible");
+    updateFooterActiveState();
+  }
+  // Called right as a genuine search/lookup is about to run — hides the
+  // search area regardless of hideMode, since "searched something" is
+  // the one condition both auto-hide modes agree should hide it.
+  function hideFooterSearchAreaOnSearch() {
+    if (compactSettings.enabled) hideFooterSearchArea();
+  }
+
+  /* ----------------------------------------------------------------------
      WINDOW CHROME — open/close/hide/show, mirroring the Map Window
   ---------------------------------------------------------------------- */
   function clampToViewport() {
@@ -2259,7 +2471,14 @@
     win.setAttribute("aria-hidden", "false");
     saveJson(YW_ACTIVE_STORAGE, true);
     reflectToggleUI();
-    if (!currentVideoId) searchInput?.focus();
+    if (!currentVideoId) {
+      // Compact Mode — the search bar only ever reveals itself via the
+      // "Focus YouTube Window Search Bar" shortcut (see focusSearch()),
+      // never just because the window opened, so don't auto-focus (and
+      // thereby auto-reveal) a search box that's meant to stay tucked
+      // away until asked for.
+      if (!compactSettings.enabled) searchInput?.focus();
+    }
   }
 
   function show() {
@@ -2362,6 +2581,9 @@
     } else if (isMinimized) {
       show();
     }
+    // Compact Mode — this shortcut is the ONLY way the search bar
+    // reveals itself (never on hover); see showFooterSearchArea().
+    showFooterSearchArea();
     searchInput?.focus();
     searchInput?.select?.();
   }
@@ -5525,6 +5747,7 @@
       searchInput?.focus();
       return false;
     }
+    hideFooterSearchAreaOnSearch();
     if (!apiKey) {
       if (!isActive) open();
       else show();
@@ -6247,6 +6470,11 @@
     settingsPanel?.classList.remove("hidden");
     positionSettingsPanel();
     settingsBtn?.setAttribute("aria-expanded", "true");
+    // Compact Mode — keep the header revealed while its own settings
+    // panel is open, even once the mouse drifts off the header itself
+    // (the panel lives under <body>, not inside .yw-header — see the
+    // reparenting note above dragHandle's declaration).
+    dragHandle?.classList.add("yw-panel-open");
     if (apiKeyStatusEl) {
       apiKeyStatusEl.textContent = prefillQuery
         ? `Add a key to search for “${prefillQuery}” right here.`
@@ -6259,6 +6487,7 @@
   function closeSettingsPanel() {
     settingsPanel?.classList.add("hidden");
     settingsBtn?.setAttribute("aria-expanded", "false");
+    dragHandle?.classList.remove("yw-panel-open");
   }
 
   function search(query) {
@@ -6269,6 +6498,7 @@
       searchInput?.focus();
       return false;
     }
+    hideFooterSearchAreaOnSearch();
 
     // Direct-URL fast path (Part 8): classify the input BEFORE any API
     // work happens. A recognized video URL/ID plays immediately with zero
@@ -6357,6 +6587,7 @@
     const raw = channelInput?.value || "";
     const parsed = parseChannelInput(raw);
     if (!parsed) return;
+    hideFooterSearchAreaOnSearch();
 
     if (!apiKey) {
       if (!isActive) open();
@@ -6406,6 +6637,63 @@
       renderResultsError(raw, err?.message || "Couldn't look that channel up — check your connection and try again.");
     }
   }
+
+  /* ----------------------------------------------------------------------
+     COMPACT MODE WIRING
+  ---------------------------------------------------------------------- */
+  compactModeToggle?.addEventListener("change", () => {
+    compactSettings.enabled = !!compactModeToggle.checked;
+    saveCompactSettings();
+    applyCompactMode();
+    reflectCompactSettingsUI();
+  });
+
+  compactHeaderBarToggle?.addEventListener("change", () => {
+    compactSettings.headerBarMode = !!compactHeaderBarToggle.checked;
+    saveCompactSettings();
+    applyCompactMode();
+  });
+
+  compactTickInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      const key = input.dataset.compactTick;
+      if (!key) return;
+      compactSettings.allowed[key] = !!input.checked;
+      saveCompactSettings();
+      applyCompactMode();
+    });
+  });
+
+  compactHideModeRadios.forEach((radio) => {
+    radio.addEventListener("change", () => {
+      if (!radio.checked) return;
+      compactSettings.hideMode = radio.value === "onlyAfterSearch" ? "onlyAfterSearch" : "timer";
+      saveCompactSettings();
+      reflectCompactSettingsUI();
+      // Switching to "Only after search" while the area happens to be
+      // showing (and a timer is ticking) should stop that timer — it
+      // now only hides once an actual search runs.
+      if (compactSettings.hideMode === "onlyAfterSearch") clearFooterHideTimer();
+    });
+  });
+
+  compactDelaySlider?.addEventListener("input", () => {
+    compactSettings.hideSeconds = Math.min(
+      YW_COMPACT_DELAY_MAX,
+      Math.max(YW_COMPACT_DELAY_MIN, Number(compactDelaySlider.value) || YW_COMPACT_DELAY_MIN)
+    );
+    if (compactDelayValueEl) compactDelayValueEl.textContent = formatCompactDelayLabel(compactSettings.hideSeconds);
+    saveCompactSettings();
+    // Live-adjust an already-running timer to the newly chosen delay,
+    // rather than waiting for the next reveal to pick it up.
+    if (footerHideTimer && compactSettings.hideMode === "timer") showFooterSearchArea();
+  });
+
+  // Quick-action fallback buttons — always work in Compact Mode
+  // regardless of what's ticked in the header tick-list above, so Hide
+  // and Close are never accidentally locked out of reach.
+  compactQuickHideBtn?.addEventListener("click", () => hide());
+  compactQuickCloseBtn?.addEventListener("click", () => close());
 
   /* ----------------------------------------------------------------------
      SETTINGS PANEL WIRING (API key)
@@ -6619,6 +6907,7 @@
   (function initDrag() {
     if (!dragHandle) return;
     let dragging = false;
+    let moved = false;
     let startX = 0;
     let startY = 0;
     let startLeft = 0;
@@ -6628,6 +6917,7 @@
       if (!e.target.closest(".yw-drag-grip")) return;
       closeSettingsPanel();
       dragging = true;
+      moved = false;
       const rect = win.getBoundingClientRect();
       startX = e.clientX;
       startY = e.clientY;
@@ -6643,6 +6933,7 @@
 
     window.addEventListener("mousemove", (e) => {
       if (!dragging) return;
+      if (Math.abs(e.clientX - startX) > 3 || Math.abs(e.clientY - startY) > 3) moved = true;
       const maxLeft = Math.max(0, window.innerWidth - win.offsetWidth);
       const maxTop = Math.max(0, window.innerHeight - win.offsetHeight);
       win.style.left = `${Math.min(Math.max(0, startLeft + (e.clientX - startX)), maxLeft)}px`;
@@ -6654,6 +6945,23 @@
       dragging = false;
       dragHandle.classList.remove("yw-dragging");
       persistState();
+    });
+
+    // Compact Mode — the grip is the only always-present hover target,
+    // which leaves touch users with no way to reveal the header pill at
+    // all (no :hover on touch). A tap that wasn't the tail end of a
+    // drag toggles it open/closed instead; tapping anywhere else in the
+    // window closes it again, same as the header simply losing :hover
+    // does for a mouse.
+    dragGrip?.addEventListener("click", (e) => {
+      if (!compactSettings.enabled || moved) return;
+      e.stopPropagation();
+      dragHandle.classList.toggle("yw-revealed");
+    });
+    win.addEventListener("click", (e) => {
+      if (!compactSettings.enabled || !dragHandle.classList.contains("yw-revealed")) return;
+      if (e.target.closest(".yw-header")) return;
+      dragHandle.classList.remove("yw-revealed");
     });
   })();
 
@@ -6808,6 +7116,8 @@
     reflectLoopUI();
     reflectLayoutModeUI();
     reflectStayOnTabUI();
+    applyCompactMode();
+    reflectCompactSettingsUI();
     syncStayOnTabToExtension();
     reflectOpenExternalUI();
     reflectQuotaUI();

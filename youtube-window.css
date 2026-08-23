@@ -299,6 +299,289 @@ body.has-wallpaper .yw-header {
   background: rgba(255, 255, 255, 0.26);
 }
 
+/* ---------- Compact Mode — header floats over the video ---------------
+   Turned on from ⚙ Settings > Compact Mode (see youtube-window.js). The
+   OLD behavior shrank the header down to a thin strip that still lived
+   in normal layout flow above the video — meaning even "collapsed" it
+   permanently claimed a sliver of the window's own height, visible as a
+   thin bar. This version removes that footprint entirely: the header is
+   pulled out of flow (position:absolute) and overlaid on the video
+   itself, so `.yw-body` (the video) claims the window's *entire* height
+   with nothing reserved above it.
+
+   Three things keep this from ever fighting YouTube's own on-video
+   controls:
+     1. Zero visual footprint at rest — no background, no border, no
+        reserved space — because pointer-events:none on the header shell
+        lets every click fall straight through to the player underneath.
+        Only the small grip dot (`.yw-drag-grip`, repositioned below)
+        and, once revealed, the action pill re-enable pointer-events on
+        themselves.
+     2. Anchored top-RIGHT only, never full-width. YouTube's own chrome
+        lives almost entirely along the *bottom* edge (progress bar,
+        play/volume/captions/settings/fullscreen), and the one thing it
+        ever shows at the *top* is the video title, anchored top-LEFT.
+        Top-right is the one corner that's reliably clear of anything
+        YouTube itself puts there.
+     3. The grip dot is the single always-present hover/tap/drag target
+        (replacing the old full-width drag bar); hovering it, dragging
+        it, tapping it (touch — see the click handler in
+        youtube-window.js), or having ⚙'s own panel open reveals the
+        action pill sliding out from underneath it. Buttons the person
+        hasn't ticked "on" are removed entirely (not just faded) via the
+        [data-compact-key] rule below — reach those through the
+        quick-action buttons inside ⚙ Settings instead.
+   `.yw-dragging` is added by initDrag() for the whole drag gesture;
+   `.yw-panel-open` by openSettingsPanel()/closeSettingsPanel(); and
+   `.yw-revealed` is a tap-toggled class (see youtube-window.js) so
+   touch users — who have no :hover — can still reach these controls.
+   -------------------------------------------------------------------- */
+.vocab-youtube-window.yw-compact:not(.yw-compact-bar) .yw-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 6;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  pointer-events: none;
+  justify-content: flex-end;
+  transition: none;
+}
+
+/* The grip is repositioned from "left edge of a full-width bar" to "a
+   small standalone dot, top-right" — pulled out of the header's flex
+   flow so `.yw-header-actions` (below) is the row's only flex item and
+   can align flush against the window's right edge via the header's own
+   justify-content:flex-end above. */
+.vocab-youtube-window.yw-compact:not(.yw-compact-bar) .yw-header-main {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: visible;
+}
+
+.vocab-youtube-window.yw-compact:not(.yw-compact-bar) .yw-header-main .yw-play-dot,
+.vocab-youtube-window.yw-compact:not(.yw-compact-bar) .yw-header-main .yw-title {
+  display: none;
+}
+
+.vocab-youtube-window.yw-compact:not(.yw-compact-bar) .yw-drag-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin: 0;
+  border-radius: 50%;
+  background: rgba(10, 14, 20, 0.5);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  opacity: 0.45;
+  pointer-events: auto;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.vocab-youtube-window.yw-compact:not(.yw-compact-bar) .yw-header:hover .yw-drag-grip,
+.vocab-youtube-window.yw-compact:not(.yw-compact-bar) .yw-header.yw-dragging .yw-drag-grip,
+.vocab-youtube-window.yw-compact:not(.yw-compact-bar) .yw-header.yw-panel-open .yw-drag-grip,
+.vocab-youtube-window.yw-compact:not(.yw-compact-bar) .yw-header.yw-revealed .yw-drag-grip {
+  opacity: 1;
+  background: rgba(10, 14, 20, 0.68);
+}
+
+/* The action row itself: a single rounded pill, not a bar — sized to
+   its own content, so it never spans further than the buttons it
+   actually holds. margin-right clears the grip dot (22px wide, inset
+   0.5rem from the edge) so the pill slides out from underneath it
+   rather than overlapping it. */
+.vocab-youtube-window.yw-compact:not(.yw-compact-bar) .yw-header-actions {
+  margin: 0.5rem 0.5rem 0 0;
+  margin-right: calc(0.5rem + 22px + 0.35rem);
+  padding: 0.25rem 0.3rem;
+  border-radius: 999px;
+  background: rgba(10, 14, 20, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.vocab-youtube-window.yw-compact:not(.yw-compact-bar) .yw-header:hover .yw-header-actions,
+.vocab-youtube-window.yw-compact:not(.yw-compact-bar) .yw-header.yw-dragging .yw-header-actions,
+.vocab-youtube-window.yw-compact:not(.yw-compact-bar) .yw-header.yw-panel-open .yw-header-actions,
+.vocab-youtube-window.yw-compact:not(.yw-compact-bar) .yw-header.yw-revealed .yw-header-actions {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* ---------- Header Bar — "Classic header bar" / auto-hide header ------
+   Opt-in (⚙ Settings > Header Bar > Auto-hide header), off by default.
+   Standalone toggle — independent of Compact Mode (applyCompactMode()
+   in youtube-window.js drives this purely off compactSettings.headerBarMode,
+   not compactSettings.enabled), so it works with Compact Mode on OR off.
+   With Compact Mode off, this simply replaces the normal always-visible
+   header with the same full-width bar, just hidden until hovered. With
+   Compact Mode on, this is the "full bar" alternative to that mode's
+   corner-pill default. Either way, at rest it is not just transparent,
+   it has ZERO hoverable hint beyond a bare 14px sliver with no color,
+   no grip, nothing rendered at all.
+   The only reason that sliver exists is so there's still something to
+   *place the mouse over* to trigger the reveal — without it, a fully
+   `display:none` header could never be un-hidden by hovering "where it
+   would be", since there'd be nothing there to hover. Moving the mouse
+   into that sliver (or dragging, or having ⚙'s panel open, or a tap on
+   touch — see the .yw-revealed handling in youtube-window.js, shared
+   with the pill above) expands it back to a real header with its usual
+   gradient background and every allowed button, then collapses to
+   nothing again the instant the mouse leaves. */
+.vocab-youtube-window.yw-compact-bar .yw-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 6;
+  min-height: 14px;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  opacity: 0;
+  pointer-events: auto;
+  transition: opacity 0.15s ease, padding 0.15s ease, min-height 0.15s ease, background 0.15s ease;
+}
+
+.vocab-youtube-window.yw-compact-bar .yw-header:hover,
+.vocab-youtube-window.yw-compact-bar .yw-header.yw-dragging,
+.vocab-youtube-window.yw-compact-bar .yw-header.yw-panel-open,
+.vocab-youtube-window.yw-compact-bar .yw-header.yw-revealed {
+  opacity: 1;
+  min-height: 0;
+  padding: 0.55rem 0.6rem;
+  background: linear-gradient(135deg, var(--blue-deep), var(--blue) 65%, #2f78bd);
+}
+
+/* Belt-and-braces alongside the opacity:0 above: nothing inside the
+   invisible sliver is clickable until the header has actually been
+   revealed, so an accidental hover-adjacent click can't fire a button
+   that was never visibly there. */
+.vocab-youtube-window.yw-compact-bar .yw-header-main,
+.vocab-youtube-window.yw-compact-bar .yw-header-actions {
+  pointer-events: none;
+}
+
+.vocab-youtube-window.yw-compact-bar .yw-header:hover .yw-header-main,
+.vocab-youtube-window.yw-compact-bar .yw-header:hover .yw-header-actions,
+.vocab-youtube-window.yw-compact-bar .yw-header.yw-dragging .yw-header-main,
+.vocab-youtube-window.yw-compact-bar .yw-header.yw-dragging .yw-header-actions,
+.vocab-youtube-window.yw-compact-bar .yw-header.yw-panel-open .yw-header-main,
+.vocab-youtube-window.yw-compact-bar .yw-header.yw-panel-open .yw-header-actions,
+.vocab-youtube-window.yw-compact-bar .yw-header.yw-revealed .yw-header-main,
+.vocab-youtube-window.yw-compact-bar .yw-header.yw-revealed .yw-header-actions {
+  pointer-events: auto;
+}
+
+.vocab-youtube-window.yw-compact .yw-header-actions [data-compact-key]:not(.yw-compact-allowed) {
+  display: none !important;
+}
+
+/* ---------- Compact Mode — search bar --------------------------------
+   #yw-footer-search-area wraps the search tabs, search form, and channel
+   finder as one unit (see index.html) so it can collapse/expand as one
+   piece. Hidden by default in compact mode; shown only via JS (see
+   showFooterSearchArea()/hideFooterSearchArea() in youtube-window.js) —
+   triggered by the "Focus YouTube Window Search Bar" shortcut, never by
+   hover, per the spec. #yw-status stays a sibling outside this wrapper
+   so status/error lines are still readable while the search area itself
+   is tucked away. ---------------------------------------------------- */
+.yw-footer-search-area {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.vocab-youtube-window.yw-compact .yw-footer-search-area {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition: max-height 0.22s ease, opacity 0.16s ease;
+}
+
+.vocab-youtube-window.yw-compact .yw-footer-search-area.yw-search-area-visible {
+  max-height: 220px;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ---------- Compact Mode — footer floats over the video too -----------
+   The rule above already collapses the search area itself, but
+   `.yw-footer` (its parent) is a normal flex item with its own padding
+   and border — those stayed put regardless, which is exactly the second
+   empty strip this was built to remove (visible along the bottom edge
+   even with nothing inside it showing). Same fix as the header: pulled
+   out of flow, laid on top of the video, zero footprint by default.
+
+   Unlike the header there's no permanent grip here — the footer only
+   ever needs to appear for the two things it holds: the search bar
+   (after the "Focus Search" shortcut) or a status line (e.g. an
+   "Error 153" message), both already short-lived by design. JS toggles
+   `.yw-footer-active` (see updateFooterActiveState() in
+   youtube-window.js) exactly when either of those is true — there's no
+   hover trigger to build here since nothing should reveal it just
+   because the mouse passed over the bottom of the video. */
+.vocab-youtube-window.yw-compact .yw-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  padding: 0;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  border-top: none;
+  pointer-events: none;
+  background: rgba(10, 14, 20, 0.74);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition: max-height 0.2s ease, opacity 0.15s ease, padding 0.2s ease;
+}
+
+.vocab-youtube-window.yw-compact .yw-footer.yw-footer-active {
+  padding: 0.5rem 0.6rem;
+  max-height: 260px;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* If the docked playlist transport bar (also anchored to the bottom of
+   `.yw-body`, see .yw-transport-bar) happens to be showing at the same
+   moment, lift the footer clear of it instead of stacking both flush
+   against the bottom edge on top of each other. */
+.vocab-youtube-window.yw-compact .yw-body.yw-has-transport-bar ~ .yw-footer.yw-footer-active {
+  bottom: 64px;
+}
+
+/* Dark, semi-transparent overlay background now (not the pale frosted
+   one this uses normally) needs its own light-on-dark text colors so
+   the search bar/status line stay readable over live video instead of
+   over a solid panel. */
+.vocab-youtube-window.yw-compact .yw-footer .yw-status {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.vocab-youtube-window.yw-compact .yw-footer .yw-channel-toggle-btn {
+  color: rgba(255, 255, 255, 0.9);
+}
+
 /* ---------- Settings panel (API key) — small dropdown under the header ----------
    Positioned with `position: fixed` and moved to a direct child of <body>
    at runtime (see positionSettingsPanel() in youtube-window.js). It used
@@ -416,6 +699,132 @@ body.has-wallpaper .yw-header {
   border: none;
   border-top: 1px solid var(--border);
   margin: 0.15rem 0;
+}
+
+/* ---------- Compact Mode — settings panel controls --------------------
+   Groups the "Compact Mode" toggle, its header-button tick-list, the
+   quick-action Hide/Close fallback buttons, and the search-bar auto-hide
+   controls, all inside the ⚙ settings panel. ---------------------------- */
+.yw-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.yw-compact-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.15rem;
+  padding: 0.5rem;
+  border-radius: 10px;
+  background: rgba(37, 99, 168, 0.06);
+}
+
+.yw-compact-options.hidden {
+  display: none;
+}
+
+.yw-compact-sublabel {
+  margin-top: 0.15rem;
+}
+
+.yw-compact-tick-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.5rem;
+}
+
+.yw-compact-tick {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.76rem;
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+}
+
+.yw-compact-tick input {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--accent-color, var(--blue));
+}
+
+.yw-compact-radio-list {
+  gap: 0.25rem 0.9rem;
+}
+
+.yw-compact-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.yw-compact-delay-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.yw-compact-delay-row.yw-compact-delay-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.yw-compact-delay-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+  cursor: pointer;
+}
+
+.yw-compact-delay-slider:focus-visible {
+  outline: 2px solid var(--accent-color, var(--blue));
+  outline-offset: 2px;
+}
+
+.yw-compact-delay-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--accent-color, var(--blue));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  margin-top: -5.5px;
+}
+
+.yw-compact-delay-slider::-moz-range-track {
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.yw-compact-delay-slider::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent-color, var(--blue));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+
+.yw-compact-delay-value {
+  flex-shrink: 0;
+  min-width: 2.6rem;
+  text-align: right;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--ink-soft);
 }
 
 /* ---------- Quota / estimated API usage area (Part 9) — lives inside
@@ -1118,6 +1527,18 @@ body.has-wallpaper .yw-header {
   display: flex;
   gap: 0.3rem;
   margin-bottom: 0.1rem;
+}
+
+/* Compact Mode — the footer search area already tucks itself away
+   behind a reveal action (see .yw-footer-search-area rules above), so
+   when it does appear it should be just the search box itself, not
+   the Videos/Channels mode switcher too. Search while compact stays on
+   activeSearchMode's default ("videos" — see youtube-window.js); the
+   Channels tab remains reachable the normal way once Compact Mode is
+   off. The channel oldest/newest finder button below the tabs is a
+   separate control and stays visible. */
+.vocab-youtube-window.yw-compact .yw-search-tabs {
+  display: none;
 }
 
 .yw-tab-btn {
@@ -1988,6 +2409,27 @@ html[data-wallpaper-tone="dark"] body.has-wallpaper .yw-footer {
   animation: yw-external-key-flash 0.55s ease-out;
 }
 
+/* Compact Mode — the search row (input + 🔎 + 🌐) is a full-size row by
+   default, sized for the always-visible footer. In compact mode it only
+   ever appears briefly over the video (see .yw-footer-search-area
+   reveal rules), so it's slimmed down to a low, minimal strip instead —
+   smaller input height/font and smaller round buttons, same shapes and
+   colors, just scaled down. */
+.vocab-youtube-window.yw-compact .yw-search-form {
+  gap: 0.3rem;
+}
+
+.vocab-youtube-window.yw-compact .yw-search-input {
+  padding: 0.22rem 0.55rem;
+  font-size: 0.74rem;
+}
+
+.vocab-youtube-window.yw-compact .yw-search-btn {
+  width: 24px;
+  height: 24px;
+  font-size: 0.7rem;
+}
+
 .yw-status {
   font-size: 0.72rem;
   color: var(--ink-soft);
@@ -2041,6 +2483,24 @@ html[data-wallpaper-tone="dark"] body.has-wallpaper .yw-footer {
   opacity: 1;
   background: var(--accent-color);
   transform: scale(1.1);
+}
+
+/* Compact Mode — YouTube's own bottom-right corner is where its
+   fullscreen icon lives, so this handle sits right on top of it by
+   necessity (there's no other corner to put a resize grip that stays
+   intuitive). Keeping it near-invisible until the person is actually
+   hovering that corner — the same moment YouTube's own controls have
+   already appeared too — is the closest this can get to "out of the
+   way until needed" rather than being a second corner icon that's
+   always fighting for the same few pixels. */
+.vocab-youtube-window.yw-compact .yw-resize-handle {
+  opacity: 0.2;
+}
+
+.vocab-youtube-window.yw-compact .yw-body:hover .yw-resize-handle,
+.vocab-youtube-window.yw-compact .yw-resize-handle:hover,
+.vocab-youtube-window.yw-compact .yw-resize-handle.yw-resizing {
+  opacity: 0.85;
 }
 
 .yw-resize-tooltip {
