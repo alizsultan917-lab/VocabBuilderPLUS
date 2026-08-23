@@ -1208,6 +1208,12 @@
   // panel a playlist track load lands on. Purely a display preference —
   // never affects what plays or the saved playlist/queue data itself.
   const YW_LAYOUT_MODE_STORAGE = "vocabRegister_youtubeLayoutMode"; // "player" | "playlist"
+  // "Keep YouTube tab open (copy link only)" — see the settings-panel
+  // toggle and syncStayOnTabToExtension() below. Purely a preference this
+  // app remembers; the extension is what actually acts on it (see
+  // background.js/content-youtube.js), synced over the same postMessage
+  // bridge as SYNC_ACCENT_COLOR/SYNC_SHORTCUT_KEYS.
+  const YW_STAY_ON_TAB_STORAGE = "vocabRegister_youtubeStayOnTab"; // "true" | "false"
 
   const YW_MIN_WIDTH = 320;
   const YW_MIN_HEIGHT = 220;
@@ -1261,6 +1267,7 @@
   if (settingsPanel && settingsPanel.parentElement !== document.body) {
     document.body.appendChild(settingsPanel);
   }
+  const stayOnTabToggle = document.getElementById("yw-stay-tab-toggle");
   const apiKeyInput = document.getElementById("yw-api-key-input");
   const apiKeySaveBtn = document.getElementById("yw-api-key-save-btn");
   const apiKeyStatusEl = document.getElementById("yw-api-key-status");
@@ -1343,6 +1350,7 @@
   let pendingChannelQuery = null; // an oldest/newest channel lookup typed before a key was configured
   let pendingChannelSearchTerm = null; // a channel *search* (Channels tab) typed before a key was configured
   let loopEnabled = loadJson(YW_LOOP_STORAGE, false) === true;
+  let stayOnYoutubeTab = loadJson(YW_STAY_ON_TAB_STORAGE, false) === true;
   let playerReady = false; // true once the current YT.Player has fired onReady
   let playerVolume = (() => {
     const v = loadJson(YW_VOLUME_STORAGE, 100);
@@ -2139,6 +2147,25 @@
   function reflectLoopUI() {
     loopBtn?.setAttribute("aria-pressed", String(loopEnabled));
     if (loopBtn) loopBtn.title = loopEnabled ? "Loop this video: on — click to turn off" : "Loop this video: off — click to turn on";
+  }
+
+  function reflectStayOnTabUI() {
+    if (stayOnTabToggle) stayOnTabToggle.checked = stayOnYoutubeTab;
+  }
+
+  // Relays the current "Keep YouTube tab open" preference to the Gemini
+  // Bridge extension, if installed — same postMessage-bridge pattern as
+  // the 🌐 Search on YouTube.com button above and syncAccentColorToExtension()/
+  // syncTabSwitchKeysToExtension() in script.js. bridge-app.js relays this
+  // to background.js, which stores it (chrome.storage.local) for both
+  // itself (whether to close the search tab after a pick) and
+  // content-youtube.js (whether to stop a video click from navigating at
+  // all) to read. Entirely inert with no error if the extension isn't
+  // installed. Fired once on load (so a freshly (re)started extension
+  // picks up whatever was last saved here) and again every time the
+  // toggle changes.
+  function syncStayOnTabToExtension() {
+    window.postMessage({ type: "SYNC_YT_STAY_MODE", stayOnTab: stayOnYoutubeTab }, window.location.origin);
   }
 
   // Part 6 — mirrors reflectLoopUI()'s pattern for the new layout toggle.
@@ -6470,6 +6497,15 @@
      copy/paste, no manual tab-switching. Entirely inert with no error
      if the extension isn't installed; this only ever talks over
      window.postMessage, same as the Search Gemini button.
+
+     Whether that tab actually closes itself afterward — and whether the
+     video plays there at all before it does — depends on the "Keep
+     YouTube tab open" toggle in this window's ⚙ settings panel: off
+     (default) is the flow described above; on, the extension never lets
+     the tab navigate to the video at all, just relays its link and
+     leaves the tab sitting on the results page so it can be reused for
+     the next pick too. See syncStayOnTabToExtension() and the ⚙ panel
+     markup for that toggle.
   ---------------------------------------------------------------------- */
   searchExternalBtn?.addEventListener("click", () => {
     const q = (searchInput?.value || "").trim();
@@ -6507,6 +6543,18 @@
     saveJson(YW_LOOP_STORAGE, loopEnabled);
     reflectLoopUI();
     showStatus(loopEnabled ? "Looping this video." : "Loop turned off.", 2000);
+  });
+
+  stayOnTabToggle?.addEventListener("change", () => {
+    stayOnYoutubeTab = !!stayOnTabToggle.checked;
+    saveJson(YW_STAY_ON_TAB_STORAGE, stayOnYoutubeTab);
+    syncStayOnTabToExtension();
+    showStatus(
+      stayOnYoutubeTab
+        ? "Picking a video will now just copy its link back here — the YouTube tab stays open."
+        : "Picking a video will open it on the YouTube tab, then bring you back here as before.",
+      3000
+    );
   });
 
   // Part 6 — layout mode toggle. Display-only: never touches playback,
@@ -6741,6 +6789,8 @@
     restoreState();
     reflectLoopUI();
     reflectLayoutModeUI();
+    reflectStayOnTabUI();
+    syncStayOnTabToExtension();
     reflectOpenExternalUI();
     reflectQuotaUI();
     reflectTabsUI();

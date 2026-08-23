@@ -1493,6 +1493,15 @@
   </div>
 
   <div id="yw-settings-panel" class="yw-settings-panel hidden">
+    <div class="yw-settings-row yw-stay-tab-row" id="yw-stay-tab-row" title="When off (default): picking a video opens it on the YouTube.com tab, its link is sent back here, then that tab closes and you're returned to this app. When on: picking a video never opens it there — only its link is copied back here — and the YouTube.com tab stays open on the results page so you can keep picking more videos from it.">
+      <label class="switch yw-stay-tab-switch" for="yw-stay-tab-toggle">
+        <input type="checkbox" id="yw-stay-tab-toggle">
+        <span class="switch-track"><span class="switch-thumb"></span></span>
+      </label>
+      <span class="yw-stay-tab-label">Keep YouTube tab open (copy link only)</span>
+    </div>
+    <p class="yw-settings-hint">Off: picking a video plays it there, then that tab closes and you land back here. On: the video never opens there — just its link comes back here — and the tab stays open so you can pick another right away.</p>
+    <hr class="yw-settings-divider">
     <label for="yw-api-key-input" class="yw-settings-label">YouTube Data API key</label>
     <div class="yw-settings-row">
       <input type="password" id="yw-api-key-input" class="yw-api-key-input" placeholder="Paste your API key…" autocomplete="off" spellcheck="false">

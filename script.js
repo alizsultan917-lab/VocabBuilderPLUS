@@ -10895,8 +10895,11 @@ window.addEventListener("message", (event) => {
 // Receives a video URL relayed by the extension after you picked a
 // video on the youtube.com tab opened by the YouTube Window's 🌐
 // button (the "Search on YouTube.com" round trip). By the time this
-// arrives the extension has already closed that tab and focused this
-// one — all that's left to do here is actually load the video.
+// arrives the extension has already focused this tab — and, unless the
+// YouTube Window's "Keep YouTube tab open" toggle is on, closed the
+// search tab too (with it on, that tab is deliberately left open on the
+// results page instead) — all that's left to do here is actually load
+// the video.
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
   if (event.origin !== window.location.origin) return;
