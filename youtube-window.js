@@ -2725,8 +2725,16 @@
   // no videoId, etc.) degrades to as much of the list as is usable
   // rather than throwing or wiping everything — losing a few bad rows is
   // fine, crashing the whole window over them is not.
-  function loadPlaylistsFromStorage() {
-    const raw = loadJson(YW_PLAYLISTS_STORAGE, []);
+  // Shared by loadPlaylistsFromStorage() (localStorage) AND the Folder
+  // Sync block below (a JSON file read back from a connected local
+  // folder) — same shape, same defensive cleaning, either way. Kept
+  // separate from sanitizeImportedPlaylist() (Playlist Part 5): import
+  // always mints fresh ids because it's merging in data that may have
+  // come from a different browser/profile, but both sources handled
+  // here are trusted to be OUR OWN previously-saved data, so ids (and
+  // therefore things like `playbackState.activePlaylistId` still
+  // pointing at the right playlist) must be preserved, not regenerated.
+  function sanitizeStoredPlaylistsArray(raw) {
     if (!Array.isArray(raw)) return [];
     const seenPlaylistIds = new Set();
     const cleaned = [];
@@ -2765,6 +2773,10 @@
     return cleaned;
   }
 
+  function loadPlaylistsFromStorage() {
+    return sanitizeStoredPlaylistsArray(loadJson(YW_PLAYLISTS_STORAGE, []));
+  }
+
   let playlists = loadPlaylistsFromStorage();
 
   // Playlist Part 5 (spec #9 — storage failure handling). A plain
@@ -2783,7 +2795,35 @@
   //     as the actual way to not lose anything, rather than just naming
   //     the problem.
   let playlistStorageWarningActive = false;
+  // Folder Sync (see the "PLAYLIST FOLDER SYNC" block further down) — when
+  // a local folder is connected, playlists are written THERE instead of
+  // localStorage, which is the whole point (a folder has no ~5-10MB quota
+  // the way localStorage does). localStorage keeps working as the default
+  // fallback for anyone who never connects a folder, and as a same-tab
+  // safety net if a folder write fails mid-session (permission revoked,
+  // folder moved/deleted, disk full, etc.) so nothing already typed is
+  // lost even though the live sync hiccuped.
   function savePlaylistsToStorage() {
+    if (window.YouTubePlaylistFolder && window.YouTubePlaylistFolder.isConnected()) {
+      window.YouTubePlaylistFolder.writePlaylists(playlists).then((ok) => {
+        if (ok) {
+          playlistStorageWarningActive = false;
+          renderFolderSyncStatus();
+          return;
+        }
+        // Folder write failed this time — fall back to localStorage so the
+        // change isn't lost outright, and surface exactly one warning per
+        // failure "episode" (same convention as the localStorage-quota
+        // warning below).
+        saveJson(YW_PLAYLISTS_STORAGE, playlists);
+        if (!playlistStorageWarningActive) {
+          playlistStorageWarningActive = true;
+          showStatus("⚠ Couldn't write to your connected folder — saving to browser storage instead this time. Check the folder still exists and permission wasn't revoked.", 8000);
+        }
+        renderFolderSyncStatus();
+      });
+      return true; // optimistic — matches this function's existing sync return shape; the actual outcome is handled async above
+    }
     try {
       localStorage.setItem(YW_PLAYLISTS_STORAGE, JSON.stringify(playlists));
       playlistStorageWarningActive = false;
@@ -2793,7 +2833,7 @@
       // either way, non-fatal: the session keeps working from memory.
       if (!playlistStorageWarningActive) {
         playlistStorageWarningActive = true;
-        showStatus("⚠ Browser storage is full — this change may not be saved. Delete an old playlist to free up space, or use Export to back up what's already saved.", 8000);
+        showStatus("⚠ Browser storage is full — this change may not be saved. Delete an old playlist to free up space, connect a 📁 local folder (My Playlists → 📁 Folder) to sync there instead, or use Export to back up what's already saved.", 9000);
       }
       return false;
     }
@@ -2805,7 +2845,24 @@
     savePlaylistsToStorage();
   }, 400);
 
-  window.addEventListener("beforeunload", () => persistPlaylistsDebounced.flush());
+  // beforeunload can't await anything — the tab may already be gone
+  // before an in-flight folder write (File System Access is always
+  // async) finishes. flush() still kicks that write off on a best-effort
+  // basis, but as a synchronous safety net ALSO mirrors the current
+  // in-memory `playlists` straight into localStorage right here, folder
+  // sync or not. Normal editing never touches localStorage while a
+  // folder's connected (that's the point of this feature — avoiding its
+  // quota) — this is a one-time, tab-closing-anyway exception, not a
+  // regression back to writing there on every change.
+  window.addEventListener("beforeunload", () => {
+    persistPlaylistsDebounced.flush();
+    try {
+      localStorage.setItem(YW_PLAYLISTS_STORAGE, JSON.stringify(playlists));
+    } catch {
+      /* non-fatal — quota exceeded or private browsing; the folder write
+         (if connected) already had its best-effort shot via flush() above */
+    }
+  });
 
   function touchPlaylist(playlist) {
     playlist.updatedAt = Date.now();
@@ -3355,6 +3412,128 @@
   }
 
   /* ----------------------------------------------------------------------
+     PLAYLIST FOLDER SYNC — connects "My Playlists" to
+     window.YouTubePlaylistFolder (youtube-playlist-folder-service.js,
+     same File System Access API approach the 🖼️ wallpaper folder feature
+     already uses). The whole point: localStorage has a hard ~5-10MB quota
+     that a big music library of playlists can actually hit, while a
+     folder on disk doesn't. This block owns nothing about *what* a
+     playlist is — it only decides *where* `playlists` gets read from at
+     startup and written to on every change, via the existing
+     persistPlaylistsDebounced() → savePlaylistsToStorage() path (see the
+     "Folder Sync" note added there) plus a one-time reconciliation on
+     connect.
+
+     CONNECT/RECONNECT IS ASYNC, STARTUP IS NOT: `playlists` is already
+     loaded from localStorage synchronously above so the window still
+     opens instantly even with no folder involved at all. initFolderSync()
+     runs after that, tries to silently reattach a previously-connected
+     folder (same "ask permission again, but never re-browse" model as
+     wallpapers), and — ONLY if that succeeds — treats the folder's own
+     file as the source of truth from that point forward, same as
+     reopening a saved document. A brand-new connection (the person just
+     clicked 📁 Folder for the first time) instead treats whatever's
+     already in `playlists` as the thing to seed the empty folder with,
+     so connecting never silently discards a library someone already
+     built up in this browser.
+  ---------------------------------------------------------------------- */
+  const YW_FOLDER_SYNC_ENABLED_STORAGE = "vocabRegister_youtubePlaylistFolderSyncOn"; // "true" once a folder's been connected at least once, so restore is only attempted when relevant
+
+  function folderSyncAvailable() {
+    return !!(window.YouTubePlaylistFolder && window.YouTubePlaylistFolder.supportsFileSystemAccess);
+  }
+  function folderSyncConnected() {
+    return !!(window.YouTubePlaylistFolder && window.YouTubePlaylistFolder.isConnected());
+  }
+
+  // Rebinds the 📁 Folder button's label/title every time it exists in the
+  // DOM — called after connect/disconnect/failed-write AND from inside
+  // renderPlaylistLibrary() itself, since that function rebuilds the
+  // button fresh on every render (same convention as the Export/Import
+  // buttons right next to it).
+  function renderFolderSyncStatus() {
+    const btn = document.getElementById("yw-playlist-folder-btn");
+    if (!btn) return;
+    if (!folderSyncAvailable()) {
+      btn.disabled = true;
+      btn.title = "Needs a browser with folder access (Chrome or Edge) to sync playlists live to disk.";
+      btn.textContent = "📁 Folder";
+      return;
+    }
+    btn.disabled = false;
+    if (folderSyncConnected()) {
+      const label = window.YouTubePlaylistFolder.getFolderLabel() || "connected folder";
+      btn.textContent = `📁 Synced: ${label}`;
+      btn.title = `Playlists are being saved live to "${label}" instead of browser storage. Click to disconnect.`;
+      btn.classList.add("yw-folder-connected");
+    } else {
+      btn.textContent = "📁 Folder";
+      btn.title = "Connect a local folder to save playlists there instead of browser storage — avoids running out of storage with a large library.";
+      btn.classList.remove("yw-folder-connected");
+    }
+  }
+
+  async function connectPlaylistFolder() {
+    if (!folderSyncAvailable()) return;
+    try {
+      const label = await window.YouTubePlaylistFolder.connect();
+      if (!label) return; // person cancelled the picker
+      saveJson(YW_FOLDER_SYNC_ENABLED_STORAGE, true);
+      // Reconciliation: an empty/missing file in a freshly-chosen folder
+      // means "nothing there yet" — seed it with whatever's already built
+      // up in this browser rather than wiping the in-memory library.
+      // A folder that already has a playlists file (reconnecting to one
+      // used before, possibly from another device/session) wins instead —
+      // that's the whole point of connecting to an EXISTING synced folder.
+      const safeLabel = escapeHtml(label); // a folder name is untrusted, filesystem-provided text — showStatus() renders via innerHTML
+      const existing = await window.YouTubePlaylistFolder.readPlaylists();
+      if (existing && Array.isArray(existing.playlists) && existing.playlists.length) {
+        playlists = sanitizeStoredPlaylistsArray(existing.playlists);
+        showStatus(`📁 Connected to "${safeLabel}" — loaded ${playlists.length} playlist${playlists.length === 1 ? "" : "s"} already saved there.`, 5000);
+      } else {
+        await window.YouTubePlaylistFolder.writePlaylists(playlists);
+        showStatus(`📁 Connected to "${safeLabel}" — playlists now save here live instead of browser storage.`, 5000);
+      }
+      playlistStorageWarningActive = false;
+      renderFolderSyncStatus();
+      if (currentBodyView === "playlists") renderPlaylistLibrary();
+    } catch (err) {
+      // AbortError = person closed the picker without choosing — not a
+      // real failure, nothing to say about it.
+      if (err && err.name === "AbortError") return;
+      showStatus("⚠ Couldn't connect that folder — check your browser allowed folder access and try again.", 6000);
+    }
+  }
+
+  async function disconnectPlaylistFolder() {
+    if (!folderSyncConnected()) return;
+    const safeLabel = escapeHtml(window.YouTubePlaylistFolder.getFolderLabel() || "the connected folder");
+    await window.YouTubePlaylistFolder.disconnect();
+    saveJson(YW_FOLDER_SYNC_ENABLED_STORAGE, false);
+    // Back to browser storage — write what's currently in memory there
+    // right away so switching back never leaves a gap.
+    saveJson(YW_PLAYLISTS_STORAGE, playlists);
+    showStatus(`📁 Disconnected from "${safeLabel}" — playlists now save to browser storage again.`, 5000);
+    renderFolderSyncStatus();
+  }
+
+  async function initFolderSync() {
+    if (!folderSyncAvailable()) return;
+    if (!loadJson(YW_FOLDER_SYNC_ENABLED_STORAGE, false)) return; // never connected one before — nothing to silently restore
+    const label = await window.YouTubePlaylistFolder.restoreConnection();
+    if (!label) return; // permission wasn't re-granted, or the folder's gone — stays on localStorage, no error shown (matches wallpaper folder's own silent-fallback behavior)
+    const existing = await window.YouTubePlaylistFolder.readPlaylists();
+    if (existing && Array.isArray(existing.playlists)) {
+      playlists = sanitizeStoredPlaylistsArray(existing.playlists);
+      if (currentBodyView === "playlists") renderPlaylistLibrary();
+    }
+    renderFolderSyncStatus();
+  }
+  // Fire-and-forget at module init — see the block comment above for why
+  // this doesn't block the synchronous localStorage-backed startup path.
+  initFolderSync();
+
+  /* ----------------------------------------------------------------------
      PLAYLIST UI (Playlist Part 2A — library, creation, rename/delete, and
      the playlist detail shell) — built entirely on top of the data model,
      persistence, and playback-queue functions in the PLAYLISTS block just
@@ -3479,6 +3658,7 @@
         <div class="yw-playlists-head">
           <h3>My Playlists</h3>
           <div class="yw-playlists-head-actions">
+            <button type="button" class="btn btn-secondary btn-small" id="yw-playlist-folder-btn"></button>
             <button type="button" class="btn btn-secondary btn-small" id="yw-playlist-import-btn" title="Import playlists from a JSON file">⇧ Import</button>
           </div>
         </div>
@@ -3493,6 +3673,8 @@
       // Playlist Part 5 — Import works even with zero playlists (it's the
       // whole point of restoring a backup on a fresh browser/profile).
       document.getElementById("yw-playlist-import-btn")?.addEventListener("click", () => playlistImportFileInput?.click());
+      document.getElementById("yw-playlist-folder-btn")?.addEventListener("click", () => (folderSyncConnected() ? disconnectPlaylistFolder() : connectPlaylistFolder()));
+      renderFolderSyncStatus();
       return;
     }
 
@@ -3520,6 +3702,7 @@
       <div class="yw-playlists-head">
         <h3>My Playlists</h3>
         <div class="yw-playlists-head-actions">
+          <button type="button" class="btn btn-secondary btn-small" id="yw-playlist-folder-btn"></button>
           <button type="button" class="btn btn-secondary btn-small" id="yw-playlist-export-btn" title="Export all playlists as a JSON file">⇩ Export</button>
           <button type="button" class="btn btn-secondary btn-small" id="yw-playlist-import-btn" title="Import playlists from a JSON file">⇧ Import</button>
           <button type="button" class="btn btn-secondary btn-small" id="yw-playlist-new-btn">+ New</button>
@@ -3536,6 +3719,8 @@
     // included, is rebuilt from scratch each render).
     document.getElementById("yw-playlist-export-btn")?.addEventListener("click", downloadPlaylistExport);
     document.getElementById("yw-playlist-import-btn")?.addEventListener("click", () => playlistImportFileInput?.click());
+    document.getElementById("yw-playlist-folder-btn")?.addEventListener("click", () => (folderSyncConnected() ? disconnectPlaylistFolder() : connectPlaylistFolder()));
+    renderFolderSyncStatus();
     playlistsEl.querySelectorAll("[data-open-playlist]").forEach((btn) => {
       btn.addEventListener("click", () => openPlaylistDetail(btn.dataset.openPlaylist));
     });

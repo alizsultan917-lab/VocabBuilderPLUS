@@ -1819,6 +1819,28 @@ html[data-wallpaper-tone="dark"] body.has-wallpaper .yw-tab-btn.active {
   flex-shrink: 0;
 }
 
+/* 📁 Folder sync button — label text is set entirely from JS
+   (renderFolderSyncStatus() in youtube-window.js), since it needs to
+   show either "📁 Folder" or "📁 Synced: <folder name>" depending on
+   connection state. This just styles the connected state so it reads as
+   active/on at a glance, matching how other "currently on" controls in
+   this window look (e.g. .yw-playlist-row-active). */
+.yw-playlists-head-actions #yw-playlist-folder-btn {
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.yw-playlists-head-actions #yw-playlist-folder-btn.yw-folder-connected {
+  background: color-mix(in srgb, var(--accent-color, #3a7bd5) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent-color, #3a7bd5) 55%, transparent);
+  color: var(--accent-color, #3a7bd5);
+}
+.yw-playlists-head-actions #yw-playlist-folder-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .yw-playlists-list {
   display: flex;
   flex-direction: column;
