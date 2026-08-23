@@ -1093,6 +1093,69 @@
   </div>
 </div>
 
+<!-- YOUTUBE PLAYLIST — CREATE / RENAME MODAL (Playlist Part 2A). One
+     shared small form for both actions — youtube-window.js swaps the
+     title/button label depending on mode. Deliberately plain .modal/
+     .modal-content markup, same as the app's other dialogs above, kept
+     as a top-level sibling here (not nested inside #vocab-youtube-window)
+     since that window's own CSS transform would otherwise clip a
+     position:fixed descendant like this. -->
+<div id="yw-playlist-name-modal" class="modal hidden">
+  <div class="modal-content modal-content-compact">
+    <h3 id="yw-playlist-name-modal-title">New Playlist</h3>
+    <div class="form-group">
+      <label for="yw-playlist-name-input">Playlist name</label>
+      <input type="text" id="yw-playlist-name-input" autocomplete="off" spellcheck="false" placeholder="e.g. Reading Music" maxlength="200">
+    </div>
+    <p class="confirm-prompt-text yw-playlist-name-error hidden" id="yw-playlist-name-error"></p>
+    <div class="modal-actions">
+      <button id="yw-playlist-name-cancel-btn" class="btn btn-secondary" type="button">Cancel</button>
+      <button id="yw-playlist-name-save-btn" class="btn btn-primary" type="button">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- YOUTUBE PLAYLIST — DELETE CONFIRM MODAL (Playlist Part 2A). Destructive
+     action, so it requires an explicit confirm click (see
+     openPlaylistDeleteModal() in youtube-window.js) rather than deleting
+     straight from the ⋮ menu. -->
+<div id="yw-playlist-delete-modal" class="modal hidden">
+  <div class="modal-content modal-content-compact">
+    <h3>Delete playlist?</h3>
+    <p class="confirm-prompt-text" id="yw-playlist-delete-text"></p>
+    <p class="confirm-prompt-text">The YouTube videos themselves will not be affected.</p>
+    <div class="modal-actions">
+      <button id="yw-playlist-delete-cancel-btn" class="btn btn-secondary" type="button">Cancel</button>
+      <button id="yw-playlist-delete-confirm-btn" class="btn btn-danger" type="button">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- YOUTUBE PLAYLIST — IMPORT MODAL (Playlist Part 5). The file itself is
+     picked via the hidden #yw-playlist-import-input below (no drag/drop
+     zone — same "click a button, browser handles the picker" convention
+     as #import-file-input elsewhere in this app); this modal only appears
+     once a file has already been read and validated client-side
+     (parsePlaylistImportFile() in youtube-window.js), so it only ever
+     shows a real summary + a merge/replace choice, never a raw file
+     picker. -->
+<input type="file" id="yw-playlist-import-input" accept="application/json,.json" class="hidden">
+<div id="yw-playlist-import-modal" class="modal hidden">
+  <div class="modal-content modal-content-compact">
+    <h3>Import Playlists</h3>
+    <p class="confirm-prompt-text" id="yw-playlist-import-summary"></p>
+    <div class="form-group">
+      <label><input type="radio" name="yw-playlist-import-mode" value="merge" checked> Merge — add alongside your current playlists</label><br>
+      <label><input type="radio" name="yw-playlist-import-mode" value="replace"> Replace — remove current playlists first</label>
+    </div>
+    <p class="confirm-prompt-text yw-playlist-import-error hidden" id="yw-playlist-import-error"></p>
+    <div class="modal-actions">
+      <button id="yw-playlist-import-cancel-btn" class="btn btn-secondary" type="button">Cancel</button>
+      <button id="yw-playlist-import-confirm-btn" class="btn btn-primary" type="button">Import</button>
+    </div>
+  </div>
+</div>
+
 <!-- 🎧 FLOATING VOCABULARY AUDIO WINDOW — detachable mini-player for
      cycling through saved words and replaying their pronunciation.
      Entirely gated behind the "Audio Window" master toggle in the
@@ -1408,6 +1471,21 @@
       </div>
       <button type="button" id="yw-loop-btn" class="icon-btn" title="Loop this video: off" aria-pressed="false" aria-label="Loop this video">🔁</button>
       <button type="button" id="yw-open-external-btn" class="icon-btn" title="Open on YouTube.com — for Like, Subscribe, Save, Download, and everything else only Google's own site can do" aria-label="Open this video on YouTube.com" disabled>↗</button>
+      <!-- Playlist Part 2B1 — "+ Add to Playlist" for whatever's currently
+           playing. Wrapped in a position:relative div so the picker
+           popover (built in youtube-window.js) can anchor under it, same
+           in-flow approach as the ⋮ playlist-row menu. Disabled/enabled
+           the same way #yw-open-external-btn already is. -->
+      <div class="yw-header-add-wrap" id="yw-header-add-wrap">
+        <button type="button" id="yw-add-current-btn" class="icon-btn" title="Add to Playlist" aria-label="Add current video to a playlist" aria-haspopup="true" aria-expanded="false" disabled>＋</button>
+      </div>
+      <button type="button" id="yw-playlists-btn" class="icon-btn" title="My Playlists" aria-label="My Playlists" aria-pressed="false">🎵</button>
+      <!-- Part 6 — layout mode. Player-focused (default) always shows the
+           video when a track starts; Playlist-focused keeps the playlist
+           list on screen instead, with the docked transport bar (below)
+           supplying playback controls either way. Display-only — never
+           changes what plays. -->
+      <button type="button" id="yw-layout-toggle-btn" class="icon-btn" title="Layout: Player-focused — click for Playlist-focused" aria-label="Switch to playlist-focused layout" aria-pressed="false">▣</button>
       <button type="button" id="yw-settings-btn" class="icon-btn" title="YouTube search settings" aria-label="YouTube search settings" aria-haspopup="true" aria-expanded="false">⚙</button>
       <button type="button" id="yw-hide-btn" class="icon-btn" title="Hide window — keeps playing in the background" aria-label="Hide YouTube window">▤</button>
       <button type="button" id="yw-close-btn" class="icon-btn" title="Close — stops playback" aria-label="Close YouTube window">✕</button>
@@ -1429,6 +1507,12 @@
     <div id="yw-video-wrap" class="yw-video-wrap hidden"></div>
     <div id="yw-results" class="yw-results hidden"></div>
     <div id="yw-channel-detail" class="yw-channel-detail hidden"></div>
+    <!-- Playlist Part 2A — library ("My Playlists") and playlist detail
+         views. Two more siblings in the same show-one-hide-the-rest
+         group as yw-results/yw-channel-detail above, toggled by the same
+         setView() in youtube-window.js. -->
+    <div id="yw-playlists" class="yw-playlists hidden"></div>
+    <div id="yw-playlist-detail" class="yw-playlist-detail hidden"></div>
     <div id="yw-empty-state" class="yw-empty-state">
       <span class="yw-empty-icon" aria-hidden="true">▶️</span>
       <p id="yw-empty-state-text">Search YouTube below, or paste a video link — it'll play right here with full controls.</p>

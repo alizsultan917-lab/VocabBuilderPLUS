@@ -245,6 +245,19 @@ body.has-wallpaper .yw-header {
   }
 }
 
+/* The header was already a tight fit at the 320px minimum window width
+   with 7 action buttons; the Part 6 layout-mode toggle (#yw-layout-
+   toggle-btn) is a display-preference nicety, not a core control like
+   Close/Hide/Settings/Playlists, so it steps aside below 400px rather
+   than risking those getting clipped by the window's own overflow:hidden
+   (see the .yw-settings-panel comment above for why that clipping is a
+   real, previously-hit issue in this file). */
+@media (max-width: 400px) {
+  #yw-layout-toggle-btn {
+    display: none;
+  }
+}
+
 .yw-header-actions .icon-btn {
   width: 24px;
   height: 24px;
@@ -404,8 +417,9 @@ body.has-wallpaper .yw-header {
   background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
-/* ---------- Loop toggle / open-on-YouTube header buttons ---------- */
-.yw-header-actions .icon-btn#yw-loop-btn[aria-pressed="true"] {
+/* ---------- Loop toggle / open-on-YouTube / My Playlists header buttons ---------- */
+.yw-header-actions .icon-btn#yw-loop-btn[aria-pressed="true"],
+.yw-header-actions .icon-btn#yw-playlists-btn.active {
   background: #fff;
   color: var(--accent-color, var(--blue));
 }
@@ -600,6 +614,147 @@ body.has-wallpaper .yw-header {
   color: rgba(255, 255, 255, 0.55);
 }
 
+/* ---------- Add-to-Playlist (Playlist Part 2B1) ----------
+   Each search-result card is now wrapped in a `.yw-result-row` alongside
+   a small "+ Add" pill — the card itself (`.yw-result-item`) is
+   untouched (still a full-width play button); this just adds a sibling
+   control rather than redesigning the card, per spec. Same shape is
+   reused for the "+ Add to Playlist" button in the header (current
+   video), via `.yw-header-add-wrap` below. */
+.yw-result-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.yw-result-row .yw-result-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.yw-result-add-wrap {
+  position: relative;
+  flex-shrink: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+}
+
+.yw-add-btn {
+  flex-shrink: 0;
+  padding: 0.32rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  font: inherit;
+}
+
+.yw-add-btn:hover,
+.yw-add-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.24);
+  outline: none;
+}
+
+/* Brief flash after a successful add — purely visual, doesn't block
+   another intentional Add click (duplicates are allowed, spec #12). */
+.yw-add-btn.yw-add-btn-flash {
+  background: var(--accent-color, rgba(255, 255, 255, 0.24));
+  border-color: transparent;
+}
+
+/* An in-flow absolutely-positioned dropdown anchored to its own wrap —
+   same non-`position:fixed` approach as `.yw-playlist-row-menu`, so it
+   never needs to escape the window's own `overflow: hidden`. */
+.yw-add-playlist-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 7;
+  min-width: 168px;
+  max-width: 220px;
+  margin-top: 0.25rem;
+  padding: 0.3rem;
+  border-radius: 10px;
+  background: rgba(18, 26, 38, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.yw-add-playlist-menu-head {
+  padding: 0.3rem 0.5rem 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.65);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.yw-add-playlist-menu-item {
+  border: none;
+  background: none;
+  color: #fff;
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  font: inherit;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yw-add-playlist-menu-item:hover,
+.yw-add-playlist-menu-item:focus-visible {
+  background: rgba(255, 255, 255, 0.14);
+  outline: none;
+}
+
+.yw-add-playlist-menu-item-new {
+  color: var(--accent-color-soft, #7fa8cc);
+  font-weight: 600;
+}
+
+.yw-add-playlist-menu-sep {
+  height: 1px;
+  margin: 0.25rem 0.2rem;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.yw-add-playlist-menu-empty {
+  padding: 0.3rem 0.5rem 0.4rem;
+  font-size: 0.76rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Header "+ Add to Playlist" (current video) — same disabled pattern as
+   the existing ↗ open-external button, enabled only while a video is
+   loaded. */
+.yw-header-add-wrap {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.yw-header-add-wrap .yw-add-playlist-menu {
+  top: calc(100% + 0.4rem);
+  right: 0;
+}
+
 /* ---------- Pagination footer ---------- */
 .yw-results-footer {
   padding: 0.2rem 0.3rem 0.4rem;
@@ -717,6 +872,181 @@ body.has-wallpaper .yw-header {
 
 .yw-video-wrap.hidden {
   display: none;
+}
+
+/* ---------- Transport bar (Playlist Part 3) — Now Playing + progress +
+   Previous/Play-Pause/Next/Repeat, overlaid at the bottom of the video
+   area. Shown ONLY while the loaded video is the active playlist's
+   current item — never for a standalone video. See updateTransportUI()
+   / "THE TRANSPORT BAR IS PLAYLIST-ONLY" in youtube-window.js. ---------- */
+.yw-transport-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0.65rem 0.55rem;
+  background: linear-gradient(to top, rgba(10, 14, 20, 0.92) 0%, rgba(10, 14, 20, 0.78) 65%, rgba(10, 14, 20, 0) 100%);
+  color: #fff;
+  pointer-events: none;
+}
+
+.yw-transport-bar.hidden {
+  display: none;
+}
+
+/* The transport bar now mounts on #yw-body itself (see ensureTransportBar()
+   in youtube-window.js) so it stays put across every content panel, not
+   just the video view — that's what makes "Playlist-focused" layout mode
+   usable. Give the scrollable panels enough bottom breathing room so their
+   last rows/lines aren't hidden behind the docked bar. */
+.yw-body.yw-has-transport-bar .yw-results,
+.yw-body.yw-has-transport-bar .yw-channel-detail,
+.yw-body.yw-has-transport-bar .yw-playlists,
+.yw-body.yw-has-transport-bar .yw-playlist-detail-content {
+  padding-bottom: 76px;
+  scroll-padding-bottom: 76px;
+}
+
+.yw-transport-bar > * {
+  pointer-events: auto;
+}
+
+.yw-np-info {
+  min-width: 0;
+}
+
+.yw-np-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yw-np-sub {
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yw-np-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.yw-np-time {
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.75);
+  flex-shrink: 0;
+  width: 2.6em;
+  text-align: center;
+}
+
+.yw-np-progress-track {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.yw-np-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent-color, #2563a8);
+  border-radius: 999px;
+  transition: width 0.2s linear;
+}
+
+.yw-np-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.yw-transport-btn {
+  border: none;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border-radius: 999px;
+  width: 30px;
+  height: 30px;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.12s ease, opacity 0.12s ease;
+}
+
+.yw-transport-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.yw-transport-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.yw-transport-btn-main {
+  width: 36px;
+  height: 36px;
+  font-size: 1rem;
+  background: var(--accent-color, #2563a8);
+}
+
+.yw-transport-btn-main:hover {
+  filter: brightness(1.12);
+  background: var(--accent-color, #2563a8);
+}
+
+.yw-transport-repeat-btn.yw-transport-repeat-active {
+  background: var(--accent-color-soft, #7fa8cc);
+  color: #0b0f14;
+}
+
+.yw-transport-shuffle-btn.yw-transport-shuffle-active {
+  background: var(--accent-color-soft, #7fa8cc);
+  color: #0b0f14;
+}
+
+.yw-transport-ended .yw-np-sub {
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+}
+
+@media (max-width: 380px) {
+  .yw-transport-bar {
+    padding: 0.4rem 0.5rem 0.45rem;
+  }
+  .yw-np-title {
+    font-size: 0.76rem;
+  }
+  .yw-np-sub {
+    font-size: 0.62rem;
+  }
+  .yw-transport-btn {
+    width: 26px;
+    height: 26px;
+    font-size: 0.75rem;
+  }
+  .yw-transport-btn-main {
+    width: 32px;
+    height: 32px;
+  }
+  .yw-np-controls {
+    gap: 0.35rem;
+  }
 }
 
 /* ---------- Search-mode tabs (Videos / Channels — Part 4) ---------- */
@@ -923,6 +1253,491 @@ html[data-wallpaper-tone="dark"] body.has-wallpaper .yw-tab-btn.active {
   font-size: 0.82rem;
   color: rgba(255, 255, 255, 0.75);
   line-height: 1.4;
+}
+
+/* =========================================================================
+   PLAYLIST LIBRARY & DETAIL (Playlist Part 2A) — reuses the same visual
+   language as the results/channel-detail views above: dark #0b0f14 body
+   background (from .yw-body), white/translucent text and pill buttons,
+   position:absolute inset:0 panels that scroll internally rather than
+   growing the window. No new design system, no new color palette.
+   ========================================================================= */
+
+/* ---------- Library ("My Playlists") ---------- */
+.yw-playlists {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.5rem 0.6rem 0.8rem;
+  color: #fff;
+}
+
+.yw-playlists.hidden {
+  display: none;
+}
+
+.yw-playlists-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.yw-playlists-head h3 {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+/* Playlist Part 5 — Export/Import sit alongside "+ New" rather than
+   replacing it; wrapped so they shrink/group together instead of
+   squeezing the ellipsis-truncated <h3> next to them. */
+.yw-playlists-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.yw-playlists-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.yw-playlist-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding-right: 0.35rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  transition: background 0.12s ease;
+}
+
+.yw-playlist-row:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.yw-playlist-row-active {
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 55%, transparent);
+}
+
+.yw-playlist-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.4rem;
+  border: none;
+  background: none;
+  color: #fff;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.yw-playlist-row-icon {
+  flex-shrink: 0;
+  font-size: 0.95rem;
+}
+
+.yw-playlist-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.yw-playlist-row-count {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.55);
+  min-width: 1.4em;
+  text-align: right;
+}
+
+.yw-playlist-row-play-btn,
+.yw-playlist-row-menu-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.72rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.yw-playlist-row-play-btn:hover,
+.yw-playlist-row-menu-btn:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.yw-playlist-row-play-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.yw-playlist-row-play-btn:disabled:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ---------- ⋮ overflow menu — an in-flow dropdown anchored to its own
+   row/button (never position:fixed), shared by a library row and the
+   playlist-detail header. ---------- */
+.yw-playlist-row-menu-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.yw-playlist-row-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 6;
+  min-width: 120px;
+  margin-top: 0.25rem;
+  padding: 0.25rem;
+  border-radius: 10px;
+  background: rgba(18, 26, 38, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.yw-playlist-row-menu-item {
+  border: none;
+  background: none;
+  color: #fff;
+  text-align: left;
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.yw-playlist-row-menu-item:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.yw-playlist-row-menu-item-danger {
+  color: #ff9a9a;
+}
+
+.yw-playlist-row-menu-item-danger:hover {
+  background: rgba(220, 50, 50, 0.22);
+}
+
+.yw-playlist-row-menu-item:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.yw-playlist-row-menu-item:disabled:hover {
+  background: none;
+}
+
+/* Per-item ⋮ menu (Part 2B2) has more/longer actions than the library
+   row's Rename/Delete pair — same look, just wider so "Move to bottom"
+   doesn't wrap. */
+.yw-playlist-item-action-menu {
+  min-width: 150px;
+}
+
+/* ---------- Empty states — shared between an empty library and an empty
+   playlist's item list. ---------- */
+.yw-playlists-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 2.2rem 1rem;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.yw-playlists-empty-icon {
+  font-size: 1.8rem;
+  opacity: 0.8;
+}
+
+.yw-playlists-empty p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  max-width: 22em;
+}
+
+/* ---------- Playlist detail ---------- */
+.yw-playlist-detail {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  color: #fff;
+}
+
+.yw-playlist-detail.hidden {
+  display: none;
+}
+
+.yw-playlist-detail-header {
+  flex-shrink: 0;
+  padding: 0.5rem 0.6rem 0.4rem;
+}
+
+.yw-playlist-detail-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+}
+
+.yw-playlist-detail-name {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.yw-playlist-detail-count {
+  margin: 0.15rem 0 0;
+  font-size: 0.74rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.yw-playlist-detail-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+}
+
+.yw-playlist-play-all-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  background: var(--accent-color, #2563a8);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.yw-playlist-play-all-btn:hover {
+  filter: brightness(1.12);
+}
+
+.yw-playlist-play-all-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  filter: none;
+}
+
+.yw-playlist-toggle-btn {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.yw-playlist-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.yw-playlist-toggle-btn[aria-pressed="true"] {
+  background: rgba(255, 255, 255, 0.26);
+  color: #fff;
+}
+
+/* ---------- Playlist detail — scrollable item list (Part 2A laid out the
+   scroll container; Part 2B2 renders into it via fixed-height, absolutely
+   positioned rows inside a full-height "sizer" — see mountVirtualPlaylist()
+   in youtube-window.js. Only a small window of rows around the visible
+   area ever exists as real DOM nodes; the sizer alone gives the container
+   its true scrollHeight so native scrolling/scrollbars behave exactly as
+   if every row were present. PL_ROW_HEIGHT in the JS must match the fixed
+   height below (36px item + 6px gap = 42px). ---------- */
+.yw-playlist-detail-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.2rem 0.5rem 0.7rem;
+}
+
+.yw-playlist-virtual-sizer {
+  position: relative;
+  width: 100%;
+}
+
+.yw-playlist-virtual-viewport {
+  position: relative;
+}
+
+.yw-playlist-item {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 36px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 0.4rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  transition: background 0.12s ease;
+}
+
+.yw-playlist-item:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.yw-playlist-item-playing {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.yw-playlist-item-play {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  /* Touch-friendly (spec #19) — the visible row is 36px tall but the
+     button's hit area is nudged taller via padding-block on the parent
+     row's flex sizing being fixed; kept simple by relying on the row's
+     own 36px height plus the row's hover/focus area rather than shrinking
+     content further. */
+}
+
+.yw-playlist-item-menu-btn {
+  /* Reuses .yw-playlist-row-menu-btn's 26x26 circular button as-is
+     (spec #19 — same touch target already used by the library/detail
+     header ⋮ buttons), no extra rule needed here beyond the shared class. */
+}
+
+.yw-playlist-item-index {
+  flex-shrink: 0;
+  width: 1.6em;
+  text-align: center;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+
+.yw-playlist-item-thumb {
+  flex-shrink: 0;
+  width: 56px;
+  height: 32px;
+  border-radius: 5px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.yw-playlist-item-thumb-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+}
+
+.yw-playlist-item-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.yw-playlist-item-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yw-playlist-item-channel {
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.55);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yw-playlist-item-duration {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Responsive foundation (Part 2A) — narrow window widths;
+   Part 2B does the deeper responsive polish. ---------- */
+@media (max-width: 380px) {
+  .yw-playlist-detail-controls .yw-playlist-toggle-btn {
+    font-size: 0.68rem;
+    padding: 0.25rem 0.5rem;
+  }
+  .yw-playlist-item-thumb,
+  .yw-playlist-item-thumb-placeholder {
+    width: 44px;
+    height: 26px;
+  }
+  .yw-playlist-row-name {
+    font-size: 0.8rem;
+  }
+  /* Narrow window (spec #17) — keep thumbnail/title/essential action
+     (play + ⋮) prominent, collapse secondary metadata rather than
+     truncating everything into illegibility. */
+  .yw-playlist-item-channel,
+  .yw-playlist-item-duration {
+    display: none;
+  }
 }
 
 /* ---------- Channel video browser (Part 5) — lives inside the channel

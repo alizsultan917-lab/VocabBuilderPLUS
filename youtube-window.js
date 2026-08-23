@@ -196,6 +196,40 @@
         quota_exceeded / network_error / malformed_response / api_error,
         each with one plain-language sentence; renderResultsError()/
         showStatus() still do the on-screen rendering, unchanged.
+    14. Playlists (music-player upgrade) — DONE for data/architecture
+       only (Playlist Part 1 of a separate six-part effort layered on
+       top of everything above — NOT the same "Part" numbering as
+       components 1-13 above; see "PLAYLIST FOUNDATION NOTES" at the
+       very end of this header comment for specifics). `playlists`
+       (persistent definitions) + `playbackState` (queue position/
+       repeat/shuffle, persisted separately) + the queue-math functions
+       (getActivePlaylist/getCurrentQueueItem/buildPlaybackQueue/
+       getNextQueueIndex/getPreviousQueueIndex/playPlaylistItem/
+       startPlaylist/stopPlaylist/setRepeatMode/setShuffleEnabled) live
+       in a new "PLAYLISTS" block placed right after LOAD VIDEO.
+       Playlist Part 2A (library view, creation, rename/delete, and the
+       playlist detail shell) is DONE — see the "PLAYLIST UI" block
+       immediately after "PLAYLISTS" in this file, and the PART 2A NOTES
+       right after the PLAYLIST FOUNDATION NOTES below. Playlist Part 2B1
+       (adding videos to a playlist from a search result's own "+ Add"
+       or the current video's header "+ Add to Playlist", zero extra API
+       calls either way) is DONE — see the "ADD TO PLAYLIST" block right
+       after the ⋮ playlist-row menu, and the PART 2B1 NOTES after the
+       PART 2A NOTES below. Playlist Part 2B2 (per-item Play now/Play
+       next/Move up/Move down/Move to top/Move to bottom/Remove, the
+       up-next temporary queue, and windowed rendering so a multi-
+       thousand-item playlist never creates more than a screenful of DOM
+       nodes) is DONE — see the "LARGE PLAYLIST RENDERING" block and the
+       per-item ⋮ menu right after "playlist detail" inside "PLAYLIST UI",
+       and the PART 2B2 NOTES after the PART 2B1 NOTES below. This closes
+       out the whole Playlist Part 2 effort. Playlist Part 3 (full
+       playback engine), Part 4A (smart shuffle/repeat), and Part 4B
+       (transport keyboard shortcuts) are also DONE — see PLAYLIST PART 3
+       NOTES / PLAYLIST PART 4A NOTES below. Playlist Part 5
+       (unlimited-scale performance, persistence, and quota protection —
+       lazy batched metadata enrichment, storage-failure handling, and
+       local JSON export/import) is DONE — see PLAYLIST PART 5 NOTES,
+       the last section before this comment closes.
 
    RISKS / CONFLICTS FOUND DURING THIS AUDIT (see Part 1 summary for the
    full writeup):
@@ -519,6 +553,643 @@
        part and still doesn't, and Part 3's "◀ Results" pill already
        covers "get back to whatever was on screen" for any path into the
        video view, paste included.
+
+   PLAYLIST FOUNDATION NOTES (Playlist Part 1 — data model, persistence,
+   and the playback-queue abstraction; NOT the same numbering as Parts
+   1-8 above, which were a separate, already-finished effort on search/
+   browsing. This is Part 1 of a new six-part plan: build a proper
+   playlist-based music player on top of the player/window/API layer
+   that already exists above):
+     - WHERE IT LIVES: one new block, "PLAYLISTS", inserted right after
+       LOAD VIDEO and before the existing SEARCH (Part 3) block. Nothing
+       above or below it was restructured — it's a pure addition.
+     - TWO STORAGE KEYS, ON PURPOSE: `vocabRegister_youtubePlaylists`
+       (the `playlists` array — names/items/ordering, the data a person
+       would be upset to lose) and `vocabRegister_youtubePlaybackState`
+       (the `playbackState` object — active playlist id, queue position,
+       repeat mode, shuffle order — session/preference data, never the
+       source of truth for what's *in* a playlist). Both go through the
+       existing `loadJson`/`saveJson` helpers, so corrupted/malformed
+       JSON degrades to an empty list / default state instead of
+       throwing, same as every other persisted key in this file.
+       `loadPlaylistsFromStorage()` additionally drops any entry missing
+       a usable id/videoId rather than let one bad row break the whole
+       list.
+     - NO ARTIFICIAL LIMITS: no `.slice()`, no `if (items.length >= N)`,
+       anywhere in the playlist CRUD or persistence path. A playlist's
+       `items` array grows exactly as large as the person adds to it;
+       the same is true of the `playlists` array itself. The only
+       ceiling is whatever the browser's actual localStorage quota is,
+       and hitting that fails soft (via the existing `saveJson` try/
+       catch) instead of crashing the window.
+     - DEBOUNCED WRITES: `persistPlaylistsDebounced` (400ms) and
+       `persistPlaybackStateDebounced` (300ms) collapse bursts of rapid
+       mutation (adding many items back-to-back, clicking "next"
+       repeatedly) into a single localStorage write each, per the
+       spec's "don't re-stringify+save a huge playlist on every tiny
+       change" requirement. `persistPlaylistsNow()` (a `.flush()` on the
+       debounced writer) runs once on `beforeunload` so a person closing
+       the tab right after an edit doesn't lose it to the debounce
+       window. Playback state is never written on a player timeupdate/
+       progress tick — only on actual track/mode changes (new current
+       index, repeat mode flipped, shuffle toggled) — so a long song
+       doesn't generate any writes at all while it plays.
+     - REPEAT MODES (`playbackState.repeatMode`: "off" | "playlist" |
+       "one") are entirely separate from the pre-existing single-video
+       `loopEnabled` variable/toggle — neither reads nor writes the
+       other. Where they interact is exactly one `if` in
+       `onPlayerStateChange`'s ENDED branch: the old single-video loop
+       is checked first and still wins if it's on (unchanged pre-
+       existing behavior); only if it's *off* does an ended video ask
+       the new queue ("is there an active playlist, and was this ended
+       video its current item?") what to do next, via `playNextInQueue()`
+       — which itself resolves "one" (replay), "playlist" (wrap to
+       index 0), or "off" (stop) using `getNextQueueIndex()`. A
+       standalone video with no active playlist is unaffected either
+       way — it just falls through to the existing "stopped" indicator.
+     - SHUFFLE is a deterministic pre-computed order, not a live
+       Math.random() comparator sort: `generateShuffleOrder(items)` is
+       a one-time Fisher-Yates shuffle of `[0..items.length-1]` (index
+       positions into `playlist.items`), stored as
+       `playbackState.shuffleOrder`, walked via
+       `playbackState.shufflePosition`. `playbackState.currentIndex`
+       (an index into `playlist.items`) stays canonical for "what's
+       playing right now" in *both* shuffle and sequential mode — that's
+       what `getCurrentQueueItem()` reads — while `shuffleOrder`/
+       `shufflePosition` only decide what "next"/"previous" resolve to.
+       `rebuildShuffleOrder(playlist, { preserveCurrent })` regenerates
+       the order (e.g. after an add/remove/reorder invalidates it) and,
+       when `preserveCurrent` is set, re-locates the still-canonical
+       `currentIndex` inside the fresh order so a shuffled queue never
+       audibly jumps just because the list changed. The playlist's own
+       saved item order (`playlist.items`) is never touched by any of
+       this — shuffle is purely a second, disposable index over it.
+     - QUEUE MUTATIONS DURING ACTIVE PLAYBACK: `addItemToPlaylist()`
+       only ever appends, so it can't disturb `currentIndex`; it just
+       invalidates/rebuilds shuffle order if that playlist is the active
+       one and shuffle is on. `removeItemFromPlaylist()` and
+       `reorderPlaylistItem()` both resolve the *currently playing
+       item's id* before mutating and re-locate it after, so deleting or
+       dragging some other row never silently skips or repeats the song
+       actually playing; removing the currently-playing row itself
+       clamps to the nearest valid index rather than stopping playback
+       outright (nobody wants their music to cut out because the queue
+       changed). Deleting a playlist that's currently active calls
+       `stopPlaylist()` to clear `playbackState` rather than leaving a
+       dangling `activePlaylistId` pointing at nothing.
+     - ZERO NEW API CALLS: `playPlaylistItem()` goes straight to the
+       existing `loadVideo(item.videoId, …)` — the same function pasted
+       links and search-result clicks already use — which only ever
+       builds a local `/embed/<id>` URL. A playlist item's stored
+       `videoId`/`title`/`channelTitle`/`thumbnailUrl`/`duration` is
+       never re-fetched from YTApi just to play or list it, satisfying
+       the "playlists must work with no key / no quota / offline"
+       requirement (components 10-11 of the Part 1 spec) for free — it's
+       the same guarantee `loadVideo()` already gave standalone pasted
+       IDs.
+     - STANDALONE PLAYBACK UNCHANGED: nothing in this block is called
+       from `loadVideo()`, `search()`, or any result-card click handler
+       — playlists are additive. Pasting a link or clicking a search
+       result still never touches `playlists`/`playbackState` at all,
+       so "play a video with no playlist involved" keeps working exactly
+       as before.
+     - PUBLIC SURFACE: `window.YouTubeWindow.playlists` (getAll/get/
+       create/rename/remove/addItem/removeItem/reorderItem) and
+       `window.YouTubeWindow.playback` (getState/getActivePlaylist/
+       getCurrentItem/buildQueue/play/start/stop/next/previous/
+       setRepeatMode/setShuffleEnabled) are exposed the same way
+       `getApiUsage()` already was, mainly so later parts' UI code (and
+       manual console testing now) have a stable entry point without
+       reaching into this file's closure directly.
+     - NOT DONE YET (later parts, by design): no playlist UI (create/
+       rename/delete controls, an "Add to playlist" action anywhere,
+       a queue/list view, drag-to-reorder handles, transport buttons for
+       next/previous/repeat/shuffle). This part is the data layer and
+       queue math those UIs will call into — see the six-part plan in
+       the task this was built from.
+
+   PART 2A NOTES (playlist library, creation, and playlist detail shell):
+     - WHERE IT LIVES: one new block, "PLAYLIST UI", inserted right after
+       the PLAYLISTS data/queue block and before the existing SEARCH
+       (Part 3) block — same "pure addition" approach Part 1 used. It
+       calls into Part 1's functions (getAllPlaylists/getPlaylist/
+       createPlaylist/renamePlaylist/deletePlaylist/startPlaylist/
+       playPlaylistItem/setShuffleEnabled/setRepeatMode/playbackState)
+       and never touches localStorage, YTApi, or `playlists`/
+       `playbackState` directly.
+     - TWO MORE `setView()` STATES: "playlists" (#yw-playlists, the
+       library) and "playlist-detail" (#yw-playlist-detail) join the
+       pre-existing empty/results/video/channel-detail states, hidden/
+       shown the same way (a single class toggle per element) — no
+       second view-switching mechanism was introduced.
+     - NAVIGATION: the header's new 🎵 button (#yw-playlists-btn) is the
+       entry point — toggles into the library, or (if already showing a
+       playlist view) back out to whatever was on screen before
+       (leavePlaylistsView(): a playing video wins, else the active
+       search tab's own results, else empty). It never stops playback —
+       same "hidden view keeps playing" pattern the existing "back to
+       results" pill already relies on. Inside the feature, "← My
+       Playlists" always returns to the library specifically, per spec.
+     - MODALS REUSE THE APP'S OWN .modal SYSTEM: #yw-playlist-name-modal
+       (create and rename — one small form, mode-dependent title/button
+       label, in openPlaylistNameModal()) and #yw-playlist-delete-modal
+       (destructive-action confirm) are plain .modal/.modal-content/
+       .modal-actions markup, added in index.html as top-level siblings
+       of the app's other dialogs (#ai-settings-modal, #edit-modal,
+       etc.) — not nested inside #vocab-youtube-window, since that
+       element's CSS transform would clip a position:fixed descendant
+       (the exact reason #yw-settings-panel reparents to <body> at
+       runtime; living top-level from the start avoids needing that same
+       workaround for these two).
+     - NAME VALIDATION: trimmed, empty rejected (inline error text in the
+       modal, focus returned to the input) — no arbitrary character-count
+       cap, since none was asked for. Duplicate names are allowed by
+       design: identity is always `playlist.id` (createPlaylist() mints
+       a fresh one via the existing genId("pl")), never `playlist.name`.
+     - ⋮ OVERFLOW MENU: one shared implementation
+       (togglePlaylistRowMenu()) used by both a library row's ⋮ and the
+       playlist-detail header's ⋮ — same two actions (Rename/Delete)
+       either way. It's an in-flow absolutely-positioned dropdown
+       anchored to its own row (not position:fixed), so — unlike the
+       settings panel — it never needs to escape the window's clipping
+       and can stay a normal child of the view it belongs to.
+     - DELETE SAFETY: the confirm modal states the video count and that
+       YouTube itself is unaffected, per spec. deletePlaylist() (Part 1)
+       already clears `playbackState` via stopPlaylist() if the deleted
+       playlist was active; this part's only job is the view — if the
+       deleted playlist was open in the detail view, it navigates back to
+       the library (never leaves the detail view pointing at a playlist
+       that no longer exists) rather than touching playback further.
+     - ITEM ROWS ARE PLAY-ONLY: renderPlaylistDetail() lists the real,
+       uncapped `playlist.items` and wires each row to the existing
+       playPlaylistItem() — but adding/removing/reordering items has no
+       UI yet, by design (Part 2B's boundary). #yw-playlist-detail-content
+       is the scrollable container Part 2B's incremental/virtualized
+       rendering will replace the innerHTML-per-render approach inside,
+       without needing to change the header/controls above it.
+     - ZERO NEW API CALLS, SAME AS PART 1: every function in this block
+       is either pure rendering or a direct call into Part 1's CRUD/
+       queue functions, which are themselves YTApi-free (see PLAYLIST
+       FOUNDATION NOTES above) — creating, renaming, deleting, opening,
+       or navigating between playlists costs 0 YouTube Data API requests.
+
+   PART 2B1 NOTES (adding videos to a playlist from search results / the
+   current video — item removal, reorder, and large-playlist rendering
+   remain Part 2B2, not touched here):
+     - WHERE IT LIVES: one new block, "ADD TO PLAYLIST", inserted right
+       after the ⋮ playlist-row menu and before the create/rename modal
+       (which it also extends — see below) — same "pure addition, reuse
+       everything below/above it" approach Parts 1/2A used. It calls
+       straight into Part 1's addItemToPlaylist()/getPlaylist() and Part
+       2A's getAllPlaylists()/createPlaylist()/openPlaylistNameModal();
+       nothing here touches localStorage or YTApi directly, and no
+       second playlist store, persistence layer, or creation flow was
+       created.
+     - ZERO EXTRA API CALLS, BY CONSTRUCTION: every `source` object handed
+       to addItemToPlaylist() here comes from data already in hand —
+       `playlistSourceFromResultRow()` reshapes an already-rendered
+       `searchState.items` row (field-renaming only: `row.id` →
+       `videoId`, `row.thumb` → `thumbnailUrl`), and the header's
+       "+ Add to Playlist" button uses `currentVideoMeta`, a small object
+       loadVideo() now populates from whatever `opts.meta` its caller
+       already had (a search-result row, a playlist item) — see
+       loadVideo()'s own comments. A bare pasted link/ID has no such
+       metadata, so `currentVideoMeta` falls back to `{ title: "YouTube
+       Video", channelTitle: "", thumbnailUrl: "", duration: null }`
+       rather than firing a videos.list lookup just to name it (spec #9).
+       Neither path ever calls search.list, videos.list, or any other
+       YTApi method — "Add" is purely a local playlists-array mutation.
+     - THE CARD ITSELF IS UNTOUCHED: `renderResultCard()`'s existing
+       `.yw-result-item` button (thumbnail/title/channel/meta/desc, click
+       to play) is byte-for-byte the same as before Part 2B1, just now
+       wrapped in a new sibling `.yw-result-row` alongside a small
+       `.yw-add-btn` ("+ Add") pill in its own `.yw-result-add-wrap` —
+       satisfies "integrate into the existing card, don't redesign it."
+       `renderChannelVideoCard()` (the channel video browser, Part 5) was
+       deliberately left alone — Part 2B1's spec scopes "Add" to video
+       search results and the current video, not every list that happens
+       to reuse `.yw-result-item` styling.
+     - POPOVER SHAPE mirrors the existing ⋮ playlist-row menu exactly: an
+       in-flow `position:relative` wrap (`.yw-result-add-wrap` per card,
+       or `.yw-header-add-wrap` around the current-video button) +
+       `position:absolute` dropdown (`openAddToPlaylistMenu()`), never
+       `position:fixed` — so, like the ⋮ menu and unlike the settings
+       panel, it never needs to escape the window's own `overflow:
+       hidden`/transform by reparenting to <body>.
+     - "+ NEW PLAYLIST" REUSES PART 2A'S OWN MODAL: `openPlaylistNameModal()`
+       gained a third, optional `opts.addSource` argument (only honored
+       in "create" mode) rather than a parallel creation flow. When set,
+       `commitPlaylistNameModal()`'s create branch calls the pending
+       `addItemToPlaylist()` immediately after `createPlaylist()` and
+       shows the same confirmation toast — but, unlike the library's own
+       "+ New" button (which still auto-opens the fresh playlist's detail
+       view, unchanged), it deliberately does NOT navigate anywhere,
+       since adding — new playlist or existing — must never leave search
+       results/the current video (spec #5/#6).
+     - DUPLICATES ARE INTENTIONAL, NOT A BUG: `handleAddToPlaylistSelect()`
+       never checks whether `source.videoId` is already present in the
+       target playlist, and nothing here disables/hides a "+ Add" control
+       after use — every click (search result or current video, same
+       video or different) is its own independent `addItemToPlaylist()`
+       call, each producing its own unique playlist-item id (Part 1's
+       `genId("item")`), and addable to any number of different playlists
+       independently. `flashAddButton()` is purely a transient CSS class
+       for feedback; it never becomes a disabled/"Added" state.
+     - CONFIRMATION IS THE APP'S EXISTING STATUS LINE: `showAddedConfirmation()`
+       is a one-line call into the pre-existing `showStatus(html,
+       autoHideMs)` (the same `#yw-status` line under the search bar
+       every other status message already uses) — no new toast/modal
+       component was built.
+     - STAYING PUT: a successful add never calls `setView()`, never
+       re-runs a search, never touches `searchInput`/`currentVideoId`. If
+       a playlist library/detail view happens to already be on screen
+       when an add happens, its item count is kept live
+       (`renderPlaylistLibrary()`/`renderPlaylistDetail()` re-run only in
+       that case) — but that view is never *opened* as a side effect of
+       adding, and both already read the live `playlists` array fresh on
+       their own next render regardless, so nothing goes stale even when
+       neither is currently shown (the common case, since "Add" only
+       appears on search results / the current video, which are mutually
+       exclusive on-screen states with the playlist views).
+     - GRACEFUL FAILURE (spec #20): `handleAddToPlaylistSelect()` re-checks
+       `getPlaylist(playlistId)` at click time — if the chosen playlist
+       was deleted between opening the picker and choosing it (e.g. from
+       another tab), it shows a plain status message and refreshes
+       whatever playlist view might be open instead of throwing; a
+       persistence failure inside `addItemToPlaylist()` (it returns
+       `null` rather than throwing — see Part 1) is handled the same way,
+       so "Added" is never shown unless the item genuinely landed in
+       `playlist.items`.
+
+   PART 2B2 NOTES (item removal/reorder/Play Next, and large-playlist
+   rendering — the final stage of Part 2):
+     - WHERE IT LIVES: "LARGE PLAYLIST RENDERING" and the per-item ⋮ menu
+       block, both inserted right after renderPlaylistDetail() inside
+       "PLAYLIST UI"; queueUpNext()/the upNext-draining change to
+       playNextInQueue() live in "PLAYLISTS" next to the functions they
+       extend. Nothing here is a second copy of anything — Play now/Move
+       up/Move down/Move to top/Move to bottom/Remove call straight into
+       Part 1's playPlaylistItem()/reorderPlaylistItem()/
+       removeItemFromPlaylist(), which already existed and already
+       handled duplicates-by-id, active-index re-anchoring, and
+       shuffle-order invalidation correctly — this part only wires UI to
+       them.
+     - WINDOWED RENDERING, NOT AN ITEM LIMIT: mountVirtualPlaylist() gives
+       #yw-playlist-detail-content a full-height "sizer" div
+       (`count * PL_ROW_HEIGHT`) so native scrolling/scrollbar size stays
+       correct, then renders only `renderPlaylistItemRow()` for the rows a
+       rAF-throttled scroll handler determines are visible (+ a small
+       PL_OVERSCAN buffer) — see that block's own header comment for the
+       full design. `playlist.items` itself is never sliced/capped
+       anywhere; a 5,000-item playlist and a 5-item one run through the
+       exact same code path, the only difference being how many rows
+       `computeVisibleRange()` decides to materialize at once.
+     - CLICKS ARE DELEGATED, NOT PER-ROW: because rows are constantly
+       created/destroyed as the window scrolls, binding a listener per row
+       would mean constant bind/unbind churn. Instead one click listener
+       on the stable `playlistDetailEl` (bound once, not per render) reads
+       `data-play-item`/`data-play-index`/`data-item-menu`/
+       `data-item-index` off whatever was actually clicked.
+     - ACTIVE-ITEM HIGHLIGHT UPDATES WITHOUT A RERENDER (spec #2/#14):
+       playPlaylistItem()/stopPlaylist() (Part 1) each now call the new
+       notifyPlaylistUIOfPlaybackChange(), which — only when a
+       playlist-detail view happens to be open — finds the previously-
+       active and newly-active row (if either is currently within the
+       rendered window) and flips just their classList/aria-current/index
+       text. No full renderPlaylistDetail() call, no rebuilding of rows
+       that didn't change. A structural change (remove/move) still calls
+       the full renderPlaylistDetail(), but that stays cheap regardless of
+       playlist size since it only ever (re)creates the visible window.
+     - PLAY NEXT IS A SEPARATE, TEMPORARY QUEUE (spec #5/#9): `upNext` on
+       `playbackState` is a small FIFO of video snapshots — never indices
+       into `playlist.items`, never touched by reorderPlaylistItem(), and
+       drained by playNextInQueue() before it falls back to the normal
+       playlist queue. Queuing a track this way never reorders the saved
+       playlist and never touches shuffleOrder — the three concepts
+       (saved order / shuffle order / up-next queue) stay exactly as
+       separate as Part 1's design intended. This is deliberately
+       minimal — it does NOT build history/back-tracking or
+       auto-skip-unavailable-videos; those remain Part 3's job (spec #27).
+     - MUTUAL EXCLUSIVITY: the per-item ⋮ menu, the library/detail-header
+       ⋮ menu, and the "+ Add to Playlist" popover all close each other on
+       open (closeAllPlaylistMenus() now also calls
+       closePlaylistItemMenu() and vice versa) so at most one popover is
+       ever on screen — the same convention Part 2A/2B1 already
+       established, just extended to a third popover type.
+     - ZERO NEW API CALLS: every action here (remove/reorder/play
+       now/play next) is a local mutation of `playlists`/`playbackState`
+       plus, at most, the existing loadVideo() → local `/embed/<id>` — no
+       new YTApi.* call is introduced anywhere in this block.
+
+   PLAYLIST PART 3 NOTES (full playback engine & continuous playback —
+   the video-view transport bar, error/unavailable-video handling,
+   autoplay-restriction handling, and the ended/completed state):
+     - WHERE IT LIVES: one new block, "PLAYBACK ENGINE", inserted right
+       after the per-item ⋮ menu / "ADD TO PLAYLIST" code and before the
+       pre-existing SEARCH (Part 3, old numbering) block — same
+       "append after everything playlist-related, touch nothing else"
+       approach every prior playlist part used. It calls straight into
+       Part 1's queue math (getActivePlaylist/getCurrentQueueItem/
+       getNextQueueIndex/buildPlaybackQueue/playPlaylistItem/
+       playNextInQueue/playPreviousInQueue/setRepeatMode) and Part 2's
+       notifyPlaylistUIOfPlaybackChange() hook; it introduces no second
+       queue/state system.
+     - THE TRANSPORT BAR IS PLAYLIST-ONLY, BY DESIGN (spec #15): a small
+       overlay (`ensureTransportBar()`, built once, lazily, the first
+       time it's needed) sits at the bottom of `#yw-video-wrap` and is
+       shown only when the currently-loaded video IS the active
+       playlist's current queue item (same identity check the pre-
+       existing ENDED handler already used: `activePlaylistId` set AND
+       `getCurrentQueueItem()?.videoId === currentVideoId`). A standalone
+       video (pasted link, search-result click with no playlist
+       involved) never shows Next/Previous/Track-X-of-Y/playlist name —
+       it keeps exactly its pre-Part-3 look (loop button, volume,
+       ↗/+Add/⋮ header row). This is the "clear distinction between
+       standalone and playlist playback" the spec asks for, expressed as
+       a UI difference, not just an internal one.
+     - NO NEW METADATA FETCHES (spec #7): the Now Playing block reads
+       `currentVideoMeta` (already populated by loadVideo() from the
+       playlist item's own stored title/channelTitle — see PLAYLIST
+       FOUNDATION NOTES' "ZERO NEW API CALLS") and `currentVideoMeta.title
+       || "YouTube video"` is the exact fallback spec #7 asks for. Track
+       X of Y comes from `playbackState.currentIndex + 1` /
+       `playlist.items.length` — pure local arithmetic.
+     - PROGRESS BAR, NOT A COMPLETION POLLER (spec #4 vs #8 — these are
+       different things): `startProgressTicker()`/`stopProgressTicker()`
+       wrap a single 1000ms `setInterval` that only ever calls
+       `player.getCurrentTime()`/`getDuration()` to move a width % and
+       repaint two mm:ss labels — it never inspects player state to
+       infer song completion (that's still exclusively
+       `onPlayerStateChange`'s ENDED branch, unchanged in kind from
+       before this part). The ticker is started on PLAYING and stopped
+       on PAUSED/ENDED/error/window-close, so nothing runs while nothing
+       is playing.
+     - PREVIOUS THRESHOLD (spec #6): `handlePreviousClick()` reads
+       `player.getCurrentTime()` (a local IFrame-API call, not a YouTube
+       Data API request, so this costs zero quota) and restarts the
+       current track via `seekTo(0, true)` past the ~3s mark, or defers
+       to `playPreviousInQueue()` before it. No extra network call
+       either way.
+     - UNAVAILABLE-VIDEO SKIP, BOUNDED (spec #12/#13): `unavailableItemIds`
+       is a plain in-memory `Set` of playlist *item* ids (never videoIds
+       — two items can share a videoId) — deliberately NOT persisted,
+       since it describes only "what failed during this playback pass,"
+       not a fact about the playlist itself (the spec is explicit that a
+       failing video must never be auto-removed from the user's saved
+       playlist). `startPlaylist()` clears it (a fresh ▶ Play is a fresh
+       pass); `playPlaylistItem()` clears just the one item id being
+       played (an explicit click — row, Next, Previous, or the skip
+       logic itself retrying — always gets a real attempt). On
+       `onPlayerError()`, if the failed video is the active playlist's
+       current item, `skipToNextPlayableAfterError()` adds that item's id
+       to the set, then walks the *play-order* (via `buildPlaybackQueue()`
+       — respects shuffle, same ordering Next/Previous already use) for
+       up to `playlist.items.length` steps looking for an id not in the
+       set. Every failure adds exactly one new id, so the set can never
+       exceed the playlist's own size — the walk is mathematically
+       bounded, satisfying "attempt each item at most once per pass"
+       without a separate attempt counter. Exhausting it (or finding no
+       next index at all, e.g. repeat=off at the last item) shows the
+       "no playable videos remain" ended state rather than looping.
+     - AUTOPLAY-RESTRICTION HANDLING IS A WATCHDOG, NOT A WORKAROUND
+       (spec #11): `armAutoplayWatchdog()` is called every time
+       `playPlaylistItem()` loads a new track (manual or automatic
+       alike) and simply checks, ~1.8s later, whether the player's own
+       state ever reached PLAYING/BUFFERING. If not, `playbackBlocked`
+       flips true, the transport bar's center button becomes a plain
+       "▶ Play" affordance (calling `player.playVideo()` — a normal user
+       gesture from here on satisfies the browser), and a one-line status
+       explains why. Playlist state (`currentIndex`/`activePlaylistId`)
+       is untouched either way — the queue doesn't get confused by a
+       browser policy, per spec's "do not break playlist state." No
+       referrer/attribute/permissions-policy trick is attempted, per
+       spec's "do not attempt browser-policy workarounds."
+     - ENDED STATE KEEPS THE PLAYLIST "OPEN" (spec #3): when
+       `playNextInQueue()` returns false from the ENDED handler (repeat
+       off, last item), `playbackState.activePlaylistId`/`currentIndex`
+       are deliberately left exactly where Part 1 already leaves them
+       (pointing at the last item) — this part only sets a local
+       `playlistFinished` flag and swaps the transport bar's center
+       button for "↺ Replay", which calls `startPlaylist(id, {fromIndex:
+       0})`. The player/iframe itself is never destroyed (still the same
+       reused `YT.Player` from mountPlayer's loadVideoById reuse path —
+       untouched by this part).
+     - REUSE, NOT REBUILD (spec #10): nothing in this part calls
+       `destroyPlayer()`/creates a second `YT.Player`. Every track change
+       — manual click, auto-advance, error-skip, or Replay — goes through
+       the exact same `playPlaylistItem()` → `loadVideo()` → `mountPlayer()`
+       path Part 1 already built, which already prefers
+       `player.loadVideoById()` over tearing the instance down (see
+       mountPlayer, unchanged by this part).
+     - ZERO NEW YOUTUBE DATA API CALLS: every function this part adds
+       talks only to the already-mounted `YT.Player` instance (getCurrentTime/
+       getDuration/getPlayerState/playVideo/pauseVideo/seekTo) or to
+       `playlists`/`playbackState` already in memory — no `YTApi.*` call
+       appears anywhere in this block, keeping playlists fully usable
+       with no API key configured (same guarantee every earlier playlist
+       part gave).
+
+   PLAYLIST PART 4A NOTES (smart shuffle, repeat modes, and the
+   playback-order engine — the request's own numbering; this project's
+   playlist effort had already covered most of this ground under its
+   Part 1/2A/2B1/2B2 numbering above, so this pass is a targeted
+   extension of the existing PLAYLISTS block rather than a rewrite):
+     - ALREADY IN PLACE FROM PART 1, UNCHANGED HERE: the three repeat
+       modes and their precedence in `getNextQueueIndex()`/
+       `getPreviousQueueIndex()` (spec #3-7/#27-28), `shuffleEnabled`/
+       `shuffleOrder`/`shufflePosition` as the one authoritative shuffle
+       state (spec #8), shuffle never writing back into `playlist.items`
+       (spec #2/#9), the ID-based (not object-based) shuffle queue (spec
+       #10), preserving the current item across shuffle on/off (spec
+       #15-17 — `currentIndex` is always a `playlist.items` position,
+       never a `shuffleOrder` position, so turning shuffle off already
+       "just works" with no extra code), and invalidating/rebuilding a
+       stale shuffle order on add/remove/reorder while preserving the
+       playing item (spec #29, `invalidateShuffleIfActive()`).
+     - WHAT THIS PASS ADDS: `generateShuffleOrder()` now takes the
+       playlist's `items` (not a bare length) and runs one deterministic
+       smoothing pass afterward to avoid two ADJACENT entries sharing a
+       videoId — spec #13's "don't play the same song twice in a row
+       just because it's in the playlist twice", answered by comparing
+       videoId, not item id, since two different items can point at the
+       same video. `getNextQueueIndex()` now calls it again to start a
+       genuinely NEW shuffle cycle when Shuffle+Repeat Playlist wraps
+       (spec #22/#25) instead of silently re-walking the same fixed
+       order forever, and passes the outgoing cycle's last item as
+       `avoidFirstItem` so the new cycle tries not to open on it (spec
+       #23). Shuffle+Repeat One is unaffected (still resolved by the
+       `repeatMode === "one"` branch ahead of any shuffle logic, so nothing
+       here advances the queue — spec #24), and Shuffle+Repeat Off is
+       unaffected too (`repeatMode !== "playlist"` still returns -1 at
+       the end of a cycle — spec #26).
+     - RESHUFFLE (spec #30): `reshuffleActivePlaylist()` is a thin
+       wrapper over the existing `rebuildShuffleOrder(playlist,
+       { preserveCurrent: true })` — no new anchor-relocation logic
+       needed, since that already keeps the playing item in place and
+       the smoothing pass above already covers "avoid immediate
+       repetition where possible". Exposed at
+       `window.YouTubeWindow.playback.reshuffle` for Part 4B's UI (and
+       manual testing) to call.
+     - SHUFFLE HISTORY (spec #18/#20): deliberately NOT a second,
+       separately-maintained array. `shuffleOrder` already IS the
+       current cycle's visiting order and `shufflePosition` already IS
+       how far into it playback has gotten, so Previous already follows
+       real playback history for free (spec #19/#21 — it's a walk
+       backward through a FIXED order, not a fresh random pick), and it
+       can never grow unbounded (spec #20) since it's capped at the
+       playlist's own length. `getShuffleHistory()` is a read-only
+       derived view (`shuffleOrder` sliced to before the current
+       position, most-recent-first) added only so a future "recently
+       played" UI has something to read without reaching into
+       `playbackState` directly.
+     - NOT TOUCHED, BY DESIGN (Part 4B's boundary): no new buttons, no
+       keyboard shortcuts, no changes to the existing shuffle/repeat
+       buttons already in the playlist-detail view or the transport bar
+       — both already call straight into `setShuffleEnabled()`/
+       `setRepeatMode()` from Part 2A/3 and need no changes for any of
+       the above.
+
+   PLAYLIST PART 5 NOTES (unlimited-scale performance, persistence, and
+   quota protection — an audit-and-close-the-gaps pass across everything
+   Parts 1-4B already built, not a rewrite of any of it):
+     - AUDIT RESULT — MOST OF THIS WAS ALREADY TRUE: playback is already
+       API-free (Part 1's "ZERO NEW API CALLS" — playPlaylistItem() only
+       ever calls the local loadVideo()), a known videoId is never
+       resolved through search.list anywhere in the playlist code path,
+       persistence is already debounced (400ms/300ms) and never fires on
+       a playback progress tick, rendering is already windowed
+       (mountVirtualPlaylist(), Part 2B2 — a 5,000-item playlist creates
+       exactly as many DOM rows as fit on screen + overscan, never 5,000),
+       playlists/playback-state/loop/volume/mute are already five
+       separate localStorage keys (never one big blob rewritten for a
+       volume change), the existing YW_CACHE_TTL/quota system already
+       distinguishes its own browser-local estimate from Google's real
+       quota in the UI copy itself, and search was already user-triggered
+       with a 5-minute cache — none of that needed changing. This part is
+       the genuine gaps found on top of that foundation:
+     - METADATA ENRICHMENT (spec #3-#5) — new "PLAYLIST ITEM METADATA
+       ENRICHMENT" block, right after mountVirtualPlaylist() in "LARGE
+       PLAYLIST RENDERING". The gap: an item added by pasting a raw video
+       ID/URL, or arriving via Part 5's own Import below, has no title/
+       thumbnail/duration the way a search-result-sourced item already
+       does. `enrichVisiblePlaylistItems(playlist, start, end)` is called
+       from renderVirtualPlaylistWindow() every time the visible window
+       is (re)painted — LAZY (spec #5): it only ever looks at rows
+       actually on screen, never sweeps a whole playlist when opened.
+       BATCHED (spec #4): every videoId needing enrichment across that
+       window goes into one YTApi.getVideoDetails() call, which already
+       chunks at 50 and already caches by request shape — no second cache
+       was built on top of it. NEVER SEARCHES (spec #2, reinforced): only
+       ever calls videos.list for an id already known, never search.list.
+       `ywEnrichAttempted` (a plain in-memory Set of item ids, session-
+       only, same reasoning as the Playback Engine's `unavailableItemIds`)
+       caps every item at one attempt, so a permanently-unavailable
+       pasted id doesn't refire a request every time it scrolls back into
+       view. No API key configured → the function returns immediately —
+       enrichment is a pure bonus, never a requirement for playback.
+     - STORAGE FAILURE HANDLING (spec #9) — `savePlaylistsToStorage()`
+       replaces the bare `saveJson(YW_PLAYLISTS_STORAGE, playlists)` call
+       inside `persistPlaylistsDebounced` specifically (playbackState/
+       prefs are untouched — see PLAYLIST FOUNDATION NOTES on why they're
+       already lower-stakes than the playlists array itself). On a
+       QuotaExceededError (or a private-browsing equivalent) it does NOT
+       throw, does NOT touch the in-memory `playlists` array (nothing is
+       ever deleted because a write failed), and shows exactly one
+       warning via the existing showStatus() line — deduped with
+       `playlistStorageWarningActive` so a burst of failed debounced
+       writes while storage stays full doesn't spam the status line, and
+       automatically clears the moment a write succeeds again. The
+       warning names Export (below) as the actual way to not lose
+       anything, rather than just stating the problem.
+     - EXPORT / IMPORT (spec #10-#12) — new "PLAYLIST EXPORT / IMPORT"
+       block, right after the delete-confirm modal's own listeners.
+       Export (`downloadPlaylistExport()`) writes an explicit field list
+       (id/name/createdAt/updatedAt/items, each item's id/videoId/title/
+       channelTitle/thumbnailUrl/duration/addedAt) — never
+       `JSON.stringify(playlists)` directly, and never the API key or any
+       other app setting, per spec. Import is read-only until confirmed:
+       `parsePlaylistImportFile()` only parses+validates (rejects
+       non-JSON, rejects a shape with no playlists array, drops any
+       record with no usable items via `sanitizeImportedPlaylist()`/
+       `sanitizeImportedPlaylistItem()` — the exact same defensive
+       cleaning style `loadPlaylistsFromStorage()` already applies to
+       locally-saved data, including a plausible-shape check on every
+       videoId via `isPlausibleVideoId()`) and hands the result to
+       `openPlaylistImportModal()`, which shows a playlist/video count
+       and a Merge-vs-Replace choice (#yw-playlist-import-modal, same
+       plain .modal markup convention as every other dialog in this app)
+       — nothing is written to `playlists` until that modal's own Import
+       button is clicked. PROTOTYPE POLLUTION / NO CODE EXECUTION (spec
+       #11): every field is copied individually onto a fresh object
+       literal in the two sanitize functions above — never
+       `{...raw}`/`Object.assign(target, raw)` — so a crafted
+       `"__proto__"`/`"constructor"` key in the file can reach nothing;
+       the file is only ever passed through `JSON.parse`, never `eval`
+       or a Function constructor. DUPLICATE IDS (spec #12): every
+       imported ITEM gets a brand-new id unconditionally
+       (`sanitizeImportedPlaylistItem()`), and every imported PLAYLIST's
+       id is re-checked against this browser's existing ids at commit
+       time (`commitPlaylistImport()`) and regenerated on collision — two
+       distinct items or playlists can never silently merge into one just
+       because an id matched. ASYNC FOR LARGE IMPORTS (spec #16):
+       `commitPlaylistImport()` pushes playlists onto the array in
+       chunks of 25 with a `setTimeout(resolve, 0)` yield between chunks,
+       rather than one long synchronous loop, so a many-thousand-item
+       export doesn't freeze the tab for the whole import — the browser
+       gets a chance to paint/handle input between chunks. One debounced
+       persist happens at the end, not one per chunk. REPLACE MODE calls
+       the existing `stopPlaylist()` before clearing `playlists`, so a
+       currently-active playlist that's about to be wiped never leaves
+       `playbackState` pointing at a now-dangling id (same guard
+       `deletePlaylist()` already applies to a single deletion). The
+       trigger buttons (⇩ Export / ⇧ Import) live in
+       `renderPlaylistLibrary()`'s own header markup, rebuilt/rebound on
+       every render exactly like the pre-existing "+ New" button already
+       is; Import is available even from the empty-playlists state (the
+       whole point of restoring a backup on a fresh browser/profile),
+       Export is not (nothing to export, and a click is now a no-op
+       status message rather than downloading an empty file — belt-and-
+       suspenders, since the button isn't rendered in the empty state at
+       all).
+     - MEMORY LEAK AUDIT (spec #17): every timer/listener/observer this
+       playlist effort has ever added was checked for a matching
+       teardown. `teardownVirtualPlaylist()` (Part 2B2, unchanged) already
+       removes its scroll listener and cancels any pending
+       `requestAnimationFrame` before a new virtual list mounts or the
+       detail view is left — confirmed still correct. `startProgressTicker()`
+       / `stopProgressTicker()` (Part 3)'s single `setInterval` is stopped
+       on PAUSED/ENDED/error, and `close()` (pre-existing, outside the
+       playlist effort) already calls both `stopProgressTicker()` and
+       `clearAutoplayWatchdog()` alongside `destroyPlayer()` — confirmed
+       no dangling interval/timeout can outlive the window being closed.
+       `armAutoplayWatchdog()` (Part 3)'s one-shot `setTimeout`
+       self-clears on firing and is never re-armed without a fresh track
+       load overwriting the previous timer id — confirmed no accumulation
+       across rapid track changes. The two `beforeunload` listeners
+       (Playlist Part 1, for the two debounced writers' `.flush()`) are
+       intentionally permanent for the page's lifetime, same as every
+       other top-level listener in this file (drag/resize/etc.) — not a
+       leak, since there's exactly one of each for the file's entire
+       lifetime, never re-added per playlist/render. No new
+       `setInterval`/`IntersectionObserver`/`MutationObserver` was
+       introduced by this part — enrichment (above) is a plain async
+       function call with no persistent handle to clean up, and
+       export/import's FileReader/object-URL are each used once and
+       explicitly revoked (`URL.revokeObjectURL()`) or left to GC
+       normally once `onload` fires, matching the pattern the app's
+       pre-existing PDF/Drive export code already uses.
+     - STRESS-TEST NOTES: 1×1 through 50×100 all exercise the same code
+       paths as 1×1 — there is no separate "large playlist" branch
+       anywhere in this file, only the windowed-rendering/lazy-enrichment
+       behavior naturally doing less work when there's less to show.
+       Shuffle/repeat/refresh/rapid-Next were already covered by Parts
+       3-4A and are untouched here. "API key removed mid-session" and
+       "quota exhausted" both already degrade gracefully for playback
+       (Part 1's zero-API-calls guarantee) and now also degrade
+       gracefully for enrichment specifically (the `if (!apiKey) return`
+       guard above, and getVideoDetails()'s existing try/catch inside
+       `enrichVisiblePlaylistItems()`) — an item just keeps showing
+       "Untitled" instead of erroring.
    ========================================================================= */
 
 (function () {
@@ -533,6 +1204,10 @@
   const YW_LOOP_STORAGE = "vocabRegister_youtubeLoopEnabled"; // "true" | "false"
   const YW_VOLUME_STORAGE = "vocabRegister_youtubeVolume"; // 0-100, last slider value
   const YW_MUTED_STORAGE = "vocabRegister_youtubeMuted"; // "true" | "false"
+  // Part 6 — "Player-focused" (default) vs "Playlist-focused": which
+  // panel a playlist track load lands on. Purely a display preference —
+  // never affects what plays or the saved playlist/queue data itself.
+  const YW_LAYOUT_MODE_STORAGE = "vocabRegister_youtubeLayoutMode"; // "player" | "playlist"
 
   const YW_MIN_WIDTH = 320;
   const YW_MIN_HEIGHT = 220;
@@ -575,6 +1250,8 @@
   const volumeSlider = document.getElementById("yw-volume-slider");
   const muteBtn = document.getElementById("yw-mute-btn");
   const openExternalBtn = document.getElementById("yw-open-external-btn");
+  // Playlist Part 2B1 — "+ Add to Playlist" for the current video.
+  const addCurrentBtn = document.getElementById("yw-add-current-btn");
   const settingsBtn = document.getElementById("yw-settings-btn");
   const settingsPanel = document.getElementById("yw-settings-panel");
   // Escape the youtube window's `overflow: hidden` (and its transform,
@@ -607,12 +1284,53 @@
   const channelToggleBtn = document.getElementById("yw-channel-toggle-btn");
   const channelForm = document.getElementById("yw-channel-form");
   const channelInput = document.getElementById("yw-channel-input");
+
+  // Playlist Part 2A — library/detail views, header entry point, and the
+  // two modals (create/rename, delete confirm). The modals live outside
+  // #vocab-youtube-window in index.html (siblings of the app's other
+  // .modal dialogs) rather than nested inside it, since the window itself
+  // has a CSS transform (see .yw-open/.yw-minimized in youtube-window.css)
+  // which would create a containing block that clips any position:fixed
+  // descendant — exactly the problem #yw-settings-panel already had to
+  // work around by reparenting to <body> at runtime. Living top-level
+  // from the start avoids needing that same workaround here.
+  const playlistsEl = document.getElementById("yw-playlists");
+  const playlistDetailEl = document.getElementById("yw-playlist-detail");
+  const playlistsBtn = document.getElementById("yw-playlists-btn");
+  const layoutToggleBtn = document.getElementById("yw-layout-toggle-btn");
+  const playlistNameModal = document.getElementById("yw-playlist-name-modal");
+  const playlistNameTitleEl = document.getElementById("yw-playlist-name-modal-title");
+  const playlistNameInput = document.getElementById("yw-playlist-name-input");
+  const playlistNameErrorEl = document.getElementById("yw-playlist-name-error");
+  const playlistNameSaveBtn = document.getElementById("yw-playlist-name-save-btn");
+  const playlistNameCancelBtn = document.getElementById("yw-playlist-name-cancel-btn");
+  const playlistDeleteModal = document.getElementById("yw-playlist-delete-modal");
+  const playlistDeleteTextEl = document.getElementById("yw-playlist-delete-text");
+  const playlistDeleteConfirmBtn = document.getElementById("yw-playlist-delete-confirm-btn");
+  const playlistDeleteCancelBtn = document.getElementById("yw-playlist-delete-cancel-btn");
+  // Playlist Part 5 — export/import. The trigger buttons themselves are
+  // rendered dynamically inside renderPlaylistLibrary() (like "+ New"
+  // already is), so only the modal/file-input pieces that live in static
+  // markup are looked up here.
+  const playlistImportFileInput = document.getElementById("yw-playlist-import-input");
+  const playlistImportModal = document.getElementById("yw-playlist-import-modal");
+  const playlistImportSummaryEl = document.getElementById("yw-playlist-import-summary");
+  const playlistImportErrorEl = document.getElementById("yw-playlist-import-error");
+  const playlistImportConfirmBtn = document.getElementById("yw-playlist-import-confirm-btn");
+  const playlistImportCancelBtn = document.getElementById("yw-playlist-import-cancel-btn");
   const channelOldestBtn = document.getElementById("yw-channel-oldest-btn");
   const channelNewestBtn = document.getElementById("yw-channel-newest-btn");
 
   let isActive = false; // window is open (visible OR minimized-but-playing)
   let isMinimized = false; // hidden-but-playing
   let currentVideoId = null;
+  // Playlist Part 2B1 — whatever metadata is known for `currentVideoId`,
+  // so "+ Add to Playlist" on the current-video view never needs a fresh
+  // API call (spec #8/#9). Set by loadVideo()'s `opts.meta`; falls back
+  // to a bare "YouTube Video" title when nothing richer is known (a
+  // pasted link/ID, or a video ID typed directly) — the same fallback
+  // spec #9 asks for. `null` whenever nothing is loaded.
+  let currentVideoMeta = null;
   let player = null; // YT.Player instance
   let playerReadyPromise = null;
   let apiKey = "";
@@ -631,6 +1349,10 @@
     return typeof v === "number" && Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 100;
   })();
   let playerMuted = loadJson(YW_MUTED_STORAGE, false) === true;
+  // Part 6 — "player" (default) or "playlist". See loadVideo()'s view
+  // choice and reflectLayoutModeUI() below; purely which panel a
+  // playlist-sourced track load lands on.
+  let layoutMode = loadJson(YW_LAYOUT_MODE_STORAGE, "player") === "playlist" ? "playlist" : "player";
 
   // Part 4: which search mode the footer's tabs are on. Purely a UI/routing
   // flag — it never owns any results itself, so switching it back and forth
@@ -1138,19 +1860,46 @@
     if (!window.YT) return;
     if (event.data === window.YT.PlayerState.PLAYING) {
       setPlayingIndicator(true);
+      // Playback Engine (Part 3) — the state we were waiting on to know
+      // autoplay wasn't blocked, and the trigger to start the (modest,
+      // stop-when-idle) progress ticker. See PLAYLIST PART 3 NOTES.
+      clearAutoplayWatchdog();
+      playbackBlocked = false;
+      startProgressTicker();
+      updateTransportUI();
     } else if (event.data === window.YT.PlayerState.ENDED) {
+      stopProgressTicker();
       if (loopEnabled) {
+        // Pre-existing single-video loop — unchanged, and still takes
+        // priority over playlist auto-advance below (see PLAYLIST
+        // FOUNDATION NOTES: the two systems are independent, but where
+        // they meet, the person's explicit per-video loop wins).
         try {
           player.seekTo(0, true);
           player.playVideo();
         } catch {
           /* non-fatal */
         }
+      } else if (playbackState.activePlaylistId && getCurrentQueueItem()?.videoId === currentVideoId) {
+        // The video that just ended is still the active playlist's
+        // current item (not a standalone video played while a playlist
+        // happened to be active) — let the queue decide what's next,
+        // per whatever repeat mode is set. playNextInQueue() itself
+        // resolves "one"/"playlist"/"off" via getNextQueueIndex().
+        if (!playNextInQueue()) {
+          setPlayingIndicator(false);
+          // Spec #3 — repeat=off, last item: stop progression, show an
+          // ended state, keep the window/player alive, allow replay. See
+          // PLAYLIST PART 3 NOTES.
+          showPlaylistFinished();
+        }
       } else {
         setPlayingIndicator(false);
       }
     } else if (event.data === window.YT.PlayerState.PAUSED) {
       setPlayingIndicator(false);
+      stopProgressTicker();
+      updateTransportUI();
     }
   }
 
@@ -1177,6 +1926,15 @@
       showStatus("This video hit a playback error in this browser's player — try again, or open it on YouTube.com.", 6000);
     } else {
       showStatus("This video couldn't be played here — try “Open on YouTube.com”.", 6000);
+    }
+    stopProgressTicker();
+    clearAutoplayWatchdog();
+    setPlayingIndicator(false);
+    // Playback Engine (Part 3, spec #12/#13) — only a playlist's own
+    // current item triggers auto-skip; a standalone video's error just
+    // stops here, exactly as before this part. See PLAYLIST PART 3 NOTES.
+    if (playbackState.activePlaylistId && getCurrentQueueItem()?.videoId === currentVideoId) {
+      skipToNextPlayableAfterError();
     }
   }
 
@@ -1312,8 +2070,19 @@
     resultsEl?.classList.toggle("hidden", view !== "results");
     videoWrap?.classList.toggle("hidden", view !== "video");
     channelDetailEl?.classList.toggle("hidden", view !== "channel-detail");
+    playlistsEl?.classList.toggle("hidden", view !== "playlists");
+    playlistDetailEl?.classList.toggle("hidden", view !== "playlist-detail");
     if (view === "empty") updateEmptyStateText();
     reflectBackToResultsUI(view);
+    reflectPlaylistsBtnUI();
+  }
+
+  // Header entry-point button state — "on" while either playlist view is
+  // showing, same visual language as the loop button's aria-pressed style.
+  function reflectPlaylistsBtnUI() {
+    const isPlaylistsView = currentBodyView === "playlists" || currentBodyView === "playlist-detail";
+    playlistsBtn?.setAttribute("aria-pressed", String(isPlaylistsView));
+    playlistsBtn?.classList.toggle("active", isPlaylistsView);
   }
 
   // The empty-state placeholder's copy depends on which tab is active —
@@ -1372,12 +2141,28 @@
     if (loopBtn) loopBtn.title = loopEnabled ? "Loop this video: on — click to turn off" : "Loop this video: off — click to turn on";
   }
 
+  // Part 6 — mirrors reflectLoopUI()'s pattern for the new layout toggle.
+  function reflectLayoutModeUI() {
+    if (!layoutToggleBtn) return;
+    const isPlaylistFocused = layoutMode === "playlist";
+    layoutToggleBtn.classList.toggle("active", isPlaylistFocused);
+    layoutToggleBtn.setAttribute("aria-pressed", String(isPlaylistFocused));
+    layoutToggleBtn.title = isPlaylistFocused ? "Layout: Playlist-focused — click for Player-focused" : "Layout: Player-focused — click for Playlist-focused";
+    layoutToggleBtn.setAttribute("aria-label", isPlaylistFocused ? "Switch to player-focused layout" : "Switch to playlist-focused layout");
+  }
+
   function reflectOpenExternalUI() {
-    if (!openExternalBtn) return;
-    openExternalBtn.disabled = !currentVideoId;
-    openExternalBtn.title = currentVideoId
-      ? "Open on YouTube.com — for Like, Subscribe, Save, Download, and everything else only Google's own site can do"
-      : "Load a video first";
+    if (openExternalBtn) {
+      openExternalBtn.disabled = !currentVideoId;
+      openExternalBtn.title = currentVideoId
+        ? "Open on YouTube.com — for Like, Subscribe, Save, Download, and everything else only Google's own site can do"
+        : "Load a video first";
+    }
+    // Playlist Part 2B1 — same enabled/disabled pattern as ↗ above.
+    if (addCurrentBtn) {
+      addCurrentBtn.disabled = !currentVideoId;
+      addCurrentBtn.title = currentVideoId ? "Add to Playlist" : "Load a video first";
+    }
   }
 
   /* ----------------------------------------------------------------------
@@ -1482,9 +2267,31 @@
     isActive = false;
     isMinimized = false;
     currentVideoId = null;
+    currentVideoMeta = null;
     destroyPlayer();
+    // Playback Engine (Part 3) — a real close (unlike hide()) tears
+    // everything down, so its own runtime-only state shouldn't outlive
+    // it either. See PLAYLIST PART 3 NOTES.
+    stopProgressTicker();
+    clearAutoplayWatchdog();
+    playlistFinished = false;
+    playbackBlocked = false;
+    hideTransportBar();
     if (resultsEl) resultsEl.innerHTML = "";
     if (channelDetailEl) channelDetailEl.innerHTML = "";
+    if (playlistsEl) playlistsEl.innerHTML = "";
+    if (playlistDetailEl) playlistDetailEl.innerHTML = "";
+    currentDetailPlaylistId = null;
+    // Part 6.1C fix — close() already tears down every other per-view
+    // state (search, channel, playlist menus/modals) below; the
+    // virtualized-playlist scroll/rAF state was the one piece left
+    // dangling, holding a reference (and an active scroll listener) on
+    // the DOM node this innerHTML reset just detached.
+    teardownVirtualPlaylist();
+    closeAllPlaylistMenus();
+    closeAddToPlaylistMenu();
+    closePlaylistNameModal();
+    closePlaylistDeleteModal();
     resetSearchState("");
     resetChannelSearchState("");
     resetChannelVideosState(null, null);
@@ -1535,6 +2342,7 @@
       // 153 (see file header). A short, non-blocking status note
       // explains why instead of YouTube's own confusing error screen.
       currentVideoId = null;
+      currentVideoMeta = null;
       setView("empty");
       reflectOpenExternalUI();
       showStatus("Playback needs the page served over http:// (not file://) — that's what Error 153 was.");
@@ -1543,8 +2351,39 @@
     }
 
     currentVideoId = id;
+    // Playlist Part 2B1 — capture whatever metadata the caller already
+    // has in hand (a search-result row, a playlist item) so "+ Add to
+    // Playlist" on this video never has to re-fetch it. No metadata at
+    // all (a pasted link/ID) falls back to a bare title per spec #9.
+    currentVideoMeta = {
+      videoId: id,
+      title: (opts.meta && opts.meta.title) || "YouTube Video",
+      channelTitle: (opts.meta && opts.meta.channelTitle) || "",
+      thumbnailUrl: (opts.meta && (opts.meta.thumbnailUrl || opts.meta.thumb)) || "",
+      duration: (opts.meta && opts.meta.duration) || null,
+    };
     mountPlayer(id);
-    setView("video");
+    // Part 6 — layout mode. A playlist-sourced load in "playlist-focused"
+    // mode stays on (or jumps to) that playlist's detail view instead of
+    // switching to the video panel; the docked transport bar (moved onto
+    // #yw-body in ensureTransportBar()) still supplies Play/Pause/Next/
+    // Previous/Shuffle/Repeat regardless. Every other load path — search
+    // results, pasted links, channel videos, and playlist loads while in
+    // the default "player-focused" mode — is completely unchanged.
+    if (opts.source === "playlist" && layoutMode === "playlist" && (playbackState.activePlaylistId || currentDetailPlaylistId)) {
+      const targetPlaylistId = playbackState.activePlaylistId || currentDetailPlaylistId;
+      // Avoid rebuilding the (possibly virtualized, possibly 1000-item)
+      // playlist-detail view on every single track change — Next/
+      // Previous/autoplay already gets its active-row highlight updated
+      // cheaply via playPlaylistItem()'s notifyPlaylistUIOfPlaybackChange()
+      // right after this returns. Only do the fuller openPlaylistDetail()
+      // switch when we're not already sitting on that exact view.
+      if (currentBodyView !== "playlist-detail" || currentDetailPlaylistId !== targetPlaylistId) {
+        openPlaylistDetail(targetPlaylistId);
+      }
+    } else {
+      setView("video");
+    }
     setPlayingIndicator(true);
     reflectOpenExternalUI();
     // Pasted-link path (Part 8) briefly names the recognized ID, so
@@ -1557,6 +2396,2432 @@
     );
     if (searchInput) searchInput.value = "";
     return true;
+  }
+
+  /* ----------------------------------------------------------------------
+     PLAYLISTS (Playlist Part 1 — data model, persistence, and the
+     playback-queue abstraction) — see "PLAYLIST FOUNDATION NOTES" at the
+     end of the big file-header comment for the full writeup. Short
+     version: two separate persisted concerns (playlist definitions vs.
+     playback state), no artificial count limits anywhere, deterministic
+     shuffle, repeat modes independent of the pre-existing single-video
+     `loopEnabled`, and zero new YouTube API calls — playback always goes
+     through the existing `loadVideo()` with a known video ID.
+  ---------------------------------------------------------------------- */
+  const YW_PLAYLISTS_STORAGE = "vocabRegister_youtubePlaylists"; // Playlist[] — persistent user data
+  const YW_PLAYBACK_STATE_STORAGE = "vocabRegister_youtubePlaybackState"; // queue position / repeat / shuffle — session preference data
+
+  function genId(prefix) {
+    try {
+      if (window.crypto && typeof window.crypto.randomUUID === "function") {
+        return `${prefix}-${window.crypto.randomUUID()}`;
+      }
+    } catch {
+      /* fall through to the fallback below */
+    }
+    return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  // Generic trailing-edge debounce — collapses a burst of calls (adding
+  // many playlist items back-to-back, rapid "next" clicks) into a single
+  // execution of `fn` using the LAST call's arguments. `.flush()` runs
+  // immediately if a call is pending, used on `beforeunload` below so a
+  // person closing the tab right after an edit doesn't lose it.
+  function debounce(fn, wait) {
+    let t = null;
+    let pendingArgs = null;
+    const debounced = (...args) => {
+      pendingArgs = args;
+      if (t) clearTimeout(t);
+      t = setTimeout(() => {
+        t = null;
+        const a = pendingArgs;
+        pendingArgs = null;
+        fn(...a);
+      }, wait);
+    };
+    debounced.flush = () => {
+      if (t) {
+        clearTimeout(t);
+        t = null;
+        const a = pendingArgs || [];
+        pendingArgs = null;
+        fn(...a);
+      }
+    };
+    return debounced;
+  }
+
+  /* ---- Playlist definitions (persistent user data) ----------------- */
+
+  // Loaded once at startup. Malformed/corrupted storage (wrong type,
+  // half-written JSON, an old/foreign shape, duplicate ids, an item with
+  // no videoId, etc.) degrades to as much of the list as is usable
+  // rather than throwing or wiping everything — losing a few bad rows is
+  // fine, crashing the whole window over them is not.
+  function loadPlaylistsFromStorage() {
+    const raw = loadJson(YW_PLAYLISTS_STORAGE, []);
+    if (!Array.isArray(raw)) return [];
+    const seenPlaylistIds = new Set();
+    const cleaned = [];
+    for (const p of raw) {
+      if (!p || typeof p !== "object" || typeof p.id !== "string" || !p.id || seenPlaylistIds.has(p.id)) continue;
+      seenPlaylistIds.add(p.id);
+      const rawItems = Array.isArray(p.items) ? p.items : [];
+      const seenItemIds = new Set();
+      const items = [];
+      for (const it of rawItems) {
+        if (!it || typeof it !== "object" || typeof it.videoId !== "string" || !it.videoId) continue;
+        let itemId = typeof it.id === "string" && it.id ? it.id : genId("item");
+        if (seenItemIds.has(itemId)) itemId = genId("item");
+        seenItemIds.add(itemId);
+        items.push({
+          id: itemId,
+          videoId: it.videoId,
+          title: typeof it.title === "string" && it.title ? it.title : "Untitled",
+          channelTitle: typeof it.channelTitle === "string" ? it.channelTitle : "",
+          thumbnailUrl: typeof it.thumbnailUrl === "string" ? it.thumbnailUrl : "",
+          duration: typeof it.duration === "string" ? it.duration : null,
+          addedAt: typeof it.addedAt === "number" ? it.addedAt : Date.now(),
+        });
+        // No cap here — a playlist keeps every item the person added
+        // (spec requirement: no fixed max videos per playlist).
+      }
+      cleaned.push({
+        id: p.id,
+        name: typeof p.name === "string" && p.name.trim() ? p.name.trim() : "Untitled playlist",
+        createdAt: typeof p.createdAt === "number" ? p.createdAt : Date.now(),
+        updatedAt: typeof p.updatedAt === "number" ? p.updatedAt : Date.now(),
+        items,
+      });
+      // No cap here either — no fixed max number of playlists.
+    }
+    return cleaned;
+  }
+
+  let playlists = loadPlaylistsFromStorage();
+
+  // Playlist Part 5 (spec #9 — storage failure handling). A plain
+  // saveJson() call would swallow a full-storage error silently, same as
+  // every other persisted key in this file — fine for a volume slider,
+  // not fine for "the data a person would be upset to lose" (see
+  // PLAYLIST FOUNDATION NOTES). This wrapper is used ONLY for the
+  // playlists array, not playbackState/prefs, and:
+  //   - never touches the in-memory `playlists` array on failure, so a
+  //     write that can't be persisted never becomes a playlist that gets
+  //     deleted or silently reverted;
+  //   - shows exactly one warning per failure "episode" (not one per
+  //     debounced write) via `playlistStorageWarningActive`, which only
+  //     resets once a write actually succeeds again;
+  //   - points at Export (Playlist Part 5's own backup feature, below)
+  //     as the actual way to not lose anything, rather than just naming
+  //     the problem.
+  let playlistStorageWarningActive = false;
+  function savePlaylistsToStorage() {
+    try {
+      localStorage.setItem(YW_PLAYLISTS_STORAGE, JSON.stringify(playlists));
+      playlistStorageWarningActive = false;
+      return true;
+    } catch {
+      // QuotaExceededError (storage full) or a private-browsing quirk —
+      // either way, non-fatal: the session keeps working from memory.
+      if (!playlistStorageWarningActive) {
+        playlistStorageWarningActive = true;
+        showStatus("⚠ Browser storage is full — this change may not be saved. Delete an old playlist to free up space, or use Export to back up what's already saved.", 8000);
+      }
+      return false;
+    }
+  }
+
+  // See file-header PLAYLIST FOUNDATION NOTES — debounced so building a
+  // large playlist doesn't re-stringify+write the whole array per click.
+  const persistPlaylistsDebounced = debounce(() => {
+    savePlaylistsToStorage();
+  }, 400);
+
+  window.addEventListener("beforeunload", () => persistPlaylistsDebounced.flush());
+
+  function touchPlaylist(playlist) {
+    playlist.updatedAt = Date.now();
+  }
+
+  function getPlaylist(playlistId) {
+    return playlists.find((p) => p.id === playlistId) || null;
+  }
+
+  function getAllPlaylists() {
+    return playlists;
+  }
+
+  function createPlaylist(name) {
+    const playlist = {
+      id: genId("pl"),
+      name: (name && String(name).trim()) || "Untitled playlist",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      items: [],
+    };
+    playlists.push(playlist); // no cap — unlimited playlists, per spec
+    persistPlaylistsDebounced();
+    return playlist;
+  }
+
+  function renamePlaylist(playlistId, name) {
+    const playlist = getPlaylist(playlistId);
+    const trimmed = (name && String(name).trim()) || "";
+    if (!playlist || !trimmed) return false;
+    playlist.name = trimmed;
+    touchPlaylist(playlist);
+    persistPlaylistsDebounced();
+    return true;
+  }
+
+  function deletePlaylist(playlistId) {
+    const idx = playlists.findIndex((p) => p.id === playlistId);
+    if (idx === -1) return false;
+    playlists.splice(idx, 1);
+    persistPlaylistsDebounced();
+    // A now-dangling activePlaylistId would make every queue function
+    // silently no-op — stop cleanly instead.
+    if (playbackState.activePlaylistId === playlistId) stopPlaylist();
+    return true;
+  }
+
+  // `source` is anything with videoId + optional title/channelTitle/
+  // duration/thumbnailUrl (or `thumb`, matching shapeResultRow()'s field
+  // name) — so a raw search-result row can be handed straight in later
+  // without reshaping it first.
+  function addItemToPlaylist(playlistId, source) {
+    const playlist = getPlaylist(playlistId);
+    if (!playlist || !source || !source.videoId) return null;
+    const item = {
+      id: genId("item"),
+      videoId: source.videoId,
+      title: source.title || "Untitled",
+      channelTitle: source.channelTitle || "",
+      thumbnailUrl: source.thumbnailUrl || source.thumb || "",
+      duration: source.duration || null,
+      addedAt: Date.now(),
+    };
+    playlist.items.push(item); // append only — never disturbs currentIndex of an active queue
+    touchPlaylist(playlist);
+    persistPlaylistsDebounced();
+    invalidateShuffleIfActive(playlistId);
+    return item;
+  }
+
+  function removeItemFromPlaylist(playlistId, itemId) {
+    const playlist = getPlaylist(playlistId);
+    if (!playlist) return false;
+    const idx = playlist.items.findIndex((it) => it.id === itemId);
+    if (idx === -1) return false;
+
+    const wasActive = playbackState.activePlaylistId === playlistId;
+    const currentItemId = wasActive ? getCurrentQueueItem()?.id || null : null;
+    const removingCurrent = currentItemId === itemId;
+
+    playlist.items.splice(idx, 1);
+    touchPlaylist(playlist);
+    persistPlaylistsDebounced();
+
+    if (wasActive) {
+      if (!playlist.items.length) {
+        stopPlaylist();
+      } else {
+        if (removingCurrent) {
+          // The playing item was itself removed — don't cut playback,
+          // just clamp the pointer to the nearest remaining item; the
+          // player keeps playing whatever's already loaded until the
+          // person (or auto-advance) moves on.
+          playbackState.currentIndex = Math.min(idx, playlist.items.length - 1);
+        } else if (currentItemId) {
+          playbackState.currentIndex = playlist.items.findIndex((it) => it.id === currentItemId);
+        }
+        if (playbackState.shuffleEnabled) rebuildShuffleOrder(playlist, { preserveCurrent: true });
+        persistPlaybackStateDebounced();
+      }
+    }
+    return true;
+  }
+
+  function reorderPlaylistItem(playlistId, itemId, newIndex) {
+    const playlist = getPlaylist(playlistId);
+    if (!playlist) return false;
+    const oldIndex = playlist.items.findIndex((it) => it.id === itemId);
+    if (oldIndex === -1) return false;
+
+    const wasActive = playbackState.activePlaylistId === playlistId;
+    const currentItemId = wasActive ? getCurrentQueueItem()?.id || null : null;
+
+    const clampedIndex = Math.max(0, Math.min(newIndex, playlist.items.length - 1));
+    const [moved] = playlist.items.splice(oldIndex, 1);
+    playlist.items.splice(clampedIndex, 0, moved);
+    touchPlaylist(playlist);
+    persistPlaylistsDebounced();
+
+    if (wasActive && currentItemId) {
+      // Re-locate the still-playing item by id — a reorder must never
+      // make playback silently jump to whatever item now sits at the
+      // old numeric index.
+      playbackState.currentIndex = playlist.items.findIndex((it) => it.id === currentItemId);
+      if (playbackState.shuffleEnabled) rebuildShuffleOrder(playlist, { preserveCurrent: true });
+      persistPlaybackStateDebounced();
+    }
+    return true;
+  }
+
+  /* ---- Playback state (session/preference data — kept separate from
+     the playlist definitions above; see PLAYLIST FOUNDATION NOTES) --- */
+  function loadPlaybackStateFromStorage() {
+    const raw = loadJson(YW_PLAYBACK_STATE_STORAGE, null);
+    const validRepeatMode = raw && (raw.repeatMode === "off" || raw.repeatMode === "playlist" || raw.repeatMode === "one");
+    // upNext (Part 2B2 — "Play Next", spec #5): a small FIFO of one-off
+    // track snapshots, deliberately NOT indices into any playlist. This
+    // keeps it independent of `playlist.items` order/shuffleOrder — the
+    // saved playlist and the temporary "what plays after this" queue are
+    // two different things, per spec #9/#5. Malformed entries (no
+    // videoId) are dropped rather than discarding the whole queue.
+    const rawUpNext = raw && Array.isArray(raw.upNext) ? raw.upNext : [];
+    const upNext = rawUpNext
+      .filter((it) => it && typeof it === "object" && typeof it.videoId === "string" && it.videoId)
+      .map((it) => ({
+        videoId: it.videoId,
+        title: typeof it.title === "string" && it.title ? it.title : "Untitled",
+        channelTitle: typeof it.channelTitle === "string" ? it.channelTitle : "",
+        thumbnailUrl: typeof it.thumbnailUrl === "string" ? it.thumbnailUrl : "",
+        duration: typeof it.duration === "string" ? it.duration : null,
+      }));
+    return {
+      activePlaylistId: raw && typeof raw.activePlaylistId === "string" ? raw.activePlaylistId : null,
+      currentIndex: raw && typeof raw.currentIndex === "number" ? raw.currentIndex : -1,
+      repeatMode: validRepeatMode ? raw.repeatMode : "off",
+      shuffleEnabled: !!(raw && raw.shuffleEnabled === true),
+      shuffleOrder: raw && Array.isArray(raw.shuffleOrder) ? raw.shuffleOrder.filter((n) => Number.isInteger(n)) : [],
+      shufflePosition: raw && typeof raw.shufflePosition === "number" ? raw.shufflePosition : -1,
+      upNext,
+    };
+  }
+
+  let playbackState = loadPlaybackStateFromStorage();
+
+  // A track change or a repeat/shuffle toggle is the only thing that
+  // ever calls this — nothing here fires on player timeupdate/progress,
+  // so a long-playing video generates zero writes while it plays.
+  const persistPlaybackStateDebounced = debounce(() => {
+    saveJson(YW_PLAYBACK_STATE_STORAGE, playbackState);
+  }, 300);
+
+  window.addEventListener("beforeunload", () => persistPlaybackStateDebounced.flush());
+
+  // Playlist Part 4A (spec #13/#23) — whether two playlist ITEMS should
+  // be treated as "the same song" for shuffle adjacency-avoidance, even
+  // though they're separate entries with separate ids (a playlist can
+  // legitimately contain the same video twice). Only videoId is
+  // compared; each item's own id is naturally unique already (it's a
+  // permutation), so id equality can never happen here.
+  function sameShuffleTrack(itemA, itemB) {
+    return !!itemA && !!itemB && itemA.videoId === itemB.videoId;
+  }
+
+  // Fisher-Yates — NOT `items.sort(() => Math.random() - 0.5)`, which is
+  // both statistically biased and re-randomizes on every call. This
+  // builds the order once; `shufflePosition` walks it, and the
+  // underlying `playlist.items` order is never touched.
+  //
+  // `items` is the playlist's own `items` array (order math still works
+  // over `[0..items.length-1]` positions into it, unchanged from
+  // before) — it's needed now, not just a bare length, so the smoothing
+  // pass below can compare videoIds. `avoidFirstItem` (spec #23/#25) is
+  // optional: when starting a fresh shuffle cycle right after a
+  // previous one ended, pass the item that cycle just finished on so
+  // this one tries not to open on the same track.
+  //
+  // After the shuffle itself, one deterministic smoothing pass tries to
+  // separate any two ADJACENT entries that share a videoId (spec #13 —
+  // two playlist rows pointing at the same video shouldn't play back to
+  // back if it can be avoided) by testing a swap against every other
+  // position and keeping the first one that actually clears it. This
+  // never re-randomizes/retries the whole shuffle — one bounded pass —
+  // so a playlist saturated with one repeated video (spec #14, the
+  // one-item case included) just leaves whatever adjacency it can't fix
+  // rather than looping forever chasing an impossible arrangement.
+  function generateShuffleOrder(items, { avoidFirstItem = null } = {}) {
+    const order = Array.from({ length: items.length }, (_, i) => i);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+
+    // True if the item at position `pos` shares a videoId with either
+    // neighbor it currently has in `order`.
+    const violatesAt = (pos) => {
+      if (pos > 0 && sameShuffleTrack(items[order[pos - 1]], items[order[pos]])) return true;
+      if (pos < order.length - 1 && sameShuffleTrack(items[order[pos]], items[order[pos + 1]])) return true;
+      return false;
+    };
+
+    // Adjacent same-video avoidance (spec #13/#22). For each violating
+    // position, try swapping it with every other position and keep the
+    // swap only if it clears the violation at both positions without
+    // creating a new one — checked in both directions (not just
+    // forward), so a violation sitting at the very end of the order can
+    // still be fixed by pulling in an earlier item. One deterministic
+    // pass, no re-randomization; a slot that can't be fixed (spec #14 —
+    // e.g. a playlist saturated with one repeated video) is left as-is.
+    for (let i = 1; i < order.length; i++) {
+      if (!violatesAt(i)) continue;
+      for (let j = 0; j < order.length; j++) {
+        if (j === i) continue;
+        [order[i], order[j]] = [order[j], order[i]];
+        if (!violatesAt(i) && !violatesAt(j)) break;
+        [order[i], order[j]] = [order[j], order[i]]; // revert, try next j
+      }
+    }
+
+    // Cycle-boundary avoidance (spec #23/#25) — try not to *open* this
+    // cycle on the same track the previous one just closed on. Same
+    // swap-and-verify approach so it never introduces a fresh adjacent
+    // violation elsewhere in the order while fixing the boundary.
+    if (avoidFirstItem && order.length > 1 && sameShuffleTrack(items[order[0]], avoidFirstItem)) {
+      for (let j = 1; j < order.length; j++) {
+        [order[0], order[j]] = [order[j], order[0]];
+        const openViolates = sameShuffleTrack(items[order[0]], avoidFirstItem) || violatesAt(0);
+        if (!openViolates && !violatesAt(j)) break;
+        [order[0], order[j]] = [order[j], order[0]]; // revert, try next j
+      }
+    }
+
+    return order;
+  }
+
+  // Regenerates `shuffleOrder` for `playlist` (e.g. after items were
+  // added/removed/reordered). When `preserveCurrent` is set, re-locates
+  // the still-canonical `playbackState.currentIndex` inside the fresh
+  // order so an active shuffled queue never audibly jumps just because
+  // the underlying list changed shape.
+  function rebuildShuffleOrder(playlist, { preserveCurrent = false } = {}) {
+    const anchorIndex = preserveCurrent ? playbackState.currentIndex : -1;
+    playbackState.shuffleOrder = generateShuffleOrder(playlist.items);
+    if (anchorIndex > -1 && anchorIndex < playlist.items.length) {
+      const pos = playbackState.shuffleOrder.indexOf(anchorIndex);
+      playbackState.shufflePosition = pos > -1 ? pos : -1;
+    } else {
+      playbackState.shufflePosition = -1;
+    }
+  }
+
+  function invalidateShuffleIfActive(playlistId) {
+    if (playbackState.activePlaylistId !== playlistId || !playbackState.shuffleEnabled) return;
+    const playlist = getPlaylist(playlistId);
+    if (!playlist) return;
+    rebuildShuffleOrder(playlist, { preserveCurrent: true });
+    persistPlaybackStateDebounced();
+  }
+
+  /* ---- Playback queue abstraction — centralized here rather than
+     scattered across future UI event handlers ------------------------ */
+
+  function getActivePlaylist() {
+    return playbackState.activePlaylistId ? getPlaylist(playbackState.activePlaylistId) : null;
+  }
+
+  // `currentIndex` is canonical for "what's playing" in BOTH shuffle and
+  // sequential mode — shuffle only ever decides what next/previous
+  // resolve to, never what "current" means.
+  function getCurrentQueueItem() {
+    const playlist = getActivePlaylist();
+    if (!playlist || playbackState.currentIndex < 0) return null;
+    return playlist.items[playbackState.currentIndex] || null;
+  }
+
+  // Returns the visiting order (playlist-item indices) for the given
+  // playlist — shuffled or sequential. Pure index math, no side effects;
+  // useful for a future "up next" list without duplicating this logic.
+  function buildPlaybackQueue(playlist) {
+    const target = playlist || getActivePlaylist();
+    if (!target || !target.items.length) return [];
+    if (playbackState.shuffleEnabled) {
+      return playbackState.shuffleOrder.length === target.items.length
+        ? playbackState.shuffleOrder.slice()
+        : generateShuffleOrder(target.items);
+    }
+    return target.items.map((_, i) => i);
+  }
+
+  function getNextQueueIndex() {
+    const playlist = getActivePlaylist();
+    if (!playlist || !playlist.items.length) return -1;
+
+    if (playbackState.repeatMode === "one") {
+      return playbackState.currentIndex > -1 ? playbackState.currentIndex : 0;
+    }
+
+    if (playbackState.shuffleEnabled) {
+      if (playbackState.shuffleOrder.length !== playlist.items.length) rebuildShuffleOrder(playlist, { preserveCurrent: true });
+      const nextPos = playbackState.shufflePosition + 1;
+      if (nextPos < playbackState.shuffleOrder.length) return playbackState.shuffleOrder[nextPos];
+      if (playbackState.repeatMode !== "playlist" || !playbackState.shuffleOrder.length) return -1;
+      // Playlist Part 4A (spec #22/#25) — the shuffle cycle is exhausted
+      // and Repeat Playlist is on: start a genuinely NEW cycle rather
+      // than silently looping the same fixed order forever (that would
+      // just be "repeat one fixed order", not shuffle). Avoid opening
+      // the new cycle on the same track this one just ended on, where
+      // possible (spec #23). `shufflePosition` is left at -1 here —
+      // `playPlaylistItem()` re-anchors it via `shuffleOrder.indexOf()`
+      // once this index is actually played, same as every other queue
+      // move in this file.
+      const lastItem = playlist.items[playbackState.shuffleOrder[playbackState.shuffleOrder.length - 1]];
+      playbackState.shuffleOrder = generateShuffleOrder(playlist.items, { avoidFirstItem: lastItem });
+      playbackState.shufflePosition = -1;
+      return playbackState.shuffleOrder[0];
+    }
+
+    const nextIndex = playbackState.currentIndex + 1;
+    if (nextIndex < playlist.items.length) return nextIndex;
+    return playbackState.repeatMode === "playlist" ? 0 : -1;
+  }
+
+  function getPreviousQueueIndex() {
+    const playlist = getActivePlaylist();
+    if (!playlist || !playlist.items.length) return -1;
+
+    if (playbackState.repeatMode === "one") {
+      return playbackState.currentIndex > -1 ? playbackState.currentIndex : 0;
+    }
+
+    if (playbackState.shuffleEnabled) {
+      if (playbackState.shuffleOrder.length !== playlist.items.length) rebuildShuffleOrder(playlist, { preserveCurrent: true });
+      const prevPos = playbackState.shufflePosition - 1;
+      if (prevPos >= 0) return playbackState.shuffleOrder[prevPos];
+      return playbackState.repeatMode === "playlist" && playbackState.shuffleOrder.length
+        ? playbackState.shuffleOrder[playbackState.shuffleOrder.length - 1]
+        : -1;
+    }
+
+    const prevIndex = playbackState.currentIndex - 1;
+    if (prevIndex >= 0) return prevIndex;
+    return playbackState.repeatMode === "playlist" ? playlist.items.length - 1 : -1;
+  }
+
+  // Plays the item at `index` within `playlistId`. This is the ONLY
+  // place playlist playback touches the player, and it does so via the
+  // existing loadVideo() — same code path as a pasted link or a search-
+  // result click, so a stored videoId never triggers a fresh API call
+  // (spec requirement: playlist membership must be independent of API
+  // availability).
+  function playPlaylistItem(playlistId, index) {
+    const playlist = getPlaylist(playlistId);
+    if (!playlist || !playlist.items.length) return false;
+    const clamped = Math.max(0, Math.min(index, playlist.items.length - 1));
+    const item = playlist.items[clamped];
+    if (!item) return false;
+
+    playbackState.activePlaylistId = playlistId;
+    playbackState.currentIndex = clamped;
+    if (playbackState.shuffleEnabled) {
+      if (playbackState.shuffleOrder.length !== playlist.items.length) rebuildShuffleOrder(playlist);
+      const pos = playbackState.shuffleOrder.indexOf(clamped);
+      playbackState.shufflePosition = pos > -1 ? pos : 0;
+    }
+    persistPlaybackStateDebounced();
+
+    // Playback Engine (Part 3) — this item is getting a real, fresh
+    // attempt right now (manual click, Next/Previous, or the error-skip
+    // logic itself), so it deserves another chance even if a previous
+    // pass marked it unavailable. See PLAYLIST PART 3 NOTES.
+    unavailableItemIds.delete(item.id);
+    playlistFinished = false;
+    playbackBlocked = false;
+    armAutoplayWatchdog();
+
+    loadVideo(item.videoId, {
+      source: "playlist",
+      meta: {
+        title: item.title,
+        channelTitle: item.channelTitle,
+        thumbnailUrl: item.thumbnailUrl,
+        duration: item.duration,
+      },
+    });
+    // Playlist Part 2B2 (spec #2) — update just the active-item highlight
+    // in an open playlist-detail view, if any, without rebuilding the
+    // list. See notifyPlaylistUIOfPlaybackChange() in the PLAYLIST UI
+    // block below (hoisted function declaration, safe to call from here).
+    notifyPlaylistUIOfPlaybackChange();
+    return true;
+  }
+
+  function startPlaylist(playlistId, { fromIndex = 0 } = {}) {
+    const playlist = getPlaylist(playlistId);
+    if (!playlist || !playlist.items.length) {
+      // Spec #1 — friendly empty state rather than silently doing
+      // nothing (the "▶ Play All" button is already disabled for this
+      // case; this covers the programmatic/console entry point too).
+      showStatus("This playlist doesn't have any videos yet — add one first.", 4000);
+      return false;
+    }
+    // Playback Engine (Part 3) — a fresh ▶ Play is a fresh playback
+    // pass: any videos marked unavailable during an earlier pass get a
+    // clean slate. See PLAYLIST PART 3 NOTES.
+    unavailableItemIds.clear();
+    playlistFinished = false;
+    return playPlaylistItem(playlistId, fromIndex);
+  }
+
+  function stopPlaylist() {
+    playbackState.activePlaylistId = null;
+    playbackState.currentIndex = -1;
+    playbackState.shufflePosition = -1;
+    persistPlaybackStateDebounced();
+    playlistFinished = false;
+    stopProgressTicker();
+    clearAutoplayWatchdog();
+    notifyPlaylistUIOfPlaybackChange();
+  }
+
+  // Playlist Part 2B2 — "Play Next" (spec #5). `upNext` is drained before
+  // falling back to the normal playlist queue, and a played-next item is
+  // loaded directly via loadVideo() rather than playPlaylistItem() — it
+  // may not even belong to `playbackState.activePlaylistId`'s own items,
+  // so it must never overwrite `currentIndex`/`activePlaylistId`. This is
+  // intentionally a one-off detour, not the "sophisticated
+  // previous/next history" the spec reserves for Part 3.
+  function queueUpNext(source) {
+    if (!source || !source.videoId) return null;
+    const entry = {
+      videoId: source.videoId,
+      title: source.title || "Untitled",
+      channelTitle: source.channelTitle || "",
+      thumbnailUrl: source.thumbnailUrl || source.thumb || "",
+      duration: source.duration || null,
+    };
+    // Newest "Play next" plays soonest (stacks in front of any previous
+    // one) — the common "play next" convention, and it never touches
+    // `playlist.items` or `shuffleOrder`.
+    playbackState.upNext.unshift(entry);
+    persistPlaybackStateDebounced();
+    return entry;
+  }
+
+  function playNextInQueue() {
+    if (playbackState.upNext.length) {
+      const next = playbackState.upNext.shift();
+      persistPlaybackStateDebounced();
+      loadVideo(next.videoId, {
+        source: "playlist",
+        meta: { title: next.title, channelTitle: next.channelTitle, thumbnailUrl: next.thumbnailUrl, duration: next.duration },
+      });
+      return true;
+    }
+    if (!playbackState.activePlaylistId) return false;
+    const nextIndex = getNextQueueIndex();
+    if (nextIndex === -1) return false;
+    return playPlaylistItem(playbackState.activePlaylistId, nextIndex);
+  }
+
+  function playPreviousInQueue() {
+    if (!playbackState.activePlaylistId) return false;
+    const prevIndex = getPreviousQueueIndex();
+    if (prevIndex === -1) return false;
+    return playPlaylistItem(playbackState.activePlaylistId, prevIndex);
+  }
+
+  function setRepeatMode(mode) {
+    if (mode !== "off" && mode !== "playlist" && mode !== "one") return false;
+    playbackState.repeatMode = mode;
+    persistPlaybackStateDebounced();
+    return true;
+  }
+
+  function setShuffleEnabled(enabled) {
+    playbackState.shuffleEnabled = !!enabled;
+    const playlist = getActivePlaylist();
+    if (playbackState.shuffleEnabled && playlist && playlist.items.length) {
+      rebuildShuffleOrder(playlist, { preserveCurrent: true });
+    } else if (!playbackState.shuffleEnabled) {
+      playbackState.shuffleOrder = [];
+      playbackState.shufflePosition = -1;
+    }
+    persistPlaybackStateDebounced();
+    return true;
+  }
+
+  // Playlist Part 4A (spec #30) — explicit "Reshuffle": get a fresh
+  // shuffle order for the CURRENT cycle on demand (Part 4B will expose
+  // this as a button), without touching repeat mode, without touching
+  // the saved playlist, and — same guarantee as every other order
+  // regeneration in this file — without interrupting whatever's
+  // currently playing. Reuses `rebuildShuffleOrder(preserveCurrent)`
+  // rather than duplicating its anchor-relocation logic: that already
+  // keeps the playing item in place and its adjacent-repeat smoothing
+  // pass already covers "avoid immediate repetition where possible".
+  // If shuffle wasn't already on, turning it on is what "reshuffle"
+  // means here rather than silently no-op'ing.
+  function reshuffleActivePlaylist() {
+    const playlist = getActivePlaylist();
+    if (!playlist || !playlist.items.length) return false;
+    playbackState.shuffleEnabled = true;
+    rebuildShuffleOrder(playlist, { preserveCurrent: true });
+    persistPlaybackStateDebounced();
+    notifyPlaylistUIOfPlaybackChange();
+    return true;
+  }
+
+  // Playlist Part 4A (spec #18/#20) — "shuffle history" for Previous,
+  // exposed as a read-only view for a future "recently played" UI
+  // (Part 4B). Deliberately NOT a second, separately-maintained array:
+  // `shuffleOrder` already IS this cycle's visiting order, and
+  // `shufflePosition` already IS "how far into it we are", so the
+  // history is just the slice before the current position — which can
+  // never grow past the playlist's own length, satisfying the "don't
+  // let this grow forever" requirement for free, with no second
+  // bookkeeping structure to keep in sync. Returns playlist ITEM ids
+  // (not videoIds — see the file-header note on why that distinction
+  // matters), most-recently-played first.
+  function getShuffleHistory() {
+    const playlist = getActivePlaylist();
+    if (!playlist || !playbackState.shuffleEnabled || playbackState.shufflePosition < 1) return [];
+    return playbackState.shuffleOrder
+      .slice(0, playbackState.shufflePosition)
+      .reverse()
+      .map((idx) => playlist.items[idx]?.id)
+      .filter(Boolean);
+  }
+
+  /* ----------------------------------------------------------------------
+     PLAYLIST UI (Playlist Part 2A — library, creation, rename/delete, and
+     the playlist detail shell) — built entirely on top of the data model,
+     persistence, and playback-queue functions in the PLAYLISTS block just
+     above (getAllPlaylists/getPlaylist/createPlaylist/renamePlaylist/
+     deletePlaylist, and the playback.* functions). Nothing here talks to
+     localStorage directly, calls YTApi, or introduces a second playlist
+     state system — it only renders `playlists`/`playbackState` and calls
+     the existing CRUD/queue functions. See the file-header PLAYLIST
+     FOUNDATION NOTES for the data layer's own design notes.
+
+     TWO VIEWS, ONE PATTERN: "playlists" (the library, #yw-playlists) and
+     "playlist-detail" (#yw-playlist-detail) are two more `setView()`
+     states, following the exact same show-one-hide-the-rest approach as
+     the pre-existing empty/results/video/channel-detail views — no new
+     view-switching mechanism was introduced. `currentDetailPlaylistId`
+     is this block's one piece of new UI-only state: which playlist the
+     detail view is currently showing (null when the library is showing
+     instead).
+
+     NAVIGATION: the header's 🎵 button toggles the whole feature on/off
+     the same way the Videos/Channels footer tabs already coexist with a
+     playing video — switching to it never stops playback (loadVideo()'s
+     video keeps playing in its now-hidden iframe exactly as it already
+     does when "back to results" is used); switching away from it
+     restores whatever was on screen before (playing video > the search
+     tab's own results > empty), via leavePlaylistsView(). Inside the
+     library, "← My Playlists" always returns to the library specifically
+     (not a generic "back"), per spec.
+
+     ITEM RENDERING IS READ/PLAY-ONLY IN 2A: renderPlaylistDetail() lists
+     `playlist.items` (real data, already unlimited per Part 1 — no
+     `.slice()`) and lets each row call the existing playPlaylistItem(),
+     but there is no add/remove/reorder UI here — that is Part 2B's job,
+     per the spec's explicit boundary. The scrollable
+     #yw-playlist-detail-content container this renders into is the
+     "large playlist architecture" hook Part 2B can swap for incremental/
+     virtualized/windowed rendering without touching the header above it.
+
+     ⋮ MENU: a small in-flow dropdown (not position:fixed, so it never
+     needs the settings-panel's reparent-to-<body> trick) anchored to
+     whichever button opened it — one shared implementation
+     (togglePlaylistRowMenu) used by both a library row's ⋮ and the
+     playlist-detail header's ⋮, since both offer the same two actions.
+
+     MODALS REUSE THE APP'S OWN DIALOG SYSTEM: #yw-playlist-name-modal
+     (create AND rename — same small form, different title/button label)
+     and #yw-playlist-delete-modal (destructive-action confirm) are plain
+     .modal/.modal-content/.modal-actions markup, the same classes
+     #ai-settings-modal/#edit-modal/#topage-confirm-modal already use
+     elsewhere in this app — no new dialog design, per spec.
+  ---------------------------------------------------------------------- */
+
+  let currentDetailPlaylistId = null; // which playlist #yw-playlist-detail is showing, or null (library showing)
+
+  // ---- entry point: header 🎵 toggle -------------------------------
+  playlistsBtn?.addEventListener("click", () => {
+    if (currentBodyView === "playlists" || currentBodyView === "playlist-detail") {
+      leavePlaylistsView();
+    } else {
+      openPlaylistLibrary();
+    }
+  });
+
+  // Mirrors the fallback used elsewhere (e.g. the results "✕" clear
+  // button) for "what should be on screen now that this view is done" —
+  // a playing video wins, then whichever search tab is active and has
+  // something to show, else the empty state. Never touches playback.
+  function leavePlaylistsView() {
+    currentDetailPlaylistId = null;
+    if (currentVideoId) {
+      setView("video");
+      return;
+    }
+    if (activeSearchMode === "channels") {
+      if (selectedChannel) {
+        renderChannelDetail();
+        return;
+      }
+      if (channelSearchState.items.length) {
+        renderChannelResultsList();
+        return;
+      }
+      setView("empty");
+      return;
+    }
+    if (searchState.items.length) {
+      renderResultsList();
+      return;
+    }
+    setView("empty");
+  }
+
+  function openPlaylistLibrary() {
+    currentDetailPlaylistId = null;
+    closeAllPlaylistMenus();
+    if (!isActive) open();
+    else show();
+    renderPlaylistLibrary();
+  }
+
+  function openPlaylistDetail(playlistId) {
+    const playlist = getPlaylist(playlistId);
+    if (!playlist) {
+      openPlaylistLibrary();
+      return;
+    }
+    currentDetailPlaylistId = playlistId;
+    closeAllPlaylistMenus();
+    if (!isActive) open();
+    else show();
+    renderPlaylistDetail();
+  }
+
+  // ---- library ("My Playlists") -------------------------------------
+  function renderPlaylistLibrary() {
+    if (!playlistsEl) return;
+    const list = getAllPlaylists(); // live reference — no cap, no .slice()
+    const activeId = playbackState.activePlaylistId;
+
+    if (!list.length) {
+      playlistsEl.innerHTML = `
+        <div class="yw-playlists-head">
+          <h3>My Playlists</h3>
+          <div class="yw-playlists-head-actions">
+            <button type="button" class="btn btn-secondary btn-small" id="yw-playlist-import-btn" title="Import playlists from a JSON file">⇧ Import</button>
+          </div>
+        </div>
+        <div class="yw-playlists-empty">
+          <span class="yw-playlists-empty-icon" aria-hidden="true">🎵</span>
+          <p>No playlists yet.<br>Create your first playlist to start building your music library.</p>
+          <button type="button" class="btn btn-primary btn-small" id="yw-playlist-empty-new-btn">+ New Playlist</button>
+        </div>
+      `;
+      setView("playlists");
+      document.getElementById("yw-playlist-empty-new-btn")?.addEventListener("click", () => openPlaylistNameModal("create"));
+      // Playlist Part 5 — Import works even with zero playlists (it's the
+      // whole point of restoring a backup on a fresh browser/profile).
+      document.getElementById("yw-playlist-import-btn")?.addEventListener("click", () => playlistImportFileInput?.click());
+      return;
+    }
+
+    const rows = list
+      .map((p) => {
+        const isPlaying = p.id === activeId;
+        const count = p.items.length;
+        return `
+          <div class="yw-playlist-row${isPlaying ? " yw-playlist-row-active" : ""}" data-playlist-id="${escapeHtml(p.id)}">
+            <button type="button" class="yw-playlist-row-main" data-open-playlist="${escapeHtml(p.id)}">
+              <span class="yw-playlist-row-icon" aria-hidden="true">${isPlaying ? "🔊" : "🎵"}</span>
+              <span class="yw-playlist-row-name">${escapeHtml(p.name)}</span>
+              <span class="yw-playlist-row-count">${count}</span>
+            </button>
+            <button type="button" class="yw-playlist-row-play-btn" data-play-playlist="${escapeHtml(p.id)}" title="Play" aria-label="Play ${escapeHtml(p.name)}"${count ? "" : " disabled"}>▶</button>
+            <div class="yw-playlist-row-menu-wrap">
+              <button type="button" class="yw-playlist-row-menu-btn" data-menu-playlist="${escapeHtml(p.id)}" title="More options" aria-label="More options for ${escapeHtml(p.name)}" aria-haspopup="true" aria-expanded="false">⋮</button>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    playlistsEl.innerHTML = `
+      <div class="yw-playlists-head">
+        <h3>My Playlists</h3>
+        <div class="yw-playlists-head-actions">
+          <button type="button" class="btn btn-secondary btn-small" id="yw-playlist-export-btn" title="Export all playlists as a JSON file">⇩ Export</button>
+          <button type="button" class="btn btn-secondary btn-small" id="yw-playlist-import-btn" title="Import playlists from a JSON file">⇧ Import</button>
+          <button type="button" class="btn btn-secondary btn-small" id="yw-playlist-new-btn">+ New</button>
+        </div>
+      </div>
+      <div class="yw-playlists-list">${rows}</div>
+    `;
+    setView("playlists");
+
+    document.getElementById("yw-playlist-new-btn")?.addEventListener("click", () => openPlaylistNameModal("create"));
+    // Playlist Part 5 — see the "PLAYLIST EXPORT / IMPORT" block for what
+    // these actually do; rebinding on every render matches the existing
+    // "+ New" convention right above (the whole library markup, buttons
+    // included, is rebuilt from scratch each render).
+    document.getElementById("yw-playlist-export-btn")?.addEventListener("click", downloadPlaylistExport);
+    document.getElementById("yw-playlist-import-btn")?.addEventListener("click", () => playlistImportFileInput?.click());
+    playlistsEl.querySelectorAll("[data-open-playlist]").forEach((btn) => {
+      btn.addEventListener("click", () => openPlaylistDetail(btn.dataset.openPlaylist));
+    });
+    playlistsEl.querySelectorAll("[data-play-playlist]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        startPlaylist(btn.dataset.playPlaylist);
+      });
+    });
+    playlistsEl.querySelectorAll("[data-menu-playlist]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        togglePlaylistRowMenu(btn.dataset.menuPlaylist, btn);
+      });
+    });
+  }
+
+  // ---- playlist detail -----------------------------------------------
+  function renderPlaylistDetail() {
+    if (!playlistDetailEl) return;
+    const playlist = getPlaylist(currentDetailPlaylistId);
+    if (!playlist) {
+      // Dangling reference (e.g. deleted from another tab/console) —
+      // never leave the detail view pointing at nothing.
+      openPlaylistLibrary();
+      return;
+    }
+    // Part 6.1C fix — this function always rebuilds the header AND the
+    // content container from scratch (see the innerHTML replace below),
+    // which recreates the scroll container itself. Left alone, every
+    // reorder/remove/reshuffle/shuffle-toggle/repeat-toggle call into
+    // this function (there are several — see call sites) would snap a
+    // scrolled-down large playlist back to the top. Capture the outgoing
+    // scroll position here (only meaningful for the same playlist that's
+    // already mounted) so it can be restored onto the freshly mounted
+    // container below, without changing anything about what gets
+    // rendered or how virtualization itself works.
+    const priorScrollTop =
+      virtualPlaylistState && virtualPlaylistState.playlistId === currentDetailPlaylistId
+        ? virtualPlaylistState.container.scrollTop
+        : 0;
+    const count = playlist.items.length;
+    const shuffleOn = playbackState.shuffleEnabled;
+    const repeatMode = playbackState.repeatMode; // "off" | "playlist" | "one"
+
+    // Playlist Part 2B2 (spec #10-#16) — the header/controls are still a
+    // plain innerHTML rebuild (cheap: a handful of elements, unrelated to
+    // playlist size), but the item LIST itself is never joined into one
+    // giant string here. When there are items, the content container is
+    // left empty and handed to mountVirtualPlaylist() below, which is the
+    // only thing that ever creates item row DOM nodes — and only for the
+    // visible window + a small overscan, regardless of whether `count` is
+    // 10 or 50,000.
+    const contentInnerHtml = count
+      ? ""
+      : `
+        <div class="yw-playlists-empty">
+          <span class="yw-playlists-empty-icon" aria-hidden="true">🎵</span>
+          <p>No videos in this playlist yet.<br>Search for one and use “+ Add” to add it here.</p>
+        </div>
+      `;
+
+    playlistDetailEl.innerHTML = `
+      <button type="button" class="yw-channel-detail-back-btn" id="yw-playlist-detail-back-btn">◀ My Playlists</button>
+      <div class="yw-playlist-detail-header">
+        <div class="yw-playlist-detail-title-row">
+          <h3 class="yw-playlist-detail-name" title="${escapeHtml(playlist.name)}">${escapeHtml(playlist.name)}</h3>
+          <div class="yw-playlist-row-menu-wrap">
+            <button type="button" class="yw-playlist-row-menu-btn" id="yw-playlist-detail-menu-btn" title="More options" aria-label="More options for ${escapeHtml(playlist.name)}" aria-haspopup="true" aria-expanded="false">⋮</button>
+          </div>
+        </div>
+        <p class="yw-playlist-detail-count">${count} video${count === 1 ? "" : "s"}</p>
+        <div class="yw-playlist-detail-controls">
+          <button type="button" class="yw-playlist-play-all-btn" id="yw-playlist-play-all-btn"${count ? "" : " disabled"}>▶ Play All</button>
+          <button type="button" class="yw-playlist-toggle-btn" id="yw-playlist-shuffle-btn" aria-pressed="${shuffleOn}" title="Shuffle: ${shuffleOn ? "on" : "off"} — click to turn ${shuffleOn ? "off" : "on"}">🔀 Shuffle</button>
+          <button type="button" class="yw-playlist-toggle-btn" id="yw-playlist-repeat-btn" aria-pressed="${repeatMode !== "off"}" title="Repeat: ${repeatMode === "one" ? "one song" : repeatMode === "playlist" ? "whole playlist" : "off"} — click to change">${repeatMode === "one" ? "🔂 Repeat one" : repeatMode === "playlist" ? "🔁 Repeat all" : "🔁 Repeat"}</button>
+        </div>
+      </div>
+      <div class="yw-playlist-detail-content" id="yw-playlist-detail-content">${contentInnerHtml}</div>
+    `;
+    setView("playlist-detail");
+
+    document.getElementById("yw-playlist-detail-back-btn")?.addEventListener("click", () => openPlaylistLibrary());
+    document.getElementById("yw-playlist-detail-menu-btn")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      togglePlaylistRowMenu(playlist.id, e.currentTarget);
+    });
+    document.getElementById("yw-playlist-play-all-btn")?.addEventListener("click", () => startPlaylist(playlist.id));
+    // Shuffle/Repeat here call straight into Part 1's setShuffleEnabled/
+    // setRepeatMode — no new playback logic, per spec.
+    document.getElementById("yw-playlist-shuffle-btn")?.addEventListener("click", () => {
+      setShuffleEnabled(!playbackState.shuffleEnabled);
+      renderPlaylistDetail();
+    });
+    document.getElementById("yw-playlist-repeat-btn")?.addEventListener("click", () => {
+      const order = ["off", "playlist", "one"];
+      const next = order[(order.indexOf(playbackState.repeatMode) + 1) % order.length];
+      setRepeatMode(next);
+      renderPlaylistDetail();
+    });
+
+    const contentEl = document.getElementById("yw-playlist-detail-content");
+    if (count) mountVirtualPlaylist(playlist, contentEl, { restoreScrollTop: priorScrollTop });
+    else teardownVirtualPlaylist();
+  }
+
+  /* ----------------------------------------------------------------------
+     LARGE PLAYLIST RENDERING (Playlist Part 2B2, spec #10-#16) —
+     windowed/virtualized rendering for #yw-playlist-detail-content. Only
+     the rows that could actually be visible (viewport height ÷ row
+     height, plus a small overscan buffer) are ever created as real DOM
+     nodes; a tall "sizer" div gives the container the correct total
+     scrollHeight (`count * PL_ROW_HEIGHT`) so native scrolling/scrollbars
+     work exactly as if every row existed, and each rendered row is
+     positioned with `top: index * PL_ROW_HEIGHT` inside it — no
+     transform/translate bookkeeping needed. A scroll handler
+     (rAF-throttled, so at most one recompute per frame) recalculates the
+     visible range and only touches the DOM when that range actually
+     changed. PL_ROW_HEIGHT must match the fixed height set on
+     `.yw-playlist-item` in youtube-window.css.
+
+     Click handling is delegated once on `playlistDetailEl` itself (see
+     just below) rather than rebound per row/per scroll — the whole point
+     of windowing is to avoid repeated bind/unbind churn on every
+     recompute, and delegation reads the target row's data-* attributes
+     at click time instead.
+  ---------------------------------------------------------------------- */
+  const PL_ROW_HEIGHT = 42; // px — keep in sync with .yw-playlist-item's fixed height + inter-row gap
+  const PL_OVERSCAN = 6; // extra rows rendered above/below the visible window
+
+  // { playlistId, count, activeIndex, container, viewport, rafId,
+  //   lastStart, lastEnd, scrollHandler } | null
+  let virtualPlaylistState = null;
+
+  function teardownVirtualPlaylist() {
+    if (virtualPlaylistState) {
+      closePlaylistItemMenu();
+      if (virtualPlaylistState.container && virtualPlaylistState.scrollHandler) {
+        virtualPlaylistState.container.removeEventListener("scroll", virtualPlaylistState.scrollHandler);
+      }
+      if (virtualPlaylistState.rafId) cancelAnimationFrame(virtualPlaylistState.rafId);
+    }
+    virtualPlaylistState = null;
+  }
+
+  function renderPlaylistItemRow(playlist, idx) {
+    const item = playlist.items[idx];
+    if (!item) return "";
+    const isActivePlaylist = playbackState.activePlaylistId === playlist.id;
+    const playing = isActivePlaylist && playbackState.currentIndex === idx;
+    const thumb = item.thumbnailUrl
+      ? `<img class="yw-playlist-item-thumb" src="${escapeHtml(item.thumbnailUrl)}" alt="" loading="lazy" draggable="false">`
+      : `<span class="yw-playlist-item-thumb yw-playlist-item-thumb-placeholder" aria-hidden="true">🎵</span>`;
+    return `
+      <div class="yw-playlist-item${playing ? " yw-playlist-item-playing" : ""}" data-index="${idx}" style="top:${idx * PL_ROW_HEIGHT}px;">
+        <button type="button" class="yw-playlist-item-play" data-play-item="${escapeHtml(item.id)}" data-play-index="${idx}"${playing ? ' aria-current="true"' : ""} aria-label="Play ${escapeHtml(item.title)}${playing ? " (now playing)" : ""}">
+          <span class="yw-playlist-item-index" aria-hidden="true">${playing ? "🔊" : idx + 1}</span>
+          ${thumb}
+          <span class="yw-playlist-item-text">
+            <span class="yw-playlist-item-title">${escapeHtml(item.title)}</span>
+            ${item.channelTitle ? `<span class="yw-playlist-item-channel">${escapeHtml(item.channelTitle)}</span>` : ""}
+          </span>
+          ${item.duration ? `<span class="yw-playlist-item-duration">${escapeHtml(item.duration)}</span>` : ""}
+        </button>
+        <div class="yw-playlist-row-menu-wrap">
+          <button type="button" class="yw-playlist-row-menu-btn yw-playlist-item-menu-btn" data-item-menu="${escapeHtml(item.id)}" data-item-index="${idx}" title="More options" aria-label="More options for ${escapeHtml(item.title)}" aria-haspopup="true" aria-expanded="false">⋮</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function computeVisibleRange(container, count) {
+    if (!container || !count) return [0, 0];
+    const scrollTop = container.scrollTop;
+    const viewportH = container.clientHeight || 300;
+    let start = Math.floor(scrollTop / PL_ROW_HEIGHT) - PL_OVERSCAN;
+    let end = Math.ceil((scrollTop + viewportH) / PL_ROW_HEIGHT) + PL_OVERSCAN;
+    // Clamp start to `count` too, not just 0 — a stale/overshoot scrollTop
+    // (e.g. right after removing a large batch of items, before the
+    // browser has reflowed the now-shorter sizer div) could otherwise
+    // leave `start` past `count` while `end` gets clamped down to `count`,
+    // producing an inverted [start, end) range that silently renders zero
+    // rows instead of the correct trailing window.
+    start = Math.max(0, Math.min(start, count));
+    end = Math.min(count, Math.max(end, start));
+    return [start, end];
+  }
+
+  function renderVirtualPlaylistWindow(force) {
+    const st = virtualPlaylistState;
+    if (!st) return;
+    const [start, end] = computeVisibleRange(st.container, st.count);
+    if (!force && start === st.lastStart && end === st.lastEnd) return; // spec #14 — nothing actually changed, skip the rebuild
+    st.lastStart = start;
+    st.lastEnd = end;
+    const playlist = getPlaylist(st.playlistId);
+    if (!playlist) return;
+    let html = "";
+    for (let i = start; i < end; i++) html += renderPlaylistItemRow(playlist, i);
+    st.viewport.innerHTML = html;
+    // Playlist Part 5 (spec #3-#5 — lazy, batched, cached metadata) — see
+    // the block below. Fire-and-forget: never blocks the paint above, and
+    // a playlist with nothing missing resolves to a no-op instantly.
+    enrichVisiblePlaylistItems(playlist, start, end);
+  }
+
+  /* ----------------------------------------------------------------------
+     PLAYLIST ITEM METADATA ENRICHMENT (Playlist Part 5, spec #3-#5) —
+     every item added through the app already carries its own title/
+     channelTitle/thumbnailUrl/duration at add time (see PLAYLIST
+     FOUNDATION NOTES' "ZERO NEW API CALLS"), so this block exists purely
+     for items that DIDN'T come with that: a raw pasted video ID/URL
+     added straight to a playlist, or an imported item from someone
+     else's export that only had a bare videoId. Those still play fine —
+     loadVideo() only ever needs the id — they just show "Untitled" with
+     a placeholder thumbnail until enriched.
+
+     LAZY, NOT EAGER (spec #5): nothing here runs when a playlist is
+     opened. It only runs from renderVirtualPlaylistWindow() above, so it
+     only ever looks at the rows actually on screen (+ overscan) — a
+     5,000-item playlist with 3 pasted-ID items scrolled into view
+     triggers one small batched request, not a 5,000-item sweep.
+
+     BATCHED (spec #4): every videoId needing enrichment across the
+     current visible window is collected into ONE array and handed to
+     YTApi.getVideoDetails(), which already chunks at 50 and already
+     caches by (path, params) — never a per-item fetch, and never a
+     second network request for an id this file already asked about
+     recently. This block doesn't add a second cache on top of that; it
+     relies entirely on the existing central one.
+
+     NEVER SEARCH (spec #2, restated for this block specifically): this
+     calls videos.list (getVideoDetails), never search.list — a known
+     videoId is resolved by asking about that exact id, not by
+     re-discovering it through a text query.
+
+     AT-MOST-ONCE PER SESSION, NOT A RETRY LOOP: `ywEnrichAttempted` is a
+     plain in-memory Set of item ids already asked about this session
+     (session-only, deliberately not persisted — same reasoning as
+     `unavailableItemIds` in the Playback Engine). Without it, scrolling
+     a still-unenriched row in and out of view repeatedly (or a
+     genuinely-private/deleted video that will never enrich) would
+     re-fire a request on every scroll pass.
+  ---------------------------------------------------------------------- */
+  const ywEnrichAttempted = new Set(); // playlist-item ids already asked about this session
+
+  function playlistItemNeedsEnrichment(item) {
+    // "Untitled" is loadPlaylistsFromStorage()'s/sanitizeImportedPlaylistItem()'s
+    // own fallback for "no title was ever known" — a real video legitimately
+    // titled the single word "Untitled" is indistinguishable from this and
+    // would keep re-attempting harmlessly (one extra batched id, not a loop,
+    // since ywEnrichAttempted still caps it at once).
+    return !item.thumbnailUrl || !item.duration || item.title === "Untitled";
+  }
+
+  async function enrichVisiblePlaylistItems(playlist, start, end) {
+    if (!apiKey) return; // spec: playlists must keep working with no key/no quota — enrichment is a pure bonus, never required
+    const targets = [];
+    for (let i = start; i < end; i++) {
+      const item = playlist.items[i];
+      if (!item || ywEnrichAttempted.has(item.id) || !playlistItemNeedsEnrichment(item)) continue;
+      ywEnrichAttempted.add(item.id); // mark before the request, not after — a slow request must not let a second scroll pass re-fire it
+      targets.push(item);
+    }
+    if (!targets.length) return;
+    const ids = [...new Set(targets.map((it) => it.videoId))]; // de-dupe videoIds — two different items can point at the same video
+    let data;
+    try {
+      data = await YTApi.getVideoDetails(ids, { parts: "snippet,contentDetails" });
+    } catch {
+      return; // no key configured mid-flight, quota exhausted, offline, etc. — items simply keep showing what they already had
+    }
+    const byId = new Map((data.items || []).map((v) => [v.id, v]));
+    let changed = false;
+    // Patch every item in the WHOLE playlist that shares one of the
+    // enriched videoIds, not just the ones in `targets` — a video that
+    // appears 3 times in a playlist only needs asking about once.
+    for (const item of playlist.items) {
+      const v = byId.get(item.videoId);
+      if (!v) continue;
+      const title = v.snippet?.title;
+      const channelTitle = v.snippet?.channelTitle;
+      const thumbnailUrl = v.snippet?.thumbnails?.default?.url || v.snippet?.thumbnails?.medium?.url;
+      const duration = formatIsoDuration(v.contentDetails?.duration);
+      if (title && item.title === "Untitled") { item.title = title; changed = true; }
+      if (channelTitle && !item.channelTitle) { item.channelTitle = channelTitle; changed = true; }
+      if (thumbnailUrl && !item.thumbnailUrl) { item.thumbnailUrl = thumbnailUrl; changed = true; }
+      if (duration && !item.duration) { item.duration = duration; changed = true; }
+    }
+    if (!changed) return;
+    persistPlaylistsDebounced(); // same debounced writer everything else in this file uses — no dedicated write path for this
+    // Repaint only if this exact window is still the one on screen (the
+    // person may have scrolled away, or closed the detail view, during
+    // the await above) — never a full renderPlaylistDetail(), same
+    // "cheap regardless of playlist size" property notifyPlaylistUIOfPlaybackChange() relies on.
+    if (virtualPlaylistState && virtualPlaylistState.playlistId === playlist.id) {
+      renderVirtualPlaylistWindow(true);
+    }
+  }
+
+  function scheduleVirtualPlaylistRender() {
+    const st = virtualPlaylistState;
+    if (!st || st.rafId) return; // spec #11 — coalesce a burst of scroll events into one recompute per frame
+    st.rafId = requestAnimationFrame(() => {
+      st.rafId = null;
+      renderVirtualPlaylistWindow(false);
+    });
+  }
+
+  function mountVirtualPlaylist(playlist, container, { restoreScrollTop = 0 } = {}) {
+    teardownVirtualPlaylist();
+    if (!container) return;
+    const count = playlist.items.length;
+    const isActivePlaylist = playbackState.activePlaylistId === playlist.id;
+    container.innerHTML = `
+      <div class="yw-playlist-virtual-sizer" id="yw-playlist-virtual-sizer" style="height:${count * PL_ROW_HEIGHT}px;">
+        <div class="yw-playlist-virtual-viewport"></div>
+      </div>
+    `;
+    const viewport = container.querySelector(".yw-playlist-virtual-viewport");
+    virtualPlaylistState = {
+      playlistId: playlist.id,
+      count,
+      activeIndex: isActivePlaylist ? playbackState.currentIndex : -1,
+      container,
+      viewport,
+      rafId: null,
+      lastStart: -1,
+      lastEnd: -1,
+      scrollHandler: null,
+    };
+    // Part 6.1C fix — re-apply the scroll position renderPlaylistDetail()
+    // captured before rebuilding, if any. The browser clamps this to the
+    // sizer's actual height on its own, so an oversized value (e.g. the
+    // list just got shorter) is harmless. 0 (the default — no prior
+    // state, or a different playlist) is a no-op, same as before this fix.
+    if (restoreScrollTop > 0) container.scrollTop = restoreScrollTop;
+    const onScroll = () => {
+      closePlaylistItemMenu(); // an open ⋮ popover would otherwise float away from the row it belongs to
+      scheduleVirtualPlaylistRender();
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    virtualPlaylistState.scrollHandler = onScroll;
+    renderVirtualPlaylistWindow(true);
+  }
+
+  // Playlist Part 2B2 (spec #2/#14) — called whenever playback's
+  // active playlist/current index changes (playPlaylistItem/stopPlaylist
+  // above). Touches only the specific row(s) whose active state actually
+  // flipped — never re-renders the list — so switching tracks stays cheap
+  // even inside a multi-thousand-item playlist.
+  function notifyPlaylistUIOfPlaybackChange() {
+    // Playback Engine (Part 3) — the video-view transport bar isn't tied
+    // to whether a playlist-detail view happens to be open, so it's kept
+    // outside that early return. See PLAYLIST PART 3 NOTES.
+    updateTransportUI();
+    if (currentBodyView !== "playlist-detail" || !currentDetailPlaylistId || !virtualPlaylistState) return;
+    if (virtualPlaylistState.playlistId !== currentDetailPlaylistId) return;
+    const isActivePlaylist = playbackState.activePlaylistId === currentDetailPlaylistId;
+    const newIndex = isActivePlaylist ? playbackState.currentIndex : -1;
+    const prevIndex = virtualPlaylistState.activeIndex;
+    if (prevIndex === newIndex) return;
+    virtualPlaylistState.activeIndex = newIndex;
+    [prevIndex, newIndex].forEach((i) => {
+      if (i == null || i < 0 || !virtualPlaylistState.viewport) return;
+      const row = virtualPlaylistState.viewport.querySelector(`.yw-playlist-item[data-index="${i}"]`);
+      if (!row) return; // not currently rendered (scrolled out of the window) — it'll pick up the right state next time it IS rendered, since renderPlaylistItemRow() always reads live playbackState
+      const nowPlaying = i === newIndex;
+      row.classList.toggle("yw-playlist-item-playing", nowPlaying);
+      const playBtn = row.querySelector(".yw-playlist-item-play");
+      if (playBtn) {
+        if (nowPlaying) playBtn.setAttribute("aria-current", "true");
+        else playBtn.removeAttribute("aria-current");
+      }
+      const indexEl = row.querySelector(".yw-playlist-item-index");
+      if (indexEl) indexEl.textContent = nowPlaying ? "🔊" : String(i + 1);
+    });
+  }
+
+  // ---- per-item ⋮ overflow menu (Play now / Play next / Move / Remove) ---
+  let openPlaylistItemMenuId = null; // the item id whose menu is open, or null
+  let openPlaylistItemMenuBtn = null;
+
+  function closePlaylistItemMenu() {
+    if (!openPlaylistItemMenuId) return;
+    const btn = openPlaylistItemMenuBtn;
+    const hadFocusInside = btn ? btn.closest(".yw-playlist-row-menu-wrap")?.contains(document.activeElement) : false;
+    document.querySelectorAll(".yw-playlist-item-action-menu").forEach((m) => m.remove());
+    document.querySelectorAll("[data-item-menu]").forEach((b) => b.setAttribute("aria-expanded", "false"));
+    openPlaylistItemMenuId = null;
+    openPlaylistItemMenuBtn = null;
+    if (hadFocusInside) btn?.focus(); // spec #20 — Escape/a selection shouldn't drop focus to <body>
+  }
+
+  function togglePlaylistItemMenu(playlistId, itemId, idx, btn) {
+    const alreadyOpen = openPlaylistItemMenuId === itemId && btn.getAttribute("aria-expanded") === "true";
+    closePlaylistItemMenu();
+    closeAllPlaylistMenus();
+    closeAddToPlaylistMenu();
+    if (alreadyOpen) return;
+    const playlist = getPlaylist(playlistId);
+    if (!playlist) return;
+    const wrap = btn.closest(".yw-playlist-row-menu-wrap");
+    if (!wrap) return;
+    const atTop = idx <= 0;
+    const atBottom = idx >= playlist.items.length - 1;
+    const menu = document.createElement("div");
+    menu.className = "yw-playlist-row-menu yw-playlist-item-action-menu";
+    menu.setAttribute("role", "menu");
+    menu.innerHTML = `
+      <button type="button" class="yw-playlist-row-menu-item" role="menuitem" data-item-action="play-now">Play now</button>
+      <button type="button" class="yw-playlist-row-menu-item" role="menuitem" data-item-action="play-next">Play next</button>
+      <button type="button" class="yw-playlist-row-menu-item" role="menuitem" data-item-action="move-up"${atTop ? " disabled" : ""}>Move up</button>
+      <button type="button" class="yw-playlist-row-menu-item" role="menuitem" data-item-action="move-down"${atBottom ? " disabled" : ""}>Move down</button>
+      <button type="button" class="yw-playlist-row-menu-item" role="menuitem" data-item-action="move-top"${atTop ? " disabled" : ""}>Move to top</button>
+      <button type="button" class="yw-playlist-row-menu-item" role="menuitem" data-item-action="move-bottom"${atBottom ? " disabled" : ""}>Move to bottom</button>
+      <button type="button" class="yw-playlist-row-menu-item yw-playlist-row-menu-item-danger" role="menuitem" data-item-action="remove">Remove</button>
+    `;
+    wrap.appendChild(menu);
+    btn.setAttribute("aria-expanded", "true");
+    openPlaylistItemMenuId = itemId;
+    openPlaylistItemMenuBtn = btn;
+    menu.querySelectorAll("[data-item-action]").forEach((actionBtn) => {
+      actionBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        handlePlaylistItemAction(actionBtn.dataset.itemAction, playlistId, itemId, idx);
+      });
+    });
+    menu.querySelector(".yw-playlist-row-menu-item:not(:disabled)")?.focus();
+  }
+
+  // The one place all seven per-item actions (spec #3-#9) are carried
+  // out — each calls straight into Part 1's existing
+  // addItemToPlaylist/removeItemFromPlaylist/reorderPlaylistItem/
+  // playPlaylistItem, so playlist-order vs. shuffle-order vs. the new
+  // upNext queue stay exactly as separate as Part 1 designed them.
+  function handlePlaylistItemAction(action, playlistId, itemId, idx) {
+    closePlaylistItemMenu();
+    const playlist = getPlaylist(playlistId);
+    if (!playlist) {
+      openPlaylistLibrary();
+      return;
+    }
+    const item = playlist.items.find((it) => it.id === itemId) || null;
+    switch (action) {
+      case "play-now":
+        // Playback change only — notifyPlaylistUIOfPlaybackChange() (via
+        // playPlaylistItem) updates the highlight; no list rebuild needed.
+        playPlaylistItem(playlistId, idx);
+        return;
+      case "play-next":
+        if (item) {
+          queueUpNext(item);
+          showStatus(`Will play next: ${escapeHtml(item.title)}`, 2200);
+        }
+        return; // the temporary queue only — saved order is untouched, nothing on screen needs to change
+      case "move-up":
+        if (!atStart(idx) && reorderPlaylistItem(playlistId, itemId, idx - 1)) renderPlaylistDetail();
+        return;
+      case "move-down":
+        if (idx < playlist.items.length - 1 && reorderPlaylistItem(playlistId, itemId, idx + 1)) renderPlaylistDetail();
+        return;
+      case "move-top":
+        if (!atStart(idx) && reorderPlaylistItem(playlistId, itemId, 0)) renderPlaylistDetail();
+        return;
+      case "move-bottom":
+        if (idx < playlist.items.length - 1 && reorderPlaylistItem(playlistId, itemId, playlist.items.length - 1)) renderPlaylistDetail();
+        return;
+      case "remove":
+        if (removeItemFromPlaylist(playlistId, itemId)) {
+          showStatus("Removed from playlist.", 2000);
+          renderPlaylistDetail();
+        }
+        return;
+      default:
+        return;
+    }
+  }
+  function atStart(idx) {
+    return idx <= 0;
+  }
+
+  // Delegated once on the (stable) #yw-playlist-detail element rather
+  // than rebound per row/per scroll — see the LARGE PLAYLIST RENDERING
+  // notes above for why that matters at scale.
+  playlistDetailEl?.addEventListener("click", (e) => {
+    const playBtn = e.target.closest("[data-play-item]");
+    if (playBtn) {
+      const idx = Number(playBtn.dataset.playIndex);
+      if (currentDetailPlaylistId != null && Number.isInteger(idx)) playPlaylistItem(currentDetailPlaylistId, idx);
+      return;
+    }
+    const menuBtn = e.target.closest("[data-item-menu]");
+    if (menuBtn) {
+      e.stopPropagation();
+      const idx = Number(menuBtn.dataset.itemIndex);
+      if (currentDetailPlaylistId != null) togglePlaylistItemMenu(currentDetailPlaylistId, menuBtn.dataset.itemMenu, idx, menuBtn);
+    }
+  });
+
+  // ---- ⋮ overflow menu (shared by a library row and the detail header) ---
+  let openPlaylistMenuId = null;
+  function closeAllPlaylistMenus() {
+    document.querySelectorAll(".yw-playlist-row-menu").forEach((m) => m.remove());
+    document.querySelectorAll("[data-menu-playlist], #yw-playlist-detail-menu-btn").forEach((b) => b.setAttribute("aria-expanded", "false"));
+    openPlaylistMenuId = null;
+    closePlaylistItemMenu(); // mutually exclusive with the per-item ⋮ menu (Part 2B2)
+  }
+  function togglePlaylistRowMenu(playlistId, btn) {
+    const alreadyOpenForThis = openPlaylistMenuId === playlistId && btn.getAttribute("aria-expanded") === "true";
+    closeAllPlaylistMenus();
+    if (alreadyOpenForThis) return;
+    const wrap = btn.closest(".yw-playlist-row-menu-wrap");
+    if (!wrap) return;
+    const menu = document.createElement("div");
+    menu.className = "yw-playlist-row-menu";
+    // Playlist Part 4B (spec #11) — Reshuffle only ever acts on
+    // reshuffleActivePlaylist()'s own target (the ACTIVE playlist, see
+    // Part 4A), so it's only offered here when this row's playlist is
+    // that active one; offering it for a playlist that isn't playing
+    // would silently reshuffle a different playlist than the one the
+    // menu was opened on.
+    const showReshuffle = playbackState.activePlaylistId === playlistId;
+    menu.innerHTML = `
+      ${showReshuffle ? '<button type="button" class="yw-playlist-row-menu-item" data-action="reshuffle">🔀 Reshuffle</button>' : ""}
+      <button type="button" class="yw-playlist-row-menu-item" data-action="rename">Rename</button>
+      <button type="button" class="yw-playlist-row-menu-item yw-playlist-row-menu-item-danger" data-action="delete">Delete</button>
+    `;
+    wrap.appendChild(menu);
+    btn.setAttribute("aria-expanded", "true");
+    openPlaylistMenuId = playlistId;
+    menu.querySelector('[data-action="reshuffle"]')?.addEventListener("click", () => {
+      closeAllPlaylistMenus();
+      reshuffleActivePlaylist();
+      if (currentBodyView === "playlist-detail") renderPlaylistDetail();
+    });
+    menu.querySelector('[data-action="rename"]')?.addEventListener("click", () => {
+      closeAllPlaylistMenus();
+      openPlaylistNameModal("rename", playlistId);
+    });
+    menu.querySelector('[data-action="delete"]')?.addEventListener("click", () => {
+      closeAllPlaylistMenus();
+      openPlaylistDeleteModal(playlistId);
+    });
+  }
+  document.addEventListener("click", (e) => {
+    if (openPlaylistMenuId && !e.target.closest(".yw-playlist-row-menu-wrap")) closeAllPlaylistMenus();
+    if (openPlaylistItemMenuId && !e.target.closest(".yw-playlist-row-menu-wrap")) closePlaylistItemMenu();
+  });
+
+  /* ----------------------------------------------------------------------
+     ADD TO PLAYLIST (Playlist Part 2B1) — the "+ Add" picker used by both
+     a search-result card's own "+ Add" pill and the current-video header
+     button. Reuses Part 1's addItemToPlaylist() and Part 2A's
+     getAllPlaylists()/createPlaylist()/openPlaylistNameModal() exactly as
+     they already exist — no second playlist store, no second creation
+     flow, no new YouTube API call anywhere in this block (every `source`
+     handed in here already came from an already-fetched search row or
+     the currently-loaded video's own known metadata; see
+     playlistSourceFromResultRow() and currentVideoMeta above).
+
+     POPOVER SHAPE mirrors the existing ⋮ playlist-row menu exactly: an
+     in-flow, position:relative wrap + position:absolute dropdown (never
+     position:fixed), so it never needs to escape the window's own
+     overflow:hidden the way the settings panel does.
+
+     DUPLICATES ARE INTENTIONAL (spec #11/#12) — handleAddToPlaylistSelect()
+     never checks whether the video is already in the target playlist, and
+     nothing here disables the "+ Add" control after a successful add;
+     every click is a genuine, independent addition, each getting its own
+     playlist-item id from addItemToPlaylist() (Part 1's genId("item")).
+
+     KEEPING THE USER WHERE THEY WERE (spec #5/#6) — a successful add only
+     ever shows a status-line confirmation (showAddedConfirmation(), the
+     app's existing #yw-status line) and flashes the button that was
+     clicked; it never calls setView()/openPlaylistDetail()/re-searches/
+     re-renders the results list. The one exception, matching spec #15,
+     is if a playlist view already happens to be on screen when the add
+     happens — its counts are kept live rather than going stale — but
+     that view is never *opened* as a side effect of adding.
+  ---------------------------------------------------------------------- */
+
+  // Reshapes an already-rendered search-result row (see shapeResultRow())
+  // into the {videoId, title, channelTitle, thumbnailUrl, duration} shape
+  // addItemToPlaylist()/playlist items use — a field-name mapping only
+  // (row.id → videoId, row.thumb → thumbnailUrl), never a re-fetch.
+  function playlistSourceFromResultRow(row) {
+    return {
+      videoId: row.id,
+      title: row.title,
+      channelTitle: row.channelTitle,
+      thumbnailUrl: row.thumb,
+      duration: row.duration,
+    };
+  }
+
+  let addToPlaylistMenuState = null; // { wrap, anchorBtn, source } | null
+
+  function closeAddToPlaylistMenu() {
+    if (!addToPlaylistMenuState) return;
+    const { wrap, anchorBtn } = addToPlaylistMenuState;
+    const hadFocusInside = wrap?.contains(document.activeElement);
+    wrap?.querySelector(".yw-add-playlist-menu")?.remove();
+    anchorBtn?.setAttribute("aria-expanded", "false");
+    addToPlaylistMenuState = null;
+    // Keyboard usability (spec #22) — if focus was inside the popover
+    // when it closed (Escape, a selection), it would otherwise fall back
+    // to <body> since the focused element was just removed from the DOM.
+    if (hadFocusInside) anchorBtn?.focus();
+  }
+
+  function renderAddToPlaylistMenuMarkup() {
+    const list = getAllPlaylists(); // live reference — reflects any playlist created moments ago
+    const rows = list.length
+      ? list.map((p) => `<button type="button" class="yw-add-playlist-menu-item" role="menuitem" data-playlist-id="${escapeHtml(p.id)}">🎵 ${escapeHtml(p.name)}</button>`).join("")
+      : `<p class="yw-add-playlist-menu-empty">No playlists yet.</p>`;
+    return `
+      <div class="yw-add-playlist-menu" role="menu" aria-label="Add to Playlist">
+        <div class="yw-add-playlist-menu-head">Add to Playlist</div>
+        ${rows}
+        <div class="yw-add-playlist-menu-sep"></div>
+        <button type="button" class="yw-add-playlist-menu-item yw-add-playlist-menu-item-new" role="menuitem" data-action="new-playlist">+ New Playlist</button>
+      </div>
+    `;
+  }
+
+  // `anchorBtn` is either a search-result card's "+ Add" pill (wrapped in
+  // .yw-result-add-wrap) or the header's "+ Add to Playlist" button
+  // (wrapped in .yw-header-add-wrap) — both are position:relative wraps
+  // this appends the dropdown into. `source` is whatever
+  // addItemToPlaylist() itself expects: {videoId, title, channelTitle,
+  // thumbnailUrl, duration}.
+  function openAddToPlaylistMenu(anchorBtn, source) {
+    if (!anchorBtn || !source || !source.videoId) return;
+    const reopeningSameOne = addToPlaylistMenuState?.anchorBtn === anchorBtn;
+    closeAddToPlaylistMenu();
+    closeAllPlaylistMenus(); // the ⋮ menu and this one are mutually exclusive on screen
+    if (reopeningSameOne) return; // clicking the same "+ Add" again just closes it
+
+    const wrap = anchorBtn.closest(".yw-result-add-wrap") || anchorBtn.closest(".yw-header-add-wrap");
+    if (!wrap) return;
+
+    wrap.insertAdjacentHTML("beforeend", renderAddToPlaylistMenuMarkup());
+    const menu = wrap.querySelector(".yw-add-playlist-menu");
+    if (!menu) return;
+    anchorBtn.setAttribute("aria-expanded", "true");
+    addToPlaylistMenuState = { wrap, anchorBtn, source };
+
+    menu.querySelectorAll("[data-playlist-id]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        handleAddToPlaylistSelect(btn.dataset.playlistId, source, anchorBtn);
+      });
+    });
+    menu.querySelector('[data-action="new-playlist"]')?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeAddToPlaylistMenu();
+      // Reuses Part 2A's createPlaylist()/openPlaylistNameModal() as-is —
+      // see the modal's commitPlaylistNameModal() below for the
+      // create-then-add branch this `addSource` triggers.
+      openPlaylistNameModal("create", null, { addSource: source });
+    });
+    // First item focused for immediate keyboard use (spec #22) — Tab/
+    // Shift+Tab and Enter/Space on any item already work for free since
+    // these are plain, normally-flowed <button> elements.
+    menu.querySelector(".yw-add-playlist-menu-item")?.focus();
+  }
+
+  document.addEventListener("click", (e) => {
+    if (!addToPlaylistMenuState) return;
+    if (e.target.closest(".yw-add-playlist-menu")) return;
+    if (e.target.closest("[data-add-video-id]") || e.target.closest("#yw-add-current-btn")) return;
+    closeAddToPlaylistMenu();
+  });
+
+  // Brief visual flash on the button that was actually clicked — spec
+  // #23's "only update the card that was interacted with if visual
+  // feedback is necessary". Never disables the button (spec #12 — an
+  // "Added" look must still allow another intentional Add).
+  function flashAddButton(btn) {
+    if (!btn || !btn.classList.contains("yw-add-btn")) return;
+    btn.classList.add("yw-add-btn-flash");
+    setTimeout(() => btn.classList.remove("yw-add-btn-flash"), 450);
+  }
+
+  function showAddedConfirmation(playlistName) {
+    showStatus(`✓ Added to ${escapeHtml(playlistName)}`, 2500);
+  }
+
+  // The one place an actual addItemToPlaylist() call happens for this
+  // whole feature — entirely local (see PLAYLIST FOUNDATION NOTES: Part
+  // 1's addItemToPlaylist() is YTApi-free), persists via the existing
+  // debounced writer, and never navigates away (spec #5/#6).
+  function handleAddToPlaylistSelect(playlistId, source, anchorBtn) {
+    closeAddToPlaylistMenu();
+    const playlist = getPlaylist(playlistId);
+    if (!playlist) {
+      // Spec #20 — the playlist vanished between opening the picker and
+      // choosing it (e.g. deleted from another tab). Handle gracefully,
+      // refresh whatever playlist UI might be open, never throw.
+      showStatus("That playlist no longer exists.", 3000);
+      if (currentBodyView === "playlists") renderPlaylistLibrary();
+      else if (currentBodyView === "playlist-detail") renderPlaylistDetail();
+      return;
+    }
+    const item = addItemToPlaylist(playlistId, source);
+    if (!item) {
+      // Spec #20 — never claim "Added" if it didn't actually happen.
+      showStatus("Couldn't add that video — please try again.", 3500);
+      return;
+    }
+    showAddedConfirmation(playlist.name);
+    flashAddButton(anchorBtn);
+    // Spec #15/#16 — keep an already-open library/detail view's counts
+    // live without navigating there or rebuilding anything else; if
+    // neither is currently on screen there's nothing to repaint here —
+    // both already read the live `playlists` array fresh the next time
+    // they're opened regardless.
+    if (currentBodyView === "playlist-detail" && currentDetailPlaylistId === playlistId) renderPlaylistDetail();
+    else if (currentBodyView === "playlists") renderPlaylistLibrary();
+  }
+
+  // ---- create / rename modal (one shared form, two modes) -----------
+  let playlistNameModalMode = null; // "create" | "rename"
+  let playlistNameModalTargetId = null;
+  // Playlist Part 2B1 — when the modal is opened from the "+ New
+  // Playlist" item inside an Add-to-Playlist picker (rather than the
+  // library's own "+ New" button), this holds the video that should be
+  // added to the playlist the instant it's created (spec #7), and
+  // suppresses the normal "open the new playlist" navigation (spec #5/#6
+  // — adding must never navigate away from search results/current video).
+  let playlistNameModalAddSource = null;
+
+  function openPlaylistNameModal(mode, playlistId, opts = {}) {
+    playlistNameModalMode = mode;
+    playlistNameModalTargetId = playlistId || null;
+    playlistNameModalAddSource = (mode === "create" && opts.addSource) || null;
+    if (playlistNameTitleEl) playlistNameTitleEl.textContent = mode === "rename" ? "Rename Playlist" : "New Playlist";
+    if (playlistNameSaveBtn) playlistNameSaveBtn.textContent = mode === "rename" ? "Rename" : "Create";
+    if (playlistNameErrorEl) {
+      playlistNameErrorEl.textContent = "";
+      playlistNameErrorEl.classList.add("hidden");
+    }
+    if (playlistNameInput) {
+      playlistNameInput.value = mode === "rename" ? getPlaylist(playlistId)?.name || "" : "";
+    }
+    playlistNameModal?.classList.remove("hidden");
+    playlistNameInput?.focus();
+    playlistNameInput?.select();
+  }
+
+  function closePlaylistNameModal() {
+    playlistNameModal?.classList.add("hidden");
+    playlistNameModalMode = null;
+    playlistNameModalTargetId = null;
+    playlistNameModalAddSource = null;
+  }
+
+  function commitPlaylistNameModal() {
+    if (!playlistNameModalMode) return;
+    const trimmed = (playlistNameInput?.value || "").trim();
+    if (!trimmed) {
+      if (playlistNameErrorEl) {
+        playlistNameErrorEl.textContent = "Enter a playlist name.";
+        playlistNameErrorEl.classList.remove("hidden");
+      }
+      playlistNameInput?.focus();
+      return;
+    }
+    if (playlistNameModalMode === "rename" && playlistNameModalTargetId) {
+      const targetId = playlistNameModalTargetId;
+      renamePlaylist(targetId, trimmed); // preserves id, updates updatedAt, persists — see PLAYLISTS block
+      closePlaylistNameModal();
+      if (currentDetailPlaylistId === targetId) renderPlaylistDetail();
+      else if (currentBodyView === "playlists") renderPlaylistLibrary();
+    } else {
+      const playlist = createPlaylist(trimmed); // unique id, createdAt/updatedAt, empty items, persisted — same Part 2A call either way
+      // Playlist Part 2B1 — "+ New Playlist" inside the Add-to-Playlist
+      // picker (spec #7): the new playlist gets the pending video
+      // immediately, and — unlike the library's own "+ New" button —
+      // this must NOT navigate to the new playlist's detail view; the
+      // person stays on search results / the current video (spec #5/#6).
+      const addSource = playlistNameModalAddSource;
+      closePlaylistNameModal();
+      if (addSource) {
+        const item = addItemToPlaylist(playlist.id, addSource);
+        if (item) {
+          showAddedConfirmation(playlist.name);
+          if (currentBodyView === "playlists") renderPlaylistLibrary();
+        } else {
+          showStatus("Couldn't add that video — please try again.", 3500);
+        }
+      } else {
+        openPlaylistDetail(playlist.id); // library's own "+ New" — spec: newly created playlist opens automatically
+      }
+    }
+  }
+
+  playlistNameSaveBtn?.addEventListener("click", commitPlaylistNameModal);
+  playlistNameCancelBtn?.addEventListener("click", closePlaylistNameModal);
+  playlistNameModal?.addEventListener("click", (e) => {
+    if (e.target === playlistNameModal) closePlaylistNameModal(); // backdrop click
+  });
+  playlistNameInput?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitPlaylistNameModal();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      closePlaylistNameModal();
+    }
+  });
+
+  // ---- delete confirm modal ------------------------------------------
+  let playlistDeleteTargetId = null;
+
+  function openPlaylistDeleteModal(playlistId) {
+    const playlist = getPlaylist(playlistId);
+    if (!playlist) return;
+    playlistDeleteTargetId = playlistId;
+    if (playlistDeleteTextEl) {
+      const count = playlist.items.length;
+      playlistDeleteTextEl.textContent = `“${playlist.name}” contains ${count} video${count === 1 ? "" : "s"}. This removes the playlist from this app.`;
+    }
+    playlistDeleteModal?.classList.remove("hidden");
+    playlistDeleteConfirmBtn?.focus();
+  }
+
+  function closePlaylistDeleteModal() {
+    playlistDeleteModal?.classList.add("hidden");
+    playlistDeleteTargetId = null;
+  }
+
+  function commitPlaylistDelete() {
+    const id = playlistDeleteTargetId;
+    if (!id) {
+      closePlaylistDeleteModal();
+      return;
+    }
+    // deletePlaylist() (PLAYLISTS block above) already calls stopPlaylist()
+    // if this was the active playlist, clearing playbackState safely —
+    // nothing playback-related to do here beyond the view itself.
+    deletePlaylist(id);
+    closePlaylistDeleteModal();
+    if (currentDetailPlaylistId === id) {
+      openPlaylistLibrary(); // was open in detail — never leave it pointing at a deleted playlist
+    } else if (currentBodyView === "playlists") {
+      renderPlaylistLibrary();
+    }
+  }
+
+  playlistDeleteConfirmBtn?.addEventListener("click", commitPlaylistDelete);
+  playlistDeleteCancelBtn?.addEventListener("click", closePlaylistDeleteModal);
+  playlistDeleteModal?.addEventListener("click", (e) => {
+    if (e.target === playlistDeleteModal) closePlaylistDeleteModal(); // backdrop click
+  });
+
+  /* ----------------------------------------------------------------------
+     PLAYLIST EXPORT / IMPORT (Playlist Part 5, spec #10-#12) — a local
+     JSON backup, entirely separate from the Drive sync feature elsewhere
+     in this app (that syncs vocabulary entries, never playlists). See
+     "PLAYLIST PART 5 NOTES" in the file-header comment for the full
+     design writeup; short version: export writes exactly the fields
+     needed to reconstruct playlists (never the API key), import is
+     read-only until the person explicitly confirms merge/replace in
+     #yw-playlist-import-modal, and every field from the parsed file is
+     copied individually onto a fresh object literal — nothing is ever
+     spread/Object.assign'd from untrusted JSON onto a real object, so a
+     crafted "__proto__" key in the file can't reach anything.
+  ---------------------------------------------------------------------- */
+  const YW_PLAYLIST_EXPORT_VERSION = 1;
+
+  function buildPlaylistExportPayload() {
+    // Deliberately NOT `JSON.stringify(playlists)` directly — an explicit
+    // field list means a future internal-only field added to the item/
+    // playlist shape doesn't leak into exports (or, worse, into someone
+    // else's import) without a conscious decision to include it here.
+    return {
+      app: "vocabRegister-youtube-playlists",
+      version: YW_PLAYLIST_EXPORT_VERSION,
+      exportedAt: Date.now(),
+      playlists: playlists.map((p) => ({
+        id: p.id,
+        name: p.name,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+        items: p.items.map((it) => ({
+          id: it.id,
+          videoId: it.videoId,
+          title: it.title,
+          channelTitle: it.channelTitle,
+          thumbnailUrl: it.thumbnailUrl,
+          duration: it.duration,
+          addedAt: it.addedAt,
+        })),
+      })),
+    };
+  }
+
+  function downloadPlaylistExport() {
+    if (!playlists.length) {
+      showStatus("No playlists to export yet.", 3000);
+      return;
+    }
+    const payload = buildPlaylistExportPayload();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `youtube-playlists-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url); // Playlist Part 5 (spec #17) — don't leak the object URL past the download
+  }
+
+  // An 11-char YouTube video ID's real alphabet is narrower than this,
+  // but this is deliberately just a shape check (not a full validator) —
+  // enough to reject obvious garbage/injected strings before they're
+  // stored or ever handed to loadVideo() to build an /embed/ URL from.
+  function isPlausibleVideoId(id) {
+    return typeof id === "string" && /^[A-Za-z0-9_-]{10,12}$/.test(id);
+  }
+
+  // Cleans one raw parsed playlist record into this file's own internal
+  // shape, or returns null if it's unusable — mirrors
+  // loadPlaylistsFromStorage()'s own defensive cleaning (Playlist Part 1)
+  // so imported data is held to exactly the same standard as anything
+  // already saved locally. Item ids are ALWAYS regenerated (spec #12):
+  // an id that happens to collide with something already in this
+  // browser's storage must never cause two distinct items to silently
+  // merge into one.
+  function sanitizeImportedPlaylistItem(raw) {
+    if (!raw || typeof raw !== "object" || !isPlausibleVideoId(raw.videoId)) return null;
+    return {
+      id: genId("item"),
+      videoId: raw.videoId,
+      title: typeof raw.title === "string" && raw.title.trim() ? raw.title.trim() : "Untitled",
+      channelTitle: typeof raw.channelTitle === "string" ? raw.channelTitle : "",
+      thumbnailUrl: typeof raw.thumbnailUrl === "string" ? raw.thumbnailUrl : "",
+      duration: typeof raw.duration === "string" ? raw.duration : null,
+      addedAt: typeof raw.addedAt === "number" ? raw.addedAt : Date.now(),
+    };
+  }
+
+  function sanitizeImportedPlaylist(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const rawItems = Array.isArray(raw.items) ? raw.items : [];
+    const items = rawItems.map(sanitizeImportedPlaylistItem).filter(Boolean);
+    if (!items.length) return null; // spec #11 — a malformed/empty record is skipped, not imported as an empty shell
+    return {
+      id: genId("pl"), // final uniqueness against THIS browser's existing playlists is still re-checked at commit time, below
+      name: typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : "Imported playlist",
+      createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now(),
+      updatedAt: Date.now(),
+      items,
+    };
+  }
+
+  // Read-only parse+validate step — never mutates `playlists`. Accepts
+  // either this app's own `{ playlists: [...] }` export shape or a bare
+  // array, so a hand-edited or differently-sourced JSON file with the
+  // same item shape still imports.
+  function parsePlaylistImportFile(text) {
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      return { error: "That file isn't valid JSON." };
+    }
+    const rawList = Array.isArray(json) ? json : Array.isArray(json?.playlists) ? json.playlists : null;
+    if (!rawList) return { error: "That file doesn't look like a playlist export." };
+    const cleaned = rawList.map(sanitizeImportedPlaylist).filter(Boolean);
+    if (!cleaned.length) return { error: "No usable playlists were found in that file." };
+    return { playlists: cleaned };
+  }
+
+  let pendingImportPlaylists = null;
+
+  function openPlaylistImportModal(cleanedPlaylists) {
+    pendingImportPlaylists = cleanedPlaylists;
+    const totalItems = cleanedPlaylists.reduce((sum, p) => sum + p.items.length, 0);
+    if (playlistImportSummaryEl) {
+      playlistImportSummaryEl.textContent = `Found ${cleanedPlaylists.length} playlist${cleanedPlaylists.length === 1 ? "" : "s"} (${totalItems} video${totalItems === 1 ? "" : "s"} total).`;
+    }
+    if (playlistImportErrorEl) {
+      playlistImportErrorEl.textContent = "";
+      playlistImportErrorEl.classList.add("hidden");
+    }
+    const mergeRadio = playlistImportModal?.querySelector('input[value="merge"]');
+    if (mergeRadio) mergeRadio.checked = true;
+    playlistImportModal?.classList.remove("hidden");
+  }
+
+  function closePlaylistImportModal() {
+    playlistImportModal?.classList.add("hidden");
+    pendingImportPlaylists = null;
+  }
+
+  // Playlist Part 5 (spec #16) — large imports are pushed onto `playlists`
+  // in chunks with a yield (setTimeout 0) between them, rather than one
+  // long synchronous loop, so dropping a many-thousand-item export in
+  // doesn't freeze the tab for the length of the whole import. Each
+  // chunk still goes through the same id-collision check a single add
+  // would.
+  async function commitPlaylistImport() {
+    const cleaned = pendingImportPlaylists;
+    if (!cleaned || !cleaned.length) {
+      closePlaylistImportModal();
+      return;
+    }
+    const mode = playlistImportModal?.querySelector('input[name="yw-playlist-import-mode"]:checked')?.value || "merge";
+    closePlaylistImportModal();
+    if (mode === "replace") {
+      playlists = [];
+      stopPlaylist(); // clears playbackState so nothing points at a playlist that's about to be gone
+    }
+    const existingIds = new Set(playlists.map((p) => p.id));
+    const CHUNK = 25; // playlists per chunk, not items — a playlist's own item count is unbounded either way
+    for (let i = 0; i < cleaned.length; i += CHUNK) {
+      const chunk = cleaned.slice(i, i + CHUNK);
+      for (const p of chunk) {
+        // spec #12 — never merge distinct playlists just because an id
+        // collided; items were already given fresh ids in
+        // sanitizeImportedPlaylistItem() above.
+        if (existingIds.has(p.id)) p.id = genId("pl");
+        existingIds.add(p.id);
+        playlists.push(p);
+      }
+      if (i + CHUNK < cleaned.length) await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    persistPlaylistsDebounced();
+    showStatus(`Imported ${cleaned.length} playlist${cleaned.length === 1 ? "" : "s"}.`, 3500);
+    if (currentBodyView === "playlists") renderPlaylistLibrary();
+  }
+
+  function handlePlaylistImportFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = parsePlaylistImportFile(String(reader.result || ""));
+      if (result.error) {
+        showStatus(result.error, 4000);
+        return;
+      }
+      openPlaylistImportModal(result.playlists);
+    };
+    reader.onerror = () => showStatus("Couldn't read that file.", 3500);
+    reader.readAsText(file);
+  }
+
+  playlistImportFileInput?.addEventListener("change", () => {
+    const file = playlistImportFileInput.files?.[0];
+    handlePlaylistImportFile(file);
+    playlistImportFileInput.value = ""; // spec: allow re-selecting the exact same file again later
+  });
+  playlistImportConfirmBtn?.addEventListener("click", commitPlaylistImport);
+  playlistImportCancelBtn?.addEventListener("click", closePlaylistImportModal);
+  playlistImportModal?.addEventListener("click", (e) => {
+    if (e.target === playlistImportModal) closePlaylistImportModal(); // backdrop click — same convention as every other modal here
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      if (playlistDeleteModal && !playlistDeleteModal.classList.contains("hidden")) closePlaylistDeleteModal();
+      // Playlist Part 5 — same Escape-closes convention as every other
+      // modal/popover in this file.
+      if (playlistImportModal && !playlistImportModal.classList.contains("hidden")) closePlaylistImportModal();
+      // Playlist Part 2B1 — same Escape-closes convention as every other
+      // popover/modal in this file (spec #21).
+      if (addToPlaylistMenuState) closeAddToPlaylistMenu();
+      // Playlist Part 2B2 — the per-item ⋮ menu follows the same convention.
+      if (openPlaylistItemMenuId) closePlaylistItemMenu();
+      return;
+    }
+    handleTransportShortcut(e);
+  });
+
+  // Playlist Part 4B (spec #14-#17) — music-player keyboard shortcuts,
+  // folded into this file's own single document-level keydown listener
+  // (the Escape handling right above) rather than a second competing
+  // listener. This is deliberately separate from script.js's
+  // CUSTOMIZABLE KEYBOARD SHORTCUT SYSTEM: that system is a per-field,
+  // click-to-record rebinding architecture built for the host app's own
+  // controls, and its defaults are intentionally never bare letters "so
+  // plain word/book typing is never affected" — bare N/P/S/R would be
+  // exactly the kind of binding that system avoids by design. Instead
+  // isTypingTarget() below reimplements that same guarantee the plain
+  // way: any input/textarea/contenteditable/select always wins, letters
+  // never fire while one is focused (spec #15/#16), matching how every
+  // other shortcut in the host app already behaves around text fields.
+  function isTypingTarget(target) {
+    if (!target) return false;
+    const tag = target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+    if (target.isContentEditable) return true;
+    return false;
+  }
+
+  function handleTransportShortcut(e) {
+    if (e.altKey || e.ctrlKey || e.metaKey) return; // leave modified combos alone
+    if (!isActive) return; // window isn't open — never steal keys from the rest of the app
+    if (isTypingTarget(e.target)) return; // spec #15 — never hijack typing, "playlist" must type P/S/R untouched
+    // Space additionally backs off for any focused button/control that
+    // already uses Space itself (spec #16) — e.g. the volume slider's
+    // native thumb, or any other focusable control mid-interaction.
+    const onControl = !!(e.target && e.target.closest && e.target.closest('button, [role="button"], [role="slider"], a[href]'));
+    switch (e.code) {
+      case "Space":
+        if (onControl || !player) return;
+        e.preventDefault();
+        handlePlayPauseClick();
+        break;
+      case "KeyN":
+        if (onControl || !playbackState.activePlaylistId) return;
+        e.preventDefault();
+        handleNextClick();
+        break;
+      case "KeyP":
+        if (onControl || !playbackState.activePlaylistId) return;
+        e.preventDefault();
+        handlePreviousClick();
+        break;
+      case "KeyS":
+        if (onControl || !playbackState.activePlaylistId) return;
+        e.preventDefault();
+        handleShuffleClick();
+        break;
+      case "KeyR":
+        if (onControl || !playbackState.activePlaylistId) return;
+        e.preventDefault();
+        handleRepeatClick();
+        break;
+      default:
+        break;
+    }
+  }
+
+  /* ----------------------------------------------------------------------
+     PLAYBACK ENGINE (Playlist Part 3 — full playback engine & continuous
+     music playback). See "PLAYLIST PART 3 NOTES" in the file-header
+     comment for the full design writeup. Short version: this block adds
+     the video-view transport bar (Now Playing + Previous/Play-Pause/
+     Next/Repeat + a progress bar), a bounded unavailable-video skip on
+     player errors, a lightweight autoplay-restriction watchdog, and the
+     "playlist finished" state — all built on top of the queue math and
+     hooks Parts 1/2 already established (getActivePlaylist/
+     getCurrentQueueItem/getNextQueueIndex/buildPlaybackQueue/
+     playPlaylistItem/playNextInQueue/playPreviousInQueue/setRepeatMode/
+     notifyPlaylistUIOfPlaybackChange). Nothing here calls YTApi.* or
+     touches localStorage — this is all reused-player-instance state.
+  ---------------------------------------------------------------------- */
+
+  // Set of playlist ITEM ids (not videoIds — two items can share a
+  // videoId) that failed to play during the current playback pass. Never
+  // persisted — see PLAYLIST PART 3 NOTES.
+  let unavailableItemIds = new Set();
+  // True once repeat=off has run out of a next item after the last
+  // track ended — cleared by any fresh play (see playPlaylistItem/
+  // startPlaylist above).
+  let playlistFinished = false;
+  // True once armAutoplayWatchdog()'s timer fires without the player
+  // ever having reached PLAYING/BUFFERING — cleared the moment it does.
+  let playbackBlocked = false;
+  let autoplayWatchdogTimer = null;
+  let progressTickerTimer = null;
+
+  function mmss(totalSeconds) {
+    const s = Math.max(0, Math.floor(totalSeconds || 0));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    const pad = (n) => String(n).padStart(2, "0");
+    return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+  }
+
+  /* ---- Autoplay-restriction watchdog (spec #11) --------------------- */
+  function clearAutoplayWatchdog() {
+    if (autoplayWatchdogTimer) {
+      clearTimeout(autoplayWatchdogTimer);
+      autoplayWatchdogTimer = null;
+    }
+  }
+
+  function armAutoplayWatchdog() {
+    clearAutoplayWatchdog();
+    autoplayWatchdogTimer = setTimeout(() => {
+      autoplayWatchdogTimer = null;
+      if (!player || !window.YT) return;
+      let state = null;
+      try {
+        state = player.getPlayerState();
+      } catch {
+        return;
+      }
+      const playing = state === window.YT.PlayerState.PLAYING || state === window.YT.PlayerState.BUFFERING;
+      if (!playing) {
+        playbackBlocked = true;
+        showStatus("Your browser blocked autoplay — press ▶ Play to continue.", 6000);
+        updateTransportUI();
+      }
+    }, 1800);
+  }
+
+  /* ---- Progress ticker (spec #8 — modest interval, stopped when idle) */
+  function startProgressTicker() {
+    if (progressTickerTimer) return; // already running
+    progressTickerTimer = setInterval(updateProgressUI, 1000);
+    updateProgressUI();
+  }
+
+  function stopProgressTicker() {
+    if (progressTickerTimer) {
+      clearInterval(progressTickerTimer);
+      progressTickerTimer = null;
+    }
+  }
+
+  /* ---- Unavailable-video skip on error (spec #12/#13) --------------- */
+  // Walks the same play-order Next/Previous already use (respects
+  // shuffle) starting just after `fromIndex`, wrapping only if
+  // repeat=playlist, and returns the first index whose item id isn't in
+  // `unavailableItemIds`. Bounded to one lap of the queue.
+  function findNextPlayableIndex(fromIndex) {
+    const playlist = getActivePlaylist();
+    if (!playlist || !playlist.items.length) return -1;
+    const order = buildPlaybackQueue(playlist);
+    if (!order.length) return -1;
+    const startPos = order.indexOf(fromIndex);
+    const wrap = playbackState.repeatMode === "playlist";
+    for (let step = 1; step <= order.length; step++) {
+      let pos = startPos + step;
+      if (pos >= order.length) {
+        if (!wrap) break;
+        pos %= order.length;
+      }
+      const idx = order[pos];
+      const candidate = playlist.items[idx];
+      if (candidate && !unavailableItemIds.has(candidate.id)) return idx;
+    }
+    return -1;
+  }
+
+  function skipToNextPlayableAfterError() {
+    const playlist = getActivePlaylist();
+    const failed = getCurrentQueueItem();
+    if (failed) unavailableItemIds.add(failed.id);
+    if (!playlist || !playlist.items.length) return;
+
+    if (unavailableItemIds.size >= playlist.items.length) {
+      // Spec #13 — every item in the playlist has now failed at least
+      // once this pass; stop instead of cycling through errors again.
+      showPlaylistFinished({ reason: "No playable videos remain in this playlist." });
+      return;
+    }
+    const nextIdx = findNextPlayableIndex(playbackState.currentIndex);
+    if (nextIdx === -1) {
+      showPlaylistFinished({ reason: "No playable videos remain in this playlist." });
+      return;
+    }
+    showStatus("That video isn't available — skipping to the next one…", 2500);
+    playPlaylistItem(playlist.id, nextIdx);
+  }
+
+  /* ---- "Playlist finished" state (spec #3) --------------------------- */
+  function showPlaylistFinished({ reason } = {}) {
+    playlistFinished = true;
+    stopProgressTicker();
+    if (reason) showStatus(reason, 6000);
+    updateTransportUI();
+  }
+
+  function replayActivePlaylist() {
+    const pid = playbackState.activePlaylistId;
+    if (!pid) return;
+    startPlaylist(pid, { fromIndex: 0 });
+  }
+
+  /* ---- Previous-with-threshold (spec #6) ----------------------------- */
+  function handlePreviousClick() {
+    if (playlistFinished) {
+      replayActivePlaylist();
+      return;
+    }
+    let currentTime = 0;
+    try {
+      currentTime = player ? player.getCurrentTime() : 0;
+    } catch {
+      currentTime = 0;
+    }
+    if (currentTime > 3) {
+      try {
+        player.seekTo(0, true);
+      } catch {
+        /* non-fatal */
+      }
+      return;
+    }
+    playPreviousInQueue();
+  }
+
+  function handleNextClick() {
+    if (playlistFinished) {
+      replayActivePlaylist();
+      return;
+    }
+    if (!playNextInQueue()) {
+      // Nothing to advance to (repeat=off, already at the end) — same
+      // ended state the natural ENDED event would have shown.
+      showPlaylistFinished();
+    }
+  }
+
+  function handlePlayPauseClick() {
+    if (!player) return;
+    if (playlistFinished) {
+      replayActivePlaylist();
+      return;
+    }
+    if (playbackBlocked) {
+      try {
+        player.playVideo();
+      } catch {
+        /* non-fatal */
+      }
+      return;
+    }
+    let state = null;
+    try {
+      state = player.getPlayerState();
+    } catch {
+      return;
+    }
+    try {
+      if (state === window.YT.PlayerState.PLAYING || state === window.YT.PlayerState.BUFFERING) player.pauseVideo();
+      else player.playVideo();
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  function handleRepeatClick() {
+    const order = ["off", "playlist", "one"];
+    const next = order[(order.indexOf(playbackState.repeatMode) + 1) % order.length];
+    setRepeatMode(next);
+    updateTransportUI();
+    // Keep the playlist-detail view's own repeat button (if open) in
+    // sync — same control, two places it can be toggled from.
+    if (currentBodyView === "playlist-detail") renderPlaylistDetail();
+  }
+
+  // Playlist Part 4B (spec #9/#10) — Shuffle toggle for the compact
+  // transport bar. Calls straight into Part 1/4A's setShuffleEnabled(),
+  // exactly like the playlist-detail view's own Shuffle button already
+  // does (see renderPlaylistDetail() above) — no second shuffle
+  // implementation, just a second place to flip the same state.
+  function handleShuffleClick() {
+    setShuffleEnabled(!playbackState.shuffleEnabled);
+    updateTransportUI();
+    // Keep the playlist-detail view's own shuffle button (if open) in
+    // sync — same control, two places it can be toggled from.
+    if (currentBodyView === "playlist-detail") renderPlaylistDetail();
+  }
+
+  /* ---- Transport bar DOM (built once, lazily) ------------------------ */
+  let transportBarEl = null;
+  function ensureTransportBar() {
+    if (transportBarEl || !body) return transportBarEl;
+    transportBarEl = document.createElement("div");
+    transportBarEl.id = "yw-transport-bar";
+    transportBarEl.className = "yw-transport-bar hidden";
+    transportBarEl.innerHTML = `
+      <div class="yw-np-info">
+        <div class="yw-np-title" id="yw-np-title"></div>
+        <div class="yw-np-sub" id="yw-np-sub"></div>
+      </div>
+      <div class="yw-np-progress-row">
+        <span class="yw-np-time" id="yw-np-elapsed">0:00</span>
+        <div class="yw-np-progress-track" id="yw-np-progress-track">
+          <div class="yw-np-progress-fill" id="yw-np-progress-fill"></div>
+        </div>
+        <span class="yw-np-time" id="yw-np-duration">0:00</span>
+      </div>
+      <div class="yw-np-controls">
+        <button type="button" class="yw-transport-btn yw-transport-shuffle-btn" id="yw-transport-shuffle-btn" title="Shuffle" aria-label="Shuffle" aria-pressed="false">🔀</button>
+        <button type="button" class="yw-transport-btn" id="yw-transport-prev-btn" title="Previous" aria-label="Previous">⏮</button>
+        <button type="button" class="yw-transport-btn yw-transport-btn-main" id="yw-transport-playpause-btn" title="Play/Pause" aria-label="Play or pause">⏸</button>
+        <button type="button" class="yw-transport-btn" id="yw-transport-next-btn" title="Next" aria-label="Next">⏭</button>
+        <button type="button" class="yw-transport-btn yw-transport-repeat-btn" id="yw-transport-repeat-btn" title="Repeat" aria-label="Change repeat mode">🔁</button>
+      </div>
+    `;
+    // Mounted on #yw-body (not #yw-video-wrap) so it stays visible — and
+    // playlist controls stay reachable — regardless of which content
+    // panel (video / results / playlist library / playlist detail) is
+    // currently shown. This is what makes "Playlist-focused" layout mode
+    // (see layoutMode below) actually usable: browsing the playlist list
+    // doesn't lose the transport controls the way it would if this were
+    // still a child of #yw-video-wrap, which setView() hides outright.
+    body.appendChild(transportBarEl);
+    transportBarEl.querySelector("#yw-transport-shuffle-btn").addEventListener("click", handleShuffleClick);
+    transportBarEl.querySelector("#yw-transport-prev-btn").addEventListener("click", handlePreviousClick);
+    transportBarEl.querySelector("#yw-transport-next-btn").addEventListener("click", handleNextClick);
+    transportBarEl.querySelector("#yw-transport-playpause-btn").addEventListener("click", handlePlayPauseClick);
+    transportBarEl.querySelector("#yw-transport-repeat-btn").addEventListener("click", handleRepeatClick);
+    transportBarEl.querySelector("#yw-np-progress-track").addEventListener("click", (e) => {
+      // Seeking is a nice-to-have on top of spec #8's "display progress
+      // where practical" — reuses the already-known duration, no new API
+      // call, and is a plain player.seekTo(), same category as Previous's
+      // seekTo(0) above.
+      if (!player || playbackBlocked || playlistFinished) return;
+      let duration = 0;
+      try {
+        duration = player.getDuration();
+      } catch {
+        return;
+      }
+      if (!duration) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+      try {
+        player.seekTo(duration * ratio, true);
+      } catch {
+        /* non-fatal */
+      }
+    });
+    return transportBarEl;
+  }
+
+  function hideTransportBar() {
+    if (transportBarEl) transportBarEl.classList.add("hidden");
+    body?.classList.remove("yw-has-transport-bar");
+  }
+
+  // True only when the currently-loaded video IS the active playlist's
+  // current queue item — a standalone video (or a playlist item played
+  // once but since superseded) never shows the transport bar. See
+  // PLAYLIST PART 3 NOTES: "THE TRANSPORT BAR IS PLAYLIST-ONLY".
+  function isPlayingActivePlaylistItem() {
+    return !!(playbackState.activePlaylistId && currentVideoId && getCurrentQueueItem()?.videoId === currentVideoId);
+  }
+
+  function updateTransportUI() {
+    if (!body) return;
+    if (!isPlayingActivePlaylistItem()) {
+      hideTransportBar();
+      return;
+    }
+    const bar = ensureTransportBar();
+    if (!bar) return;
+    const playlist = getActivePlaylist();
+    const item = getCurrentQueueItem();
+    if (!playlist || !item) {
+      hideTransportBar();
+      return;
+    }
+    bar.classList.remove("hidden");
+    body.classList.add("yw-has-transport-bar");
+
+    const titleEl2 = bar.querySelector("#yw-np-title");
+    const subEl = bar.querySelector("#yw-np-sub");
+    // Spec #7 — graceful fallback with no extra API call: currentVideoMeta
+    // already carries whatever the playlist item itself stored, and
+    // loadVideo() already defaults an empty title to "YouTube Video".
+    const title = (currentVideoMeta && currentVideoMeta.title) || item.title || "YouTube video";
+    const channel = (currentVideoMeta && currentVideoMeta.channelTitle) || item.channelTitle || "";
+    if (titleEl2) titleEl2.textContent = title;
+    if (subEl) {
+      const trackPos = `Track ${playbackState.currentIndex + 1} of ${playlist.items.length}`;
+      subEl.textContent = [channel, playlist.name, trackPos].filter(Boolean).join(" • ");
+    }
+
+    const shuffleBtn = bar.querySelector("#yw-transport-shuffle-btn");
+    const prevBtn = bar.querySelector("#yw-transport-prev-btn");
+    const nextBtn = bar.querySelector("#yw-transport-next-btn");
+    const playPauseBtn = bar.querySelector("#yw-transport-playpause-btn");
+    const repeatBtn = bar.querySelector("#yw-transport-repeat-btn");
+
+    if (playlistFinished) {
+      bar.classList.add("yw-transport-ended");
+      if (playPauseBtn) {
+        playPauseBtn.textContent = "↺";
+        playPauseBtn.title = "Replay playlist";
+        playPauseBtn.setAttribute("aria-label", "Replay playlist");
+      }
+      if (subEl) subEl.textContent = `Playlist finished • ${playlist.name}`;
+    } else {
+      bar.classList.remove("yw-transport-ended");
+      if (playPauseBtn) {
+        let state = null;
+        try {
+          state = player ? player.getPlayerState() : null;
+        } catch {
+          state = null;
+        }
+        const showPause = !playbackBlocked && window.YT && (state === window.YT.PlayerState.PLAYING || state === window.YT.PlayerState.BUFFERING);
+        playPauseBtn.textContent = playbackBlocked ? "▶" : showPause ? "⏸" : "▶";
+        playPauseBtn.title = playbackBlocked ? "Autoplay was blocked — click to play" : showPause ? "Pause" : "Play";
+        playPauseBtn.setAttribute("aria-label", playPauseBtn.title);
+      }
+    }
+    // Previous is always available while a playlist track is loaded
+    // (it either restarts the current track or moves back — see
+    // handlePreviousClick); Next is disabled only when there's
+    // genuinely nowhere to go (repeat=off, last item, nothing queued).
+    if (prevBtn) prevBtn.disabled = false;
+    if (nextBtn) nextBtn.disabled = !playlistFinished && getNextQueueIndex() === -1 && !playbackState.upNext.length;
+
+    if (repeatBtn) {
+      const mode = playbackState.repeatMode;
+      repeatBtn.textContent = mode === "one" ? "🔂" : "🔁";
+      repeatBtn.classList.toggle("yw-transport-repeat-active", mode !== "off");
+      repeatBtn.title = mode === "one" ? "Repeat: one song — click to change" : mode === "playlist" ? "Repeat: whole playlist — click to change" : "Repeat: off — click to change";
+      repeatBtn.setAttribute("aria-label", repeatBtn.title);
+    }
+
+    // Playlist Part 4B (spec #9/#10/#21) — active state is never color-only:
+    // the button also gets the accent "active" treatment shared with the
+    // repeat button, plus aria-pressed and a dynamic label/title.
+    if (shuffleBtn) {
+      const on = playbackState.shuffleEnabled;
+      shuffleBtn.classList.toggle("yw-transport-shuffle-active", on);
+      shuffleBtn.setAttribute("aria-pressed", String(on));
+      shuffleBtn.title = on ? "Shuffle: on — click to turn off" : "Shuffle: off — click to turn on";
+      shuffleBtn.setAttribute("aria-label", shuffleBtn.title);
+    }
+
+    updateProgressUI();
+  }
+
+  function updateProgressUI() {
+    if (!transportBarEl || transportBarEl.classList.contains("hidden")) return;
+    const fill = transportBarEl.querySelector("#yw-np-progress-fill");
+    const elapsedEl = transportBarEl.querySelector("#yw-np-elapsed");
+    const durationEl = transportBarEl.querySelector("#yw-np-duration");
+    if (!fill || !elapsedEl || !durationEl) return;
+    if (!player || playlistFinished) {
+      fill.style.width = "0%";
+      elapsedEl.textContent = "0:00";
+      durationEl.textContent = "0:00";
+      return;
+    }
+    let current = 0;
+    let duration = 0;
+    try {
+      current = player.getCurrentTime() || 0;
+      duration = player.getDuration() || 0;
+    } catch {
+      return;
+    }
+    fill.style.width = `${duration ? Math.min(100, (current / duration) * 100) : 0}%`;
+    elapsedEl.textContent = mmss(current);
+    durationEl.textContent = mmss(duration);
   }
 
   /* ----------------------------------------------------------------------
@@ -1745,16 +5010,27 @@
     const published = formatPublished(row.publishedAt);
     if (published) metaBits.push(`<span>${escapeHtml(published)}</span>`);
     const desc = truncate(row.description, 130);
+    // Playlist Part 2B1 — the card itself is untouched (still the same
+    // full play button); a sibling "+ Add" pill is wrapped alongside it
+    // in `.yw-result-row` rather than redesigning the card, per spec.
+    // The whole thing never re-fetches anything: every field the add
+    // button needs (videoId/title/channelTitle/thumb/duration) is
+    // already sitting in `row`, from this same already-completed search.
     return `
-      <button type="button" class="yw-result-item" data-video-id="${escapeHtml(row.id)}">
-        <img class="yw-result-thumb" src="${escapeHtml(row.thumb)}" alt="" loading="lazy" draggable="false">
-        <span class="yw-result-text">
-          <span class="yw-result-title">${escapeHtml(row.title)}</span>
-          <span class="yw-result-channel">${escapeHtml(row.channelTitle)}</span>
-          <span class="yw-result-meta">${metaBits.join('<span class="yw-result-meta-dot">·</span>')}</span>
-          ${desc ? `<span class="yw-result-desc">${escapeHtml(desc)}</span>` : ""}
-        </span>
-      </button>
+      <div class="yw-result-row">
+        <button type="button" class="yw-result-item" data-video-id="${escapeHtml(row.id)}">
+          <img class="yw-result-thumb" src="${escapeHtml(row.thumb)}" alt="" loading="lazy" draggable="false">
+          <span class="yw-result-text">
+            <span class="yw-result-title">${escapeHtml(row.title)}</span>
+            <span class="yw-result-channel">${escapeHtml(row.channelTitle)}</span>
+            <span class="yw-result-meta">${metaBits.join('<span class="yw-result-meta-dot">·</span>')}</span>
+            ${desc ? `<span class="yw-result-desc">${escapeHtml(desc)}</span>` : ""}
+          </span>
+        </button>
+        <div class="yw-result-add-wrap">
+          <button type="button" class="yw-add-btn" data-add-video-id="${escapeHtml(row.id)}" aria-haspopup="true" aria-expanded="false" aria-label="Add ${escapeHtml(row.title)} to a playlist">+ Add</button>
+        </div>
+      </div>
     `;
   }
 
@@ -1807,7 +5083,26 @@
     resultsEl.querySelectorAll(".yw-result-item").forEach((btn) => {
       btn.addEventListener("click", () => {
         lastResultsContext = "search";
-        loadVideo(btn.dataset.videoId);
+        // Playlist Part 2B1 — pass along whatever's already known about
+        // this row (title/channel/thumb/duration) so the current-video
+        // "+ Add to Playlist" button has real metadata to work with too,
+        // without any extra request (searchState.items is the same list
+        // already rendered here).
+        const row = searchState.items.find((r) => r.id === btn.dataset.videoId);
+        loadVideo(btn.dataset.videoId, row ? { meta: row } : undefined);
+      });
+    });
+    // Playlist Part 2B1 — "+ Add" never touches the network: `row` here
+    // is the exact same already-fetched search-result item the card
+    // above renders from, just reshaped to the {videoId, ...} field
+    // names addItemToPlaylist()/playlist items use (see
+    // playlistSourceFromResultRow()).
+    resultsEl.querySelectorAll("[data-add-video-id]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const row = searchState.items.find((r) => r.id === btn.dataset.addVideoId);
+        if (!row) return;
+        openAddToPlaylistMenu(btn, playlistSourceFromResultRow(row));
       });
     });
     document.getElementById("yw-results-clear-inline")?.addEventListener("click", () => {
@@ -3214,9 +6509,35 @@
     showStatus(loopEnabled ? "Looping this video." : "Loop turned off.", 2000);
   });
 
+  // Part 6 — layout mode toggle. Display-only: never touches playback,
+  // the saved playlist, or playbackState. If the mode just switched to
+  // "playlist" and a playlist track is already playing, jump straight to
+  // that playlist's detail view so the effect is immediately visible
+  // rather than only applying on the *next* track change.
+  layoutToggleBtn?.addEventListener("click", () => {
+    layoutMode = layoutMode === "player" ? "playlist" : "player";
+    saveJson(YW_LAYOUT_MODE_STORAGE, layoutMode);
+    reflectLayoutModeUI();
+    if (layoutMode === "playlist" && playbackState.activePlaylistId) {
+      openPlaylistDetail(playbackState.activePlaylistId);
+    }
+    showStatus(layoutMode === "playlist" ? "Playlist-focused layout." : "Player-focused layout.", 2000);
+  });
+
   openExternalBtn?.addEventListener("click", () => {
     if (!currentVideoId) return;
     window.open(`https://www.youtube.com/watch?v=${encodeURIComponent(currentVideoId)}`, "_blank", "noopener,noreferrer");
+  });
+
+  // Playlist Part 2B1 — "+ Add to Playlist" for the current video (spec
+  // #8). Uses currentVideoMeta exactly as loadVideo() last set it —
+  // whether that came from a search result, a playlist item, or a bare
+  // pasted ID/URL (fallback title "YouTube Video", per spec #9) — so
+  // this never performs a search or any other API call.
+  addCurrentBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!currentVideoId || !currentVideoMeta) return;
+    openAddToPlaylistMenu(addCurrentBtn, currentVideoMeta);
   });
 
   /* ----------------------------------------------------------------------
@@ -3371,6 +6692,43 @@
     search,
     isOpen,
     getApiUsage: () => YTApi.getUsageSnapshot(),
+    // Playlist Part 1 — data/CRUD + playback-queue entry points for
+    // later UI parts (and manual console testing) to build on. See
+    // PLAYLIST FOUNDATION NOTES near the top of this file.
+    playlists: {
+      getAll: getAllPlaylists,
+      get: getPlaylist,
+      create: createPlaylist,
+      rename: renamePlaylist,
+      remove: deletePlaylist,
+      addItem: addItemToPlaylist,
+      removeItem: removeItemFromPlaylist,
+      reorderItem: reorderPlaylistItem,
+    },
+    playback: {
+      getState: () => ({ ...playbackState }),
+      getActivePlaylist,
+      getCurrentItem: getCurrentQueueItem,
+      buildQueue: buildPlaybackQueue,
+      play: playPlaylistItem,
+      start: startPlaylist,
+      stop: stopPlaylist,
+      next: playNextInQueue,
+      previous: playPreviousInQueue,
+      setRepeatMode,
+      setShuffleEnabled,
+      // Playlist Part 4A additions — see PLAYLIST PART 4A NOTES.
+      reshuffle: reshuffleActivePlaylist,
+      getShuffleHistory,
+    },
+    // Playlist Part 2A — UI entry points (mainly for manual console
+    // testing; the header 🎵 button and in-window clicks are the normal
+    // path). No new state — these just call the same render/CRUD
+    // functions the UI itself uses.
+    playlistUI: {
+      openLibrary: openPlaylistLibrary,
+      openDetail: openPlaylistDetail,
+    },
   };
 
   /* ----------------------------------------------------------------------
@@ -3382,6 +6740,7 @@
   (function initPersisted() {
     restoreState();
     reflectLoopUI();
+    reflectLayoutModeUI();
     reflectOpenExternalUI();
     reflectQuotaUI();
     reflectTabsUI();
