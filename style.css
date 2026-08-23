@@ -2902,10 +2902,21 @@ tbody tr:hover {
 .switch-track {
   position: absolute;
   inset: 0;
-  background: var(--border);
+  /* --accent-color-soft/-pale are both DERIVED from whatever hue Smart/
+     Custom Accent last computed — their own formulas independently cut
+     saturation (soft: sat-15, pale: sat-25) on top of raising lightness,
+     so on a low-saturation extracted hue (common with a naturalistic
+     wallpaper photo) even "soft" can land close to white — which is
+     exactly why this kept rendering pale no matter which token was
+     used. Mixing var(--accent-color) itself (full saturation, whatever
+     it currently is) directly with white at a fixed ratio guarantees a
+     visibly-tinted "off" pill regardless of how washed-out the app's own
+     precomputed soft/pale variants happen to be for the current hue. */
+  background: color-mix(in srgb, var(--accent-color) 55%, white);
+  border: 1px solid var(--accent-color-deep);
   border-radius: 999px;
   box-shadow: inset 0 1px 2px rgba(22, 63, 99, 0.15);
-  transition: background 0.25s ease;
+  transition: background 0.25s ease, border-color 0.25s ease;
 }
 
 .switch-thumb {
@@ -2922,6 +2933,7 @@ tbody tr:hover {
 
 .switch input:checked ~ .switch-track {
   background: linear-gradient(135deg, var(--button-highlight-bg), var(--accent-color-deep));
+  border-color: var(--accent-color-deep);
 }
 
 .switch input:checked ~ .switch-track .switch-thumb {
@@ -3851,12 +3863,24 @@ body.fish-hide-pufferfish .fish-particle.species-pufferfish {
 
 /* The switch track is much smaller (44x26), so its highlight dots and
    cap glow are scaled down to match — the same recipe would look like
-   one big smear at that size. */
+   one big smear at that size.
+
+   These highlights are also DAMPENED (wrapped in an extra color-mix
+   cutting their strength roughly in half) relative to the shared
+   --bubble-hl1/-hl2/-hl1-mid tokens every other bubbly surface uses at
+   full strength. On a track this small, two full-strength highlight
+   blooms plus the top cap gradient cover most of its 26px height — so
+   at typical-to-high Liquid Interface Tint/Alpha slider settings the
+   toggle read as an almost-solid white/glassy pill with only a sliver
+   of the accent-tinted fill (set below) showing at the edges, which is
+   exactly the "toggle looks white instead of accent-colored" report.
+   Dampening keeps a glossy highlight (still reads as glass) without it
+   overpowering the accent color it's sitting on top of. */
 body.bubbly-mode .switch-track {
   --bubble-core:
-    radial-gradient(circle 7px at 26% 32%, var(--bubble-hl1) 0%, var(--bubble-hl1-mid) 55%, transparent 100%),
-    radial-gradient(circle 5px at 62% 26%, var(--bubble-hl2) 0%, transparent 100%),
-    linear-gradient(180deg, var(--bubble-cap, var(--bubble-hl2)) 0%, transparent 30%),
+    radial-gradient(circle 7px at 26% 32%, color-mix(in srgb, var(--bubble-hl1) 50%, transparent) 0%, color-mix(in srgb, var(--bubble-hl1-mid) 50%, transparent) 55%, transparent 100%),
+    radial-gradient(circle 5px at 62% 26%, color-mix(in srgb, var(--bubble-hl2) 50%, transparent) 0%, transparent 100%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bubble-cap, var(--bubble-hl2)) 45%, transparent) 0%, transparent 30%),
     var(--bubble-base);
 
   position: relative;
@@ -4449,16 +4473,48 @@ body.bubbly-mode .switch-track {
   position: relative;
   overflow: hidden;
   isolation: isolate;
-  background: var(--bubble-core);
+  /* Same root cause as the non-bubbly OFF state above: --accent-color-
+     soft/-pale are derived from whatever hue got extracted, cutting
+     saturation further on top of raising lightness — on a low-saturation
+     wallpaper-sampled hue that lands close to white regardless of which
+     token is used, glass highlight layered on top or not. Mixing
+     var(--accent-color) directly with white at a fixed ratio guarantees
+     a visible tint under the glass highlight instead of depending on the
+     app's own precomputed variant for the current hue.
+     Raised from 55%->72% accent: even with --bubble-core dampened above,
+     a 55/45 mix still read as pale/whitish once the highlight blooms and
+     the glass border sat on top of it — 72% keeps the "off" pill clearly
+     accent-tinted rather than a near-white pill with an accent edge. */
+  background: var(--bubble-core), color-mix(in srgb, var(--accent-color) 72%, white);
+  border: 1px solid var(--accent-color-deep);
   box-shadow: inset 0 1px 3px var(--bubble-ring-dark), inset 0 -1px 0 var(--bubble-ring-bright);
 }
 
 body.bubbly-mode .switch input:checked ~ .switch-track {
+  /* Was hardcoded to var(--blue)/var(--blue-deep) — that ignored Custom
+     Accent Color entirely, so with Liquid Interface (bubbly-mode) on,
+     every checked toggle track fell back to the app's fixed default
+     blue instead of the chosen accent, no matter what color was picked.
+     --button-highlight-bg/--accent-color-deep are the same accent-family
+     vars the non-bubbly base rule above (.switch input:checked ~
+     .switch-track) already uses, so bubbly and non-bubbly toggles now
+     track the same accent color consistently.
+
+     The gradient's own opacity used to be tied to --glass-alpha (calc(...
+     * 0.5)) — at the slider's typical-to-high range that put the ON
+     gradient at ~25-50% opacity, so the mostly-transparent --bubble-core
+     underneath it let whatever was behind the toggle (often a light
+     wallpaper photo) show through and read as white/pale instead of
+     accent-colored — the exact "ON toggle looks white" report. The
+     gradient is now a fixed, mostly-opaque accent tint so a checked
+     toggle stays clearly accent-colored regardless of the Liquid
+     Interface transparency setting; --bubble-core (dampened above) still
+     rides on top for the glossy highlight. */
   background:
     var(--bubble-core),
     linear-gradient(135deg,
-      color-mix(in srgb, var(--blue) calc(var(--glass-alpha) * 0.5), transparent),
-      color-mix(in srgb, var(--blue-deep) calc(var(--glass-alpha) * 0.5), transparent));
+      color-mix(in srgb, var(--button-highlight-bg) 92%, transparent),
+      color-mix(in srgb, var(--accent-color-deep) 92%, transparent));
 }
 
 body.bubbly-mode .switch-thumb {
