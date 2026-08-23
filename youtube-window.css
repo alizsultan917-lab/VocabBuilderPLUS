@@ -52,8 +52,8 @@
   left: auto;
   width: 420px;
   height: 320px;
-  min-width: 320px;
-  min-height: 220px;
+  min-width: 180px;
+  min-height: 120px;
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 32px);
   z-index: 98;
@@ -273,15 +273,43 @@ body.has-wallpaper .yw-header {
   }
 }
 
-/* The header was already a tight fit at the 320px minimum window width
-   with 7 action buttons; the Part 6 layout-mode toggle (#yw-layout-
+/* The header was already a tight fit at the old 320px minimum window
+   width with 7 action buttons; the Part 6 layout-mode toggle (#yw-layout-
    toggle-btn) is a display-preference nicety, not a core control like
    Close/Hide/Settings/Playlists, so it steps aside below 400px rather
    than risking those getting clipped by the window's own overflow:hidden
    (see the .yw-settings-panel comment above for why that clipping is a
-   real, previously-hit issue in this file). */
+   real, previously-hit issue in this file). Now that the window can go
+   down to 180px wide (see YW_MIN_WIDTH), the same idea continues in the
+   breakpoints just below this one, thinning out the rest of the row. */
 @media (max-width: 400px) {
   #yw-layout-toggle-btn {
+    display: none;
+  }
+}
+
+/* The window's minimum width was lowered from 320px to 180px (see
+   YW_MIN_WIDTH in youtube-window.js) so it can be shrunk much further
+   than the header row above was ever designed to fit. Rather than let
+   .icon-btn's fixed 24px width clip silently against the window's own
+   overflow:hidden, the same "step aside" pattern used for the layout
+   toggle above continues down through the rest of the non-essential
+   buttons, in ascending order of how much people actually reach for
+   them day-to-day. Close/Hide/Settings never disappear. */
+@media (max-width: 340px) {
+  #yw-loop-btn {
+    display: none;
+  }
+}
+@media (max-width: 300px) {
+  #yw-open-external-btn,
+  #yw-add-current-btn {
+    display: none;
+  }
+}
+@media (max-width: 260px) {
+  #yw-mute-btn,
+  #yw-playlists-btn {
     display: none;
   }
 }

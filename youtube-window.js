@@ -11,7 +11,7 @@
        size persisted to localStorage)
      - a tiny public surface other code (or the console) can call into:
        window.YouTubeWindow = { open, close, hide, show, toggle,
-       loadVideo, search, isOpen }
+       loadVideo, search, isOpen, skipAd, transport: { previous, playPause, next } }
 
    WHY SEARCH NEEDS AN API KEY (AND WHY IT'S NOT AN IFRAME):
    YouTube's own watch/search/results pages send
@@ -1220,8 +1220,8 @@
   // See loadCompactSettings() below.
   const YW_COMPACT_STORAGE = "vocabRegister_youtubeCompactSettings";
 
-  const YW_MIN_WIDTH = 320;
-  const YW_MIN_HEIGHT = 220;
+  const YW_MIN_WIDTH = 180;
+  const YW_MIN_HEIGHT = 120;
   const YW_MAX_WIDTH = 900;
   const YW_MAX_HEIGHT = 700;
 
@@ -4877,6 +4877,39 @@
     }
   }
 
+  // 📺 Skip Ad — the app's "Skip YouTube Ad" shortcut (skipYoutubeAd in
+  // script.js's CUSTOMIZABLE KEYBOARD SHORTCUT SYSTEM). The Skip Ad
+  // button YouTube shows during an ad lives inside this player's own
+  // iframe — a genuinely different origin from the app's page, so
+  // script.js/this file can't reach into that iframe's DOM directly
+  // (the browser blocks cross-origin DOM access outright, try/catch or
+  // not). postMessage is the one channel that's allowed to cross that
+  // boundary: this posts straight to the iframe's own window, and the
+  // companion extension's content-youtube.js — injected into every
+  // youtube.com frame as of manifest.json's "all_frames": true, not
+  // just top-level tabs — is what's actually listening on the other
+  // side and does the real work of finding + clicking whatever Skip Ad
+  // button is currently showing. A silent no-op if there's no player
+  // yet, if getIframe() isn't available for some reason, if the
+  // extension isn't installed, or if no ad happens to be playing right
+  // now — there's nothing useful to show the person for any of those,
+  // same restraint as the transport handlers above.
+  function skipAd() {
+    if (!player) return;
+    let iframe = null;
+    try {
+      iframe = player.getIframe?.();
+    } catch {
+      iframe = null;
+    }
+    if (!iframe || !iframe.contentWindow) return;
+    try {
+      iframe.contentWindow.postMessage({ type: "VOCAB_SKIP_YOUTUBE_AD" }, "https://www.youtube.com");
+    } catch {
+      /* non-fatal — extension not installed, or the iframe isn't ready yet */
+    }
+  }
+
   function handleRepeatClick() {
     const order = ["off", "playlist", "one"];
     const next = order[(order.indexOf(playbackState.repeatMode) + 1) % order.length];
@@ -6969,7 +7002,7 @@
      RESIZE (bottom-right corner handle) — Pointer Events so mouse,
      trackpad, touch, and pen all work identically, same as the Map
      Window's resize handle. Sets width AND height directly, clamped to
-     the 320×220 – 900×700 box from the spec.
+     the 180×120 – 900×700 box from the spec.
   ---------------------------------------------------------------------- */
   (function initResize() {
     if (!resizeHandle) return;
@@ -7065,7 +7098,17 @@
     loadVideo,
     search,
     isOpen,
+    skipAd,
     getApiUsage: () => YTApi.getUsageSnapshot(),
+    // Exposed for script.js's CUSTOMIZABLE KEYBOARD SHORTCUT SYSTEM so
+    // the transport bar's Previous/Play-Pause/Next actions (the same
+    // handlers the transport bar's own buttons call) can be triggered
+    // by a mapped key, not just a click.
+    transport: {
+      previous: handlePreviousClick,
+      playPause: handlePlayPauseClick,
+      next: handleNextClick,
+    },
     // Playlist Part 1 — data/CRUD + playback-queue entry points for
     // later UI parts (and manual console testing) to build on. See
     // PLAYLIST FOUNDATION NOTES near the top of this file.

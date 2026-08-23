@@ -11433,7 +11433,9 @@ definitionsList.addEventListener("click", (e) => {
     // Toggles Dual-Bar Mode <-> Single-Bar Mode for the Page section —
     // same key mapped both ways, matching how every other toggle-style
     // action in this file is a single binding.
-    togglePageBarMode: ["F5"],
+    // (Moved off F5 — F5 is now the default for the YouTube Window's
+    // Play/Pause transport action below.)
+    togglePageBarMode: ["F9"],
 
     // Word Bar inline cursor navigation — only acts while the Word
     // Input Bar itself is actively focused (see the dispatcher below).
@@ -11452,16 +11454,21 @@ definitionsList.addEventListener("click", (e) => {
     playUs: ["BracketLeft"],
     playUk: ["BracketRight"],
 
-    toggleSettings: ["F1"],
-    quickSearch: ["F3"],
-    advancedPanel: ["F6"],
-    manualBackup: ["F9"],
-
     searchGemini: ["Quote"],
-    fetchAi: ["F2"],
     addEntry: ["Enter"],
     addManualDefinition: ["Semicolon"],
-    addManualImage: ["F4"],
+
+    // 📺 YouTube Window — transport + window-state actions. Previous/
+    // Play-Pause/Next mirror the floating window's own transport bar
+    // (the Previous / main Play-Pause / Next trio), so their defaults
+    // sit together on F4/F5/F6. Skip Ad, Close, and Hide have no
+    // default binding — set one from the sidebar if you want one.
+    skipYoutubeAd: [],
+    closeYoutubeWindow: [],
+    hideYoutubeWindow: [],
+    youtubePrevious: ["F4"],
+    youtubePlayPause: ["F5"],
+    youtubeNext: ["F6"],
 
     // 🎧 Vocabulary Audio Window — only fire while the master toggle
     // (isAudioWindowActive) is on, and only outside text-entry fields;
@@ -11478,17 +11485,10 @@ definitionsList.addEventListener("click", (e) => {
 
   // Rendering metadata for the sidebar — order here is display order.
   const SHORTCUT_FIELDS = [
-    { key: "toggleSettings", label: "Settings Panel Toggle (⌨️)", group: "Header Bar" },
-    { key: "quickSearch", label: "Quick Search View (🔍 Display)", group: "Header Bar" },
-    { key: "advancedPanel", label: "Advanced Control Panel (🎛️ Customize)", group: "Header Bar" },
-    { key: "manualBackup", label: "Manual Backup / Save Layout (💾 Storage)", group: "Header Bar" },
-
     { key: "searchGemini", label: "Search Gemini", group: "Main Actions" },
     { key: "restartGeminiTab", label: "Restart Gemini Tab (Close & Reopen)", group: "Main Actions" },
-    { key: "fetchAi", label: "Fetch with AI", group: "Main Actions" },
     { key: "addEntry", label: "Add Entry", group: "Main Actions" },
     { key: "addManualDefinition", label: "Add Manual Definition", group: "Main Actions" },
-    { key: "addManualImage", label: "Add Manual Image", group: "Main Actions" },
 
     { key: "playUs", label: "Play US Pronunciation", group: "Pronunciation" },
     { key: "playUk", label: "Play UK Pronunciation", group: "Pronunciation" },
@@ -11503,6 +11503,13 @@ definitionsList.addEventListener("click", (e) => {
     { key: "focusAppTab", label: "Return to App Tab", group: "Extension / Tabs" },
     { key: "focusYoutubeTab", label: "Focus YouTube Tab", group: "Extension / Tabs" },
     { key: "focusYoutubeSearch", label: "Focus YouTube Window Search Bar", group: "Extension / Tabs" },
+
+    { key: "skipYoutubeAd", label: "Skip YouTube Ad", group: "YouTube Window" },
+    { key: "closeYoutubeWindow", label: "Close YouTube Window", group: "YouTube Window" },
+    { key: "hideYoutubeWindow", label: "Hide YouTube Window", group: "YouTube Window" },
+    { key: "youtubePrevious", label: "Previous Track", group: "YouTube Window" },
+    { key: "youtubePlayPause", label: "Play / Pause", group: "YouTube Window" },
+    { key: "youtubeNext", label: "Next Track", group: "YouTube Window" },
 
     { key: "focusWordInput", label: "Focus Word Input Bar", group: "Focus & Cursor" },
     { key: "focusPageInput", label: "Focus Page Input Bar (From Page)", group: "Focus & Cursor" },
@@ -11619,6 +11626,12 @@ definitionsList.addEventListener("click", (e) => {
         if (saved[k]) merged.passThroughModifier = saved[k];
         return;
       }
+      // Only merge fields that still exist — drops stale bindings left
+      // over from a field that's since been removed from the app (e.g.
+      // an old save's "advancedPanel": ["F6"]), so a retired field can
+      // never keep squatting on a key another action has since been
+      // given as its default.
+      if (!(k in merged)) return;
       merged[k] = normalizeCodes(saved[k]);
     });
     return merged;
@@ -11678,14 +11691,16 @@ definitionsList.addEventListener("click", (e) => {
 
   // Tells the companion extension (if installed) which keys currently
   // mean "focus Gemini tab" / "return to app tab" / "focus YouTube
-  // search bar", so content-gemini.js can listen for the *same* "return
-  // to app tab" key while you're sitting on the Gemini tab itself, and
-  // content-youtube.js can listen for the *same* "focus YouTube search
-  // bar" key while you're sitting on a real youtube.com tab — see
-  // background.js / bridge-app.js for the relay, and content-gemini.js /
-  // content-youtube.js for where each is consumed.
+  // search bar" / "skip YouTube ad", so content-gemini.js can listen for
+  // the *same* "return to app tab" key while you're sitting on the
+  // Gemini tab itself, and content-youtube.js can listen for the *same*
+  // "focus YouTube search bar" / "skip ad" keys while you're sitting on
+  // a real youtube.com tab (or, for Skip Ad, inside the app's own
+  // embedded YouTube Window player — see skipAd() in youtube-window.js)
+  // — see background.js / bridge-app.js for the relay, and
+  // content-gemini.js / content-youtube.js for where each is consumed.
   function syncTabSwitchKeysToExtension() {
-    // These three fields are expected to stay single-key bindings for
+    // These four fields are expected to stay single-key bindings for
     // the extension bridge to make sense; if someone rebinds any of
     // them to a two-key chord, only the first key is relayed.
     window.postMessage(
@@ -11694,6 +11709,7 @@ definitionsList.addEventListener("click", (e) => {
         focusGeminiKey: shortcutConfig.focusGeminiTab?.[0] || null,
         focusAppKey: shortcutConfig.focusAppTab?.[0] || null,
         youtubeSearchKey: shortcutConfig.focusYoutubeSearch?.[0] || null,
+        skipAdKey: shortcutConfig.skipYoutubeAd?.[0] || null,
       },
       window.location.origin
     );
@@ -12004,17 +12020,11 @@ definitionsList.addEventListener("click", (e) => {
   function applyShortcutTitles() {
     const targets = [
       [document.getElementById("entry-form-submit-btn"), "addEntry", "Add Entry"],
-      [aiFetchBtn, "fetchAi", "Fetch with AI"],
       [typeof searchGeminiBtn !== "undefined" ? searchGeminiBtn : null, "searchGemini", "Search Gemini"],
       [typeof restartGeminiTabBtn !== "undefined" ? restartGeminiTabBtn : null, "restartGeminiTab", "Restart Gemini Tab"],
       [addDefinitionBtn, "addManualDefinition", "Add this definition"],
-      [addImageBtn, "addManualImage", "Add this image"],
       [pronUsBtn, "playUs", "Play American pronunciation"],
       [pronUkBtn, "playUk", "Play British pronunciation"],
-      [shortcutsToggleBtn, "toggleSettings", "Keyboard Shortcuts"],
-      [displayToggleBtn, "quickSearch", "Display settings"],
-      [customizeToggleBtn, "advancedPanel", "Customize layout"],
-      [storageToggleBtn, "manualBackup", "Storage settings"],
       [wordInput, "focusWordInput", "Word"],
       [pageInput, "focusPageInput", "Page No."],
       [typeof vawPlayUsBtn !== "undefined" ? vawPlayUsBtn : null, "audioTrigger", "Play US pronunciation"],
@@ -12022,6 +12032,15 @@ definitionsList.addEventListener("click", (e) => {
       [typeof vawPrevBtn !== "undefined" ? vawPrevBtn : null, "audioCyclePrev", "Previous word"],
       [typeof vawNextBtn !== "undefined" ? vawNextBtn : null, "audioCycleNext", "Next word"],
       [typeof vawDeleteBtn !== "undefined" ? vawDeleteBtn : null, "vawDelete", "Remove this word from the Audio Window"],
+      // YouTube Window controls — looked up live (rather than cached at
+      // module load) since the transport bar (Prev/Play-Pause/Next) is
+      // built lazily on first use and won't exist in the DOM yet the
+      // first time applyShortcutTitles() runs.
+      [document.getElementById("yw-close-btn"), "closeYoutubeWindow", "Close YouTube Window"],
+      [document.getElementById("yw-hide-btn"), "hideYoutubeWindow", "Hide YouTube Window"],
+      [document.getElementById("yw-transport-prev-btn"), "youtubePrevious", "Previous"],
+      [document.getElementById("yw-transport-playpause-btn"), "youtubePlayPause", "Play/Pause"],
+      [document.getElementById("yw-transport-next-btn"), "youtubeNext", "Next"],
     ];
     targets.forEach(([el, key, fallback]) => {
       if (!el) return;
@@ -12232,26 +12251,6 @@ definitionsList.addEventListener("click", (e) => {
   // generic chord match below so neither path duplicates this logic.
   function runAction(action, e) {
     switch (action) {
-      case "toggleSettings":
-        e.preventDefault();
-        toggleSidebar();
-        break;
-
-      case "quickSearch":
-        e.preventDefault();
-        displayToggleBtn?.click();
-        break;
-
-      case "advancedPanel":
-        e.preventDefault();
-        customizeToggleBtn?.click();
-        break;
-
-      case "manualBackup":
-        e.preventDefault();
-        storageToggleBtn?.click();
-        break;
-
       case "searchGemini":
         e.preventDefault();
         if (typeof searchGeminiBtn !== "undefined") searchGeminiBtn?.click();
@@ -12260,11 +12259,6 @@ definitionsList.addEventListener("click", (e) => {
       case "restartGeminiTab":
         e.preventDefault();
         if (typeof restartGeminiTabBtn !== "undefined") restartGeminiTabBtn?.click();
-        break;
-
-      case "fetchAi":
-        e.preventDefault();
-        aiFetchBtn?.click();
         break;
 
       case "addEntry": {
@@ -12282,11 +12276,6 @@ definitionsList.addEventListener("click", (e) => {
       case "addManualDefinition":
         e.preventDefault();
         (editModal.classList.contains("hidden") ? addDefinitionBtn : editAddDefinitionBtn)?.click();
-        break;
-
-      case "addManualImage":
-        e.preventDefault();
-        (editModal.classList.contains("hidden") ? addImageBtn : editAddImageBtn)?.click();
         break;
 
       case "playUs":
@@ -12359,6 +12348,47 @@ definitionsList.addEventListener("click", (e) => {
         if (window.YouTubeWindow?.focusSearch) {
           window.YouTubeWindow.focusSearch();
         }
+        break;
+
+      // 📺 YouTube Window — Skip Ad lives inside the youtube.com iframe
+      // the floating YouTube Window embeds, which this page can't reach
+      // directly (cross-origin) — skipAd() in youtube-window.js posts a
+      // message straight into that iframe instead, where the companion
+      // extension's content-youtube.js (now injected into every
+      // youtube.com frame, not just top-level tabs — see manifest.json's
+      // "all_frames": true) picks it up and clicks the Skip Ad button
+      // locally. A silent no-op with the extension not installed, or
+      // with no ad currently showing. The same configured key also
+      // works directly on a real, standalone youtube.com tab — see the
+      // synced keydown listener in content-youtube.js.
+      case "skipYoutubeAd":
+        e.preventDefault();
+        window.YouTubeWindow?.skipAd?.();
+        break;
+
+      case "closeYoutubeWindow":
+        e.preventDefault();
+        window.YouTubeWindow?.close();
+        break;
+
+      case "hideYoutubeWindow":
+        e.preventDefault();
+        window.YouTubeWindow?.hide();
+        break;
+
+      case "youtubePrevious":
+        e.preventDefault();
+        window.YouTubeWindow?.transport?.previous();
+        break;
+
+      case "youtubePlayPause":
+        e.preventDefault();
+        window.YouTubeWindow?.transport?.playPause();
+        break;
+
+      case "youtubeNext":
+        e.preventDefault();
+        window.YouTubeWindow?.transport?.next();
         break;
 
       case "focusWordInput":
