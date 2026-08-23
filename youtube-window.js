@@ -5079,7 +5079,12 @@
   // extension isn't installed, or if no ad happens to be playing right
   // now — there's nothing useful to show the person for any of those,
   // same restraint as the transport handlers above.
+  // TEMP DEBUG: console.log calls below trace whether skipAd() is even
+  // being invoked, whether a player/iframe exists at the moment it's
+  // called, and whether the postMessage actually goes out — safe to
+  // remove once Skip Ad is confirmed working end-to-end.
   function skipAd() {
+    console.log("[VocabBridge:youtube-window] skipAd() called. player:", !!player);
     if (!player) return;
     let iframe = null;
     try {
@@ -5087,10 +5092,13 @@
     } catch {
       iframe = null;
     }
+    console.log("[VocabBridge:youtube-window] skipAd() iframe:", iframe, "contentWindow:", iframe && !!iframe.contentWindow);
     if (!iframe || !iframe.contentWindow) return;
     try {
       iframe.contentWindow.postMessage({ type: "VOCAB_SKIP_YOUTUBE_AD" }, "https://www.youtube.com");
-    } catch {
+      console.log("[VocabBridge:youtube-window] skipAd() postMessage sent to iframe.");
+    } catch (err) {
+      console.log("[VocabBridge:youtube-window] skipAd() postMessage threw:", err);
       /* non-fatal — extension not installed, or the iframe isn't ready yet */
     }
   }
