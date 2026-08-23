@@ -11408,6 +11408,21 @@ definitionsList.addEventListener("click", (e) => {
     focusAppTab: ["F8"],
     restartGeminiTab: ["Backquote"],
 
+    // Switches to the youtube.com tab the extension opened for a search
+    // (via the YouTube Window's 🌐 button) — a pure tab-switch, same
+    // shape as focusGeminiTab above. Never opens a new tab; if none is
+    // currently open, this is a no-op (see FOCUS_YOUTUBE_TAB in
+    // background.js).
+    focusYoutubeTab: ["Home"],
+
+    // Opens (or, if it's already open, just focuses) the floating
+    // YouTube Window's search bar. Also synced to the companion
+    // extension (see syncTabSwitchKeysToExtension below) so the same
+    // physical key jumps to YouTube's own search box when you're
+    // already sitting on a youtube.com tab — see focusYoutubeSearch in
+    // the dispatcher below and content-youtube.js's mirrored listener.
+    focusYoutubeSearch: ["F10"],
+
     // Focus mappings — jump straight into the Word / Page bars. Only
     // "From Page" had a dedicated binding before; "To Page" (the other
     // half of Dual-Bar Mode) is mapped the same way now.
@@ -11486,6 +11501,8 @@ definitionsList.addEventListener("click", (e) => {
 
     { key: "focusGeminiTab", label: "Focus Gemini Tab", group: "Extension / Tabs" },
     { key: "focusAppTab", label: "Return to App Tab", group: "Extension / Tabs" },
+    { key: "focusYoutubeTab", label: "Focus YouTube Tab", group: "Extension / Tabs" },
+    { key: "focusYoutubeSearch", label: "Focus YouTube Window Search Bar", group: "Extension / Tabs" },
 
     { key: "focusWordInput", label: "Focus Word Input Bar", group: "Focus & Cursor" },
     { key: "focusPageInput", label: "Focus Page Input Bar (From Page)", group: "Focus & Cursor" },
@@ -11660,19 +11677,23 @@ definitionsList.addEventListener("click", (e) => {
   }
 
   // Tells the companion extension (if installed) which keys currently
-  // mean "focus Gemini tab" / "return to app tab", so content-gemini.js
-  // can listen for the *same* "return to app tab" key while you're
-  // sitting on the Gemini tab itself — see background.js / bridge-app.js
-  // for the relay, and content-gemini.js for where it's consumed.
+  // mean "focus Gemini tab" / "return to app tab" / "focus YouTube
+  // search bar", so content-gemini.js can listen for the *same* "return
+  // to app tab" key while you're sitting on the Gemini tab itself, and
+  // content-youtube.js can listen for the *same* "focus YouTube search
+  // bar" key while you're sitting on a real youtube.com tab — see
+  // background.js / bridge-app.js for the relay, and content-gemini.js /
+  // content-youtube.js for where each is consumed.
   function syncTabSwitchKeysToExtension() {
-    // These two fields are expected to stay single-key bindings for the
-    // extension bridge to make sense; if someone rebinds either to a
-    // two-key chord, only the first key is relayed.
+    // These three fields are expected to stay single-key bindings for
+    // the extension bridge to make sense; if someone rebinds any of
+    // them to a two-key chord, only the first key is relayed.
     window.postMessage(
       {
         type: "SYNC_SHORTCUT_KEYS",
         focusGeminiKey: shortcutConfig.focusGeminiTab?.[0] || null,
         focusAppKey: shortcutConfig.focusAppTab?.[0] || null,
+        youtubeSearchKey: shortcutConfig.focusYoutubeSearch?.[0] || null,
       },
       window.location.origin
     );
@@ -12313,12 +12334,31 @@ definitionsList.addEventListener("click", (e) => {
         window.postMessage({ type: "FOCUS_GEMINI_TAB" }, window.location.origin);
         break;
 
+      case "focusYoutubeTab":
+        e.preventDefault();
+        window.postMessage({ type: "FOCUS_YOUTUBE_TAB" }, window.location.origin);
+        break;
+
       case "focusAppTab":
         // This tab (the app) already has focus when this fires, so
         // there's nothing to do here — the same binding is synced to
         // the extension (see syncTabSwitchKeysToExtension above) so
         // content-gemini.js can act on it while you're on Gemini's tab.
         e.preventDefault();
+        break;
+
+      case "focusYoutubeSearch":
+        // Opens the floating YouTube Window if it's closed (or just
+        // un-minimizes it if it's hidden-while-playing), then puts the
+        // text cursor in its search bar either way. The same binding is
+        // synced to the extension (see syncTabSwitchKeysToExtension
+        // above) so content-youtube.js can jump to YouTube's own search
+        // box with the same key while you're already on a youtube.com
+        // tab.
+        e.preventDefault();
+        if (window.YouTubeWindow?.focusSearch) {
+          window.YouTubeWindow.focusSearch();
+        }
         break;
 
       case "focusWordInput":

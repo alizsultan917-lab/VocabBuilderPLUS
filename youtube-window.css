@@ -32,6 +32,18 @@
   50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-color) 40%, transparent); }
 }
 
+/* The inline SVG YouTube logomark that replaced the ▶️ emoji in the
+   header toggle button (see index.html). The button itself is a small
+   circle (.storage-toggle-btn, 26x26px) — this just sizes/centers the
+   logo within it and adds a subtle shadow so the red rectangle reads
+   clearly against both the light and dark header background. */
+#youtube-window-toggle-btn .youtube-logo-icon {
+  width: 18px;
+  height: 13px;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
+}
+
 .vocab-youtube-window {
   position: fixed;
   bottom: 24px;
@@ -149,7 +161,17 @@ body.has-wallpaper .yw-header {
   align-items: center;
   gap: 0.5rem;
   flex: 1;
-  min-width: 0;
+  /* Just enough room for the drag grip itself, even if the play-dot and
+     title have to disappear entirely first — without this floor, flexbox
+     is free to shrink this whole group (grip included) straight to 0,
+     and since the grip itself has flex-shrink:0 it doesn't disappear
+     with the rest — it pokes out of its own now-zero-width box and
+     renders on TOP of the volume control next to it instead. overflow:
+     hidden is what actually stops that spillover; the min-width is what
+     keeps the grip from being squeezed away to nothing in the first
+     place, so there's always something to grab. */
+  min-width: 1.75rem;
+  overflow: hidden;
 }
 
 .yw-play-dot {
@@ -197,7 +219,13 @@ body.has-wallpaper .yw-header {
 .yw-volume-slider {
   -webkit-appearance: none;
   appearance: none;
-  width: 64px;
+  /* Shortened from 64px — at the window's default/minimum widths this
+     slider plus the header's icon-button row left no room for the drag
+     grip (see .yw-header-main above), which made the grip get squeezed
+     to nothing and visually overlap the mute button. Still plenty wide
+     to drag accurately; the header just isn't fighting itself for space
+     anymore. */
+  width: 40px;
   height: 4px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.35);
@@ -241,7 +269,7 @@ body.has-wallpaper .yw-header {
 
 @media (max-width: 480px) {
   .yw-volume-slider {
-    width: 44px;
+    width: 28px;
   }
 }
 

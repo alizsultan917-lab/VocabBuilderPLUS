@@ -2349,6 +2349,23 @@
     return hide();
   }
 
+  // FOCUS SEARCH — the "Focus YouTube Window Search Bar" keyboard
+  // shortcut's in-app half (see focusYoutubeSearch in script.js's
+  // CUSTOMIZABLE KEYBOARD SHORTCUT SYSTEM). Opens the window if it's
+  // closed, un-minimizes it if it's just hidden-while-playing, then puts
+  // the text cursor in the search bar either way — including when a
+  // video is already loaded, which open() alone doesn't do (it only
+  // auto-focuses the search bar when nothing's currently playing).
+  function focusSearch() {
+    if (!isActive) {
+      open();
+    } else if (isMinimized) {
+      show();
+    }
+    searchInput?.focus();
+    searchInput?.select?.();
+  }
+
   /* ----------------------------------------------------------------------
      LOAD VIDEO — plays a known video ID right here. Never needs an API
      key, since a specific video's /embed/ URL is public and always
@@ -6736,6 +6753,7 @@
     hide,
     show,
     toggle,
+    focusSearch,
     loadVideo,
     search,
     isOpen,
