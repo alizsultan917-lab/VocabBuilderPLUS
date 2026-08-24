@@ -10917,6 +10917,36 @@ window.addEventListener("message", (event) => {
   }
 });
 
+// Receives a PLAYLIST pick relayed by the extension after you picked a
+// playlist/Mix card (not a single video) on the youtube.com tab opened
+// by the YouTube Window's 🌐 button — same round trip as
+// YOUTUBE_VIDEO_SELECTED just above, but content-youtube.js reports a
+// `playlistId` (+ best-effort `title`) instead of a video URL. Handed
+// straight to window.YouTubeWindow.playlists.importFromYoutube(), which
+// creates/reuses one of the app's own local playlists and pulls in its
+// videos via the official (quota-cheap, cached) playlistItems.list call
+// — see that function in youtube-window.js for exactly how little it
+// costs. autoplay: true so picking a playlist starts it right away, the
+// same "zero further clicks" feel as picking a single video.
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  if (event.origin !== window.location.origin) return;
+  if (!event.data || event.data.type !== "YOUTUBE_PLAYLIST_SELECTED") return;
+
+  console.log("[VocabBridge] script.js received YOUTUBE_PLAYLIST_SELECTED:", event.data.payload);
+
+  try {
+    const payload = event.data.payload || {};
+    const playlistId = typeof payload.playlistId === "string" ? payload.playlistId.trim() : "";
+    const title = typeof payload.title === "string" ? payload.title.trim() : "";
+    if (playlistId && window.YouTubeWindow?.playlists?.importFromYoutube) {
+      window.YouTubeWindow.playlists.importFromYoutube(playlistId, { title, autoplay: true, source: "bridge" });
+    }
+  } catch (err) {
+    console.error("[VocabBridge] Ignored a malformed YOUTUBE_PLAYLIST_SELECTED message:", err);
+  }
+});
+
 // Handshake: tells the extension (if installed) that resetFormPendingState/
 // addPendingDefinition/addPendingImage/wordInput above are now defined, so
 // it's safe to deliver any Gemini data — including anything scraped and

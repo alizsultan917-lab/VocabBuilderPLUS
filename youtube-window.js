@@ -2786,13 +2786,27 @@
         // No cap here — a playlist keeps every item the person added
         // (spec requirement: no fixed max videos per playlist).
       }
-      cleaned.push({
+      const cleanedPlaylist = {
         id: p.id,
         name: typeof p.name === "string" && p.name.trim() ? p.name.trim() : "Untitled playlist",
         createdAt: typeof p.createdAt === "number" ? p.createdAt : Date.now(),
         updatedAt: typeof p.updatedAt === "number" ? p.updatedAt : Date.now(),
         items,
-      });
+      };
+      // YOUTUBE PLAYLIST IMPORT — carried through only when this playlist
+      // was created by importYoutubePlaylist() (see that block above).
+      // sourcePlaylistNextPageToken is what lets "Load more from YouTube"
+      // keep working after a reload without re-fetching page 1 again;
+      // sourcePlaylistId is also how importYoutubePlaylist() recognizes
+      // "already imported this one" and reuses it instead of duplicating.
+      if (typeof p.sourcePlaylistId === "string" && p.sourcePlaylistId) {
+        cleanedPlaylist.sourcePlaylistId = p.sourcePlaylistId;
+        cleanedPlaylist.sourcePlaylistNextPageToken =
+          typeof p.sourcePlaylistNextPageToken === "string" && p.sourcePlaylistNextPageToken
+            ? p.sourcePlaylistNextPageToken
+            : null;
+      }
+      cleaned.push(cleanedPlaylist);
       // No cap here either — no fixed max number of playlists.
     }
     return cleaned;
@@ -3327,6 +3341,109 @@
     notifyPlaylistUIOfPlaybackChange();
   }
 
+  /* ----------------------------------------------------------------------
+     YOUTUBE PLAYLIST IMPORT (Bridge) — turns a REAL YouTube playlist
+     picked on the 🌐 "Search on YouTube.com" tab (a `ytd-playlist-renderer`/
+     `ytd-radio-renderer` card there — see content-youtube.js's playlist
+     click/arrow-key interception) into one of THIS app's own local
+     playlists, using the exact same playlistItems.list call/cache/cost
+     accounting `getPlaylistVideos()` already uses everywhere else in this
+     file (see loadFullChannelPlaylist() above).
+
+     QUOTA DISCIPLINE, ON PURPOSE: this fetches exactly ONE page (up to
+     50 items, 1 quota unit — the cheapest read the Data API offers,
+     already cached by ytFetch()) no matter how large the real playlist
+     is. A 60-video playlist and a 6,000-video playlist cost the same
+     single request here; nothing past that first page is ever fetched
+     unless the person explicitly clicks "Load more from YouTube" in the
+     playlist-detail view (loadMoreFromYoutube(), below), which spends
+     one more page/one more unit per click. Picking a big playlist off
+     the search tab can therefore never surprise-drain a quota the way
+     eagerly walking every page up front would.
+
+     DEDUPE: re-picking a playlist already imported this way reuses the
+     same local playlist (matched on `sourcePlaylistId`) instead of
+     creating a duplicate and re-spending quota on a page it already has.
+  ---------------------------------------------------------------------- */
+  function playlistItemToSource(raw) {
+    const videoId = raw?.snippet?.resourceId?.videoId;
+    if (!videoId) return null;
+    return {
+      videoId,
+      title: raw.snippet?.title,
+      channelTitle: raw.snippet?.videoOwnerChannelTitle || raw.snippet?.channelTitle,
+      thumbnailUrl: raw.snippet?.thumbnails?.medium?.url || raw.snippet?.thumbnails?.default?.url,
+    };
+  }
+
+  async function importYoutubePlaylist(sourcePlaylistId, opts = {}) {
+    if (!sourcePlaylistId) return null;
+    const { title, autoplay = true } = opts;
+
+    const existing = playlists.find((p) => p.sourcePlaylistId === sourcePlaylistId);
+    if (existing) {
+      openPlaylistDetail(existing.id);
+      if (autoplay) startPlaylist(existing.id);
+      return existing;
+    }
+
+    const playlist = createPlaylist((title && title.trim()) || "YouTube playlist");
+    playlist.sourcePlaylistId = sourcePlaylistId;
+    playlist.sourcePlaylistNextPageToken = null;
+
+    openPlaylistDetail(playlist.id); // show it immediately — items stream in below, no need to wait
+    showStatus("Loading playlist from YouTube…", 2500);
+
+    try {
+      const data = await YTApi.getPlaylistVideos(sourcePlaylistId, { maxResults: 50 });
+      const items = Array.isArray(data.items) ? data.items : [];
+      for (const raw of items) {
+        const source = playlistItemToSource(raw);
+        if (source) addItemToPlaylist(playlist.id, source);
+      }
+      playlist.sourcePlaylistNextPageToken = data.nextPageToken || null;
+      persistPlaylistsDebounced();
+      if (currentDetailPlaylistId === playlist.id) renderPlaylistDetail();
+      if (autoplay && playlist.items.length) startPlaylist(playlist.id);
+      if (!playlist.items.length) {
+        showStatus("That playlist looks empty (or private) — nothing to import.", 4000);
+      }
+    } catch (err) {
+      console.warn("[YouTubeWindow] importYoutubePlaylist failed:", err);
+      showStatus("Couldn't load that playlist from YouTube — check your API key/quota and try again.", 5000);
+    }
+    return playlist;
+  }
+
+  // Fetches exactly one more page (see the QUOTA DISCIPLINE note above)
+  // for a playlist that was imported via importYoutubePlaylist(). A no-op
+  // if this playlist didn't come from YouTube, or the last fetch already
+  // reached its real end (sourcePlaylistNextPageToken is null).
+  async function loadMoreFromYoutube(playlistId) {
+    const playlist = getPlaylist(playlistId);
+    if (!playlist || !playlist.sourcePlaylistId || !playlist.sourcePlaylistNextPageToken) return false;
+    showStatus("Loading more from YouTube…", 2500);
+    try {
+      const data = await YTApi.getPlaylistVideos(playlist.sourcePlaylistId, {
+        maxResults: 50,
+        pageToken: playlist.sourcePlaylistNextPageToken,
+      });
+      const items = Array.isArray(data.items) ? data.items : [];
+      for (const raw of items) {
+        const source = playlistItemToSource(raw);
+        if (source) addItemToPlaylist(playlist.id, source);
+      }
+      playlist.sourcePlaylistNextPageToken = data.nextPageToken || null;
+      persistPlaylistsDebounced();
+      if (currentDetailPlaylistId === playlist.id) renderPlaylistDetail();
+      return true;
+    } catch (err) {
+      console.warn("[YouTubeWindow] loadMoreFromYoutube failed:", err);
+      showStatus("Couldn't load more from YouTube — check your connection/quota and try again.", 4000);
+      return false;
+    }
+  }
+
   // Playlist Part 2B2 — "Play Next" (spec #5). `upNext` is drained before
   // falling back to the normal playlist queue, and a played-next item is
   // loaded directly via loadVideo() rather than playPlaylistItem() — it
@@ -3817,11 +3934,16 @@
             <button type="button" class="yw-playlist-row-menu-btn" id="yw-playlist-detail-menu-btn" title="More options" aria-label="More options for ${escapeHtml(playlist.name)}" aria-haspopup="true" aria-expanded="false">⋮</button>
           </div>
         </div>
-        <p class="yw-playlist-detail-count">${count} video${count === 1 ? "" : "s"}</p>
+        <p class="yw-playlist-detail-count">${count} video${count === 1 ? "" : "s"}${playlist.sourcePlaylistId ? " · from YouTube" : ""}</p>
         <div class="yw-playlist-detail-controls">
           <button type="button" class="yw-playlist-play-all-btn" id="yw-playlist-play-all-btn"${count ? "" : " disabled"}>▶ Play All</button>
           <button type="button" class="yw-playlist-toggle-btn" id="yw-playlist-shuffle-btn" aria-pressed="${shuffleOn}" title="Shuffle: ${shuffleOn ? "on" : "off"} — click to turn ${shuffleOn ? "off" : "on"}">🔀 Shuffle</button>
           <button type="button" class="yw-playlist-toggle-btn" id="yw-playlist-repeat-btn" aria-pressed="${repeatMode !== "off"}" title="Repeat: ${repeatMode === "one" ? "one song" : repeatMode === "playlist" ? "whole playlist" : "off"} — click to change">${repeatMode === "one" ? "🔂 Repeat one" : repeatMode === "playlist" ? "🔁 Repeat all" : "🔁 Repeat"}</button>
+          ${
+            playlist.sourcePlaylistId && playlist.sourcePlaylistNextPageToken
+              ? `<button type="button" class="yw-playlist-toggle-btn" id="yw-playlist-load-more-btn" title="Fetch the next batch of videos from this YouTube playlist (1 more quota unit)">⇩ Load more from YouTube</button>`
+              : ""
+          }
         </div>
       </div>
       <div class="yw-playlist-detail-content" id="yw-playlist-detail-content">${contentInnerHtml}</div>
@@ -3834,6 +3956,16 @@
       togglePlaylistRowMenu(playlist.id, e.currentTarget);
     });
     document.getElementById("yw-playlist-play-all-btn")?.addEventListener("click", () => startPlaylist(playlist.id));
+    document.getElementById("yw-playlist-load-more-btn")?.addEventListener("click", (e) => {
+      e.currentTarget.disabled = true;
+      loadMoreFromYoutube(playlist.id).finally(() => {
+        // Button is rebuilt by renderPlaylistDetail() on success (new
+        // count, possibly no more pages) — this only matters if the
+        // fetch failed and the same button is still on screen.
+        const btn = document.getElementById("yw-playlist-load-more-btn");
+        if (btn) btn.disabled = false;
+      });
+    });
     // Shuffle/Repeat here call straight into Part 1's setShuffleEnabled/
     // setRepeatMode — no new playback logic, per spec.
     document.getElementById("yw-playlist-shuffle-btn")?.addEventListener("click", () => {
@@ -7355,6 +7487,9 @@
       addItem: addItemToPlaylist,
       removeItem: removeItemFromPlaylist,
       reorderItem: reorderPlaylistItem,
+      // YouTube Playlist Import (Bridge) — see the block above stopPlaylist().
+      importFromYoutube: importYoutubePlaylist,
+      loadMoreFromYoutube,
     },
     playback: {
       getState: () => ({ ...playbackState }),
