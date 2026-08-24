@@ -52,8 +52,10 @@
   left: auto;
   width: 420px;
   height: 320px;
-  min-width: 180px;
-  min-height: 120px;
+  /* Matches YW_MIN_WIDTH/YW_MIN_HEIGHT in youtube-window.js — keep the two
+     in sync if either changes. */
+  min-width: 90px;
+  min-height: 70px;
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 32px);
   z-index: 98;
@@ -1379,7 +1381,20 @@ body.has-wallpaper .yw-header {
    Previous/Play-Pause/Next/Repeat, overlaid at the bottom of the video
    area. Shown ONLY while the loaded video is the active playlist's
    current item — never for a standalone video. See updateTransportUI()
-   / "THE TRANSPORT BAR IS PLAYLIST-ONLY" in youtube-window.js. ---------- */
+   / "THE TRANSPORT BAR IS PLAYLIST-ONLY" in youtube-window.js.
+
+   Auto-hide (⚙ Settings > Playback Controls Overlay): off (default),
+   the bar stays fully built and mounted whenever a playlist track is
+   loaded (unchanged), but now starts invisible and only fades in while
+   the mouse is over the window — same hover-reveal language as the
+   Header Bar rules above, just keyed off the window itself rather than
+   the header strip specifically, since this overlay sits over whatever
+   content panel is currently showing (see ensureTransportBar() in
+   youtube-window.js), not just the video. `.yw-transport-bar > *` gets
+   its own pointer-events toggle alongside the parent's opacity so an
+   invisible bar can never still be clicked through. On
+   (yw-transport-permanent-hide): the bar is removed from view entirely,
+   hover or not — see applyTransportHideSetting() in youtube-window.js. */
 .yw-transport-bar {
   position: absolute;
   left: 0;
@@ -1393,10 +1408,34 @@ body.has-wallpaper .yw-header {
   background: linear-gradient(to top, rgba(10, 14, 20, 0.92) 0%, rgba(10, 14, 20, 0.78) 65%, rgba(10, 14, 20, 0) 100%);
   color: #fff;
   pointer-events: none;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
 .yw-transport-bar.hidden {
   display: none;
+}
+
+.yw-transport-bar > * {
+  pointer-events: none;
+}
+
+.vocab-youtube-window:hover .yw-transport-bar,
+.vocab-youtube-window.yw-dragging .yw-transport-bar,
+.vocab-youtube-window:focus-within .yw-transport-bar {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.vocab-youtube-window:hover .yw-transport-bar > *,
+.vocab-youtube-window.yw-dragging .yw-transport-bar > *,
+.vocab-youtube-window:focus-within .yw-transport-bar > * {
+  pointer-events: auto;
+}
+
+.vocab-youtube-window.yw-transport-permanent-hide .yw-transport-bar {
+  display: none !important;
 }
 
 /* The transport bar now mounts on #yw-body itself (see ensureTransportBar()
@@ -1412,13 +1451,10 @@ body.has-wallpaper .yw-header {
   scroll-padding-bottom: 76px;
 }
 
-.yw-transport-bar > * {
-  pointer-events: auto;
-}
-
 .yw-np-info {
   min-width: 0;
 }
+
 
 .yw-np-title {
   font-size: 0.82rem;

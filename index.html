@@ -1535,6 +1535,30 @@
     <hr class="yw-settings-divider">
 
     <!-- ---------------------------------------------------------------
+         PLAYBACK CONTROLS OVERLAY — the Now Playing / progress bar /
+         shuffle-prev-play-next-repeat strip docked over the bottom of
+         the video while a playlist track is loaded (built by
+         ensureTransportBar() in youtube-window.js). Off (default): the
+         overlay stays invisible until your mouse is over the window,
+         then fades in — it no longer sits on screen the whole time. On:
+         it's hidden permanently, hover or not. Either way the playlist
+         keeps playing; this only affects whether the overlay is shown. -->
+    <div class="yw-settings-section" id="yw-transport-hide-settings-section">
+      <p class="yw-settings-label">Playback Controls Overlay</p>
+      <div class="bubbly-toggle-row">
+        <div class="bubbly-toggle-label">
+          <span class="bubbly-toggle-title">Permanently hide playback controls overlay</span>
+          <span class="bubbly-toggle-hint">Off (default): the Now Playing / progress / shuffle-prev-play-next-repeat strip over the video only appears while your mouse is over the window, and fades away when it leaves. On: that overlay never appears at all, even on hover — playback and the header controls above are unaffected either way.</span>
+        </div>
+        <label class="switch" for="yw-transport-hide-toggle">
+          <input type="checkbox" id="yw-transport-hide-toggle">
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+        </label>
+      </div>
+    </div>
+    <hr class="yw-settings-divider">
+
+    <!-- ---------------------------------------------------------------
          COMPACT MODE — collapses the header down to just ⚙ (plus
          whatever's ticked below), each only appearing on hover, and
          tucks the search bar away behind the "Focus YouTube Window

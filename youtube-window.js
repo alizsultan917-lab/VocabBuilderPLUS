@@ -1219,9 +1219,21 @@
   // hideMode: "timer" | "onlyAfterSearch", hideSeconds: 5-120 (seconds) }.
   // See loadCompactSettings() below.
   const YW_COMPACT_STORAGE = "vocabRegister_youtubeCompactSettings";
+  // Transport bar (Now Playing / shuffle / prev / play-pause / next /
+  // repeat overlay) visibility. Off (default): the overlay now only
+  // reveals itself while the mouse is over the window — see the
+  // .yw-transport-bar hover rules in youtube-window.css — instead of
+  // sitting on screen the whole time a playlist track is loaded. On: the
+  // overlay never shows at all, hover or not. See applyTransportHideSetting()
+  // and the "Auto-hide playback controls" settings-panel toggle.
+  const YW_TRANSPORT_HIDE_STORAGE = "vocabRegister_youtubeTransportPermanentlyHidden";
 
-  const YW_MIN_WIDTH = 180;
-  const YW_MIN_HEIGHT = 120;
+  // Lowered from 180/120 on request — the header (Compact Mode) and the
+  // transport bar (see the "Auto-hide playback controls" settings toggle
+  // below) already collapse gracefully at small sizes, so there's no
+  // layout reason to stop someone shrinking the window further than this.
+  const YW_MIN_WIDTH = 90;
+  const YW_MIN_HEIGHT = 70;
   const YW_MAX_WIDTH = 900;
   const YW_MAX_HEIGHT = 700;
 
@@ -1305,6 +1317,9 @@
   // Compact Mode — settings panel controls + the footer search wrapper.
   const compactModeToggle = document.getElementById("yw-compact-mode-toggle");
   const compactHeaderBarToggle = document.getElementById("yw-compact-header-bar-toggle");
+  // Transport bar hover-reveal / permanent-hide toggle (see
+  // YW_TRANSPORT_HIDE_STORAGE above).
+  const transportHideToggle = document.getElementById("yw-transport-hide-toggle");
   const compactOptionsEl = document.getElementById("yw-compact-options");
   const compactTickInputs = Array.from(document.querySelectorAll("#yw-compact-tick-list [data-compact-tick]"));
   const compactHideModeRadios = Array.from(document.querySelectorAll("input[name='yw-compact-hide-mode']"));
@@ -1388,6 +1403,7 @@
   let pendingChannelQuery = null; // an oldest/newest channel lookup typed before a key was configured
   let pendingChannelSearchTerm = null; // a channel *search* (Channels tab) typed before a key was configured
   let loopEnabled = loadJson(YW_LOOP_STORAGE, false) === true;
+  let transportPermanentlyHidden = loadJson(YW_TRANSPORT_HIDE_STORAGE, false) === true;
   let stayOnYoutubeTab = loadJson(YW_STAY_ON_TAB_STORAGE, false) === true;
   let playerReady = false; // true once the current YT.Player has fired onReady
   let playerVolume = (() => {
@@ -2277,6 +2293,15 @@
     layoutToggleBtn.setAttribute("aria-pressed", String(isPlaylistFocused));
     layoutToggleBtn.title = isPlaylistFocused ? "Layout: Playlist-focused — click for Player-focused" : "Layout: Player-focused — click for Playlist-focused";
     layoutToggleBtn.setAttribute("aria-label", isPlaylistFocused ? "Switch to player-focused layout" : "Switch to playlist-focused layout");
+  }
+
+  // Mirrors applyCompactMode()'s win.classList.toggle() pattern — the
+  // actual show/hide-on-hover behavior lives in CSS (see the
+  // .yw-transport-bar rules in youtube-window.css); this just flips the
+  // one class those rules key off, plus the settings checkbox.
+  function applyTransportHideSetting() {
+    win.classList.toggle("yw-transport-permanent-hide", transportPermanentlyHidden);
+    if (transportHideToggle) transportHideToggle.checked = transportPermanentlyHidden;
   }
 
   function reflectOpenExternalUI() {
@@ -6880,6 +6905,15 @@
     applyCompactMode();
   });
 
+  // Playback-controls overlay: on = never show it at all; off (default) =
+  // hover-to-reveal only, handled entirely in CSS (see
+  // .yw-transport-permanent-hide / .yw-transport-bar:hover rules).
+  transportHideToggle?.addEventListener("change", () => {
+    transportPermanentlyHidden = !!transportHideToggle.checked;
+    saveJson(YW_TRANSPORT_HIDE_STORAGE, transportPermanentlyHidden);
+    applyTransportHideSetting();
+  });
+
   compactTickInputs.forEach((input) => {
     input.addEventListener("change", () => {
       const key = input.dataset.compactTick;
@@ -7154,6 +7188,11 @@
       win.style.right = "auto";
       win.style.bottom = "auto";
       dragHandle.classList.add("yw-dragging");
+      // Also on the window itself — .yw-header and #yw-body (parent of
+      // the transport bar) are siblings, so the transport bar's own
+      // hover-reveal rules in youtube-window.css key off this rather
+      // than dragHandle's class directly.
+      win.classList.add("yw-dragging");
       e.preventDefault();
     });
 
@@ -7170,6 +7209,7 @@
       if (!dragging) return;
       dragging = false;
       dragHandle.classList.remove("yw-dragging");
+      win.classList.remove("yw-dragging");
       persistState();
     });
 
@@ -7195,7 +7235,8 @@
      RESIZE (bottom-right corner handle) — Pointer Events so mouse,
      trackpad, touch, and pen all work identically, same as the Map
      Window's resize handle. Sets width AND height directly, clamped to
-     the 180×120 – 900×700 box from the spec.
+     the YW_MIN_WIDTH×YW_MIN_HEIGHT – 900×700 box (see those constants
+     above).
   ---------------------------------------------------------------------- */
   (function initResize() {
     if (!resizeHandle) return;
@@ -7354,6 +7395,7 @@
     reflectStayOnTabUI();
     applyCompactMode();
     reflectCompactSettingsUI();
+    applyTransportHideSetting();
     syncStayOnTabToExtension();
     reflectOpenExternalUI();
     reflectQuotaUI();
