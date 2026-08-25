@@ -640,12 +640,24 @@ function loadEntriesFromLocalStorage() {
   }
 }
 
-function saveEntriesToLocalStorage() {
+function saveEntriesToLocalStorage(hasDurableBackup) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
   } catch (err) {
     console.error("Failed to save entries to localStorage.", err);
-    alert("Could not save your entry — your browser storage may be full or disabled.");
+    // localStorage has its own small quota (~5-10MB) that a connected
+    // folder/Drive does nothing to raise — this mirror write can fail on
+    // its own even though the real save to your folder or Drive just
+    // succeeded. Only alarm the person when localStorage genuinely is
+    // their only backup; otherwise this is just a stale mirror, not lost
+    // data, so log it instead of interrupting them.
+    if (hasDurableBackup) {
+      console.warn(
+        "Browser-storage mirror is out of sync (quota exceeded), but your entry is safely saved to your connected folder/Drive."
+      );
+    } else {
+      alert("Could not save your entry — your browser storage may be full or disabled.");
+    }
   }
 }
 
@@ -2727,7 +2739,8 @@ function saveEntries() {
   // all), loadEntries() fell back to that frozen copy — resurrecting
   // long-deleted entries and losing anything added since. Keeping this
   // mirror current at all times closes that gap for good.
-  perfTime("Local Storage I/O", saveEntriesToLocalStorage);
+  const hasDurableBackup = saveLocal || saveCloud;
+  perfTime("Local Storage I/O", () => saveEntriesToLocalStorage(hasDurableBackup));
 }
 
 function loadLastBookPage() {
