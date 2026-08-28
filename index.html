@@ -58,7 +58,7 @@
 ">
 <title>Literary Vocabulary Register</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600;700&family=Kalam:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="wallpaper-enhancements.css">
 <link rel="stylesheet" href="map-window.css">
@@ -141,6 +141,12 @@
       </button>
     </div>
 
+    <div id="notepad-widget" class="storage-widget">
+      <button type="button" id="notepad-toggle-btn" class="storage-toggle-btn" title="Notepad: OFF" aria-pressed="false">
+        <span class="storage-icon">📝</span>
+      </button>
+    </div>
+
     <div id="shortcuts-widget" class="storage-widget">
       <button type="button" id="shortcuts-toggle-btn" class="storage-toggle-btn" title="Keyboard Shortcuts">
         <span class="storage-icon">⌨️</span>
@@ -219,7 +225,7 @@
           <div class="bubbly-toggle-row">
             <div class="bubbly-toggle-label">
               <span class="bubbly-toggle-title">Hide All</span>
-              <span class="bubbly-toggle-hint">Hides Add Entry, Fetch with AI, AI Settings, Search Gemini, Restart Gemini Tab, and the Book Title field all at once. Turn this off to show/hide each one individually below.</span>
+              <span class="bubbly-toggle-hint">Hides Add Entry, Fetch with AI, AI Settings, Search AI, Restart AI Tab, and the Book Title field all at once. Turn this off to show/hide each one individually below.</span>
             </div>
             <label class="switch" for="hide-form-buttons-toggle">
               <input type="checkbox" id="hide-form-buttons-toggle">
@@ -242,11 +248,11 @@
             </label>
             <label class="form-buttons-visibility-row">
               <input type="checkbox" id="show-search-gemini-btn-toggle" checked>
-              <span>Search Gemini</span>
+              <span>Search AI</span>
             </label>
             <label class="form-buttons-visibility-row">
               <input type="checkbox" id="show-restart-gemini-btn-toggle" checked>
-              <span>Restart Gemini Tab</span>
+              <span>Restart AI Tab</span>
             </label>
             <label class="form-buttons-visibility-row">
               <input type="checkbox" id="show-book-title-field-toggle" checked>
@@ -764,7 +770,7 @@
   </div>
 </header>
 
-<!-- KEYBOARD SHORTCUTS SIDEBAR (Gemini-style sliding panel).
+<!-- KEYBOARD SHORTCUTS SIDEBAR (a Gemini-inspired sliding panel — the name is just about the visual style, unrelated to the AI Bridge).
      Rows are rendered by script.js from a single SHORTCUT_FIELDS config
      array — see the "CUSTOMIZABLE KEYBOARD SHORTCUT SYSTEM" block near
      the end of script.js. -->
@@ -846,11 +852,16 @@
               <span class="ai-fetch-icon">✨</span> <span id="ai-fetch-btn-label">Fetch with AI</span>
             </button>
             <button type="button" id="ai-settings-btn" class="link-btn key-link-btn" title="Configure your local/cloud AI settings">AI Settings</button>
-            <button type="button" id="search-gemini-btn" class="btn btn-gemini" title="Opens Gemini in another tab and searches this word (requires the Gemini Bridge extension)">
-              <span class="gemini-btn-icon">✨</span> <span class="gemini-btn-label">Search Gemini</span>
+            <select id="ai-provider-select" class="ai-provider-select" title="Which AI 'Search AI' / 'Restart AI Tab' target (requires the AI Bridge extension)">
+              <option value="gemini">✨ Gemini</option>
+              <option value="chatgpt">🤖 ChatGPT</option>
+              <option value="deepseek">🐋 DeepSeek</option>
+            </select>
+            <button type="button" id="search-gemini-btn" class="btn btn-gemini" title="Opens the selected AI in another tab and searches this word (requires the AI Bridge extension)">
+              <span class="gemini-btn-icon">✨</span> <span class="gemini-btn-label">Search AI</span>
             </button>
-            <button type="button" id="restart-gemini-tab-btn" class="btn btn-gemini" title="Closes the current Gemini tab (if one is open) and opens a fresh one (requires the Gemini Bridge extension)">
-              <span class="gemini-btn-icon">🔄</span> <span class="gemini-btn-label">Restart Gemini Tab</span>
+            <button type="button" id="restart-gemini-tab-btn" class="btn btn-gemini" title="Closes the current tab for the selected AI (if one is open) and opens a fresh one (requires the AI Bridge extension)">
+              <span class="gemini-btn-icon">🔄</span> <span class="gemini-btn-label">Restart AI Tab</span>
             </button>
           </div>
           <span id="ai-fetch-status" class="ai-fetch-status hidden"></span>
@@ -1204,6 +1215,31 @@
     <div class="vaw-delete-row">
       <button type="button" id="vaw-delete-btn" class="btn btn-danger btn-small" title="Remove this word from the Audio Window only (keeps it in your register)">🗑️ Remove from Window</button>
     </div>
+  </div>
+</div>
+
+<!-- 📝 FLOATING NOTEPAD — a cute little scratchpad for jotting down app
+     update ideas, bugs, or to-dos while you're using the app. Entirely
+     separate from your vocabulary entries — gated behind the "Notepad"
+     master toggle in the header (#notepad-toggle-btn), same open/close/
+     drag pattern as the Audio Window above. Whatever you type is saved
+     to localStorage as you go (see the "FLOATING NOTEPAD" block in
+     script.js) — nothing here is ever sent anywhere. -->
+<div id="vocab-notepad-window" class="vocab-notepad-window hidden" aria-hidden="true">
+  <div class="np-header" id="np-drag-handle" title="Drag to move">
+    <span class="np-drag-grip" aria-hidden="true">⠿</span>
+    <div class="np-header-main">
+      <span class="np-pin" aria-hidden="true">📌</span>
+      <span class="np-title">Notepad</span>
+    </div>
+    <div class="np-header-actions">
+      <span id="np-saved-tag" class="np-saved-tag hidden">Saved ✓</span>
+      <button type="button" id="np-clear-btn" class="icon-btn" title="Clear notepad">🗑️</button>
+      <button type="button" id="np-close-btn" class="icon-btn" title="Close notepad">✕</button>
+    </div>
+  </div>
+  <div class="np-body">
+    <textarea id="np-textarea" class="np-textarea" placeholder="Jot down update ideas, bugs to fix, features to add…" spellcheck="true"></textarea>
   </div>
 </div>
 
@@ -1677,7 +1713,7 @@
       <form id="yw-search-form" class="yw-search-form">
         <input type="text" id="yw-search-input" class="yw-search-input" placeholder="Search YouTube…" autocomplete="off" spellcheck="false" aria-label="Search YouTube or paste a video link">
         <button type="submit" id="yw-search-btn" class="yw-search-btn" title="Search / load link" aria-label="Search or load link">🔎</button>
-        <button type="button" id="yw-search-external-btn" class="yw-search-btn yw-search-external-btn" title="Search this on YouTube.com in a new tab — pick a video there and it's brought back here automatically (requires the Gemini Bridge extension)" aria-label="Search on YouTube.com in a new tab">🌐</button>
+        <button type="button" id="yw-search-external-btn" class="yw-search-btn yw-search-external-btn" title="Search this on YouTube.com in a new tab — pick a video there and it's brought back here automatically (requires the AI Bridge extension)" aria-label="Search on YouTube.com in a new tab">🌐</button>
       </form>
       <button type="button" id="yw-channel-toggle-btn" class="yw-channel-toggle-btn">📺 Channel: oldest / newest video ▾</button>
       <div id="yw-channel-form" class="yw-channel-form hidden">
