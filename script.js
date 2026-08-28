@@ -7656,9 +7656,18 @@ function debounce(fn, delay) {
    DEFINITION + PHONETICS LOOKUP (Free Dictionary API — no auth)
    Returns MULTIPLE distinct definitions (one per part of speech, capped).
 --------------------------------------------------------------------- */
-async function fetchDefinitions(word, _isRetry = false) {
+async function fetchDefinitions(word, externalSignal, _isRetry = false) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), LOOKUP_TIMEOUT_MS);
+  // If the calling lookup gets superseded (person kept typing), abort this
+  // request immediately instead of letting it run to completion (and
+  // potentially retry) uselessly in the background — every extra request
+  // to this free, rate-limited API makes a temporary block more likely.
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener("abort", onExternalAbort);
+  }
 
   try {
     const response = await fetch(
@@ -7677,7 +7686,7 @@ async function fetchDefinitions(word, _isRetry = false) {
       // fetchImages() already retries once for. A genuine 4xx (other
       // than 404, handled above) isn't worth retrying.
       if (response.status >= 500 && !_isRetry) {
-        return fetchDefinitions(word, true);
+        return fetchDefinitions(word, externalSignal, true);
       }
       return { ok: false, reason: `http-${response.status}` };
     }
@@ -7777,14 +7786,19 @@ async function fetchDefinitions(word, _isRetry = false) {
     return { ok: true, definitions, phonetics };
   } catch (err) {
     clearTimeout(timeoutId);
+    // Superseded by a newer lookup — don't retry, don't send another
+    // request for a word the person has already moved past.
+    if (externalSignal?.aborted) return { ok: false, reason: "superseded" };
     const reason = err.name === "AbortError" ? "timeout" : "network-error";
     console.warn(`Dictionary lookup failed (${reason}):`, err);
     // One quiet retry for transient hiccups (flaky network, momentary
     // timeout, or a 5xx response missing CORS headers that surfaces as a
     // generic failed-fetch) before actually giving up — mirrors the
     // retry fetchImages() already does for the same class of errors.
-    if (!_isRetry) return fetchDefinitions(word, true);
+    if (!_isRetry) return fetchDefinitions(word, externalSignal, true);
     return { ok: false, reason };
+  } finally {
+    if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
   }
 }
 
@@ -7793,10 +7807,18 @@ async function fetchDefinitions(word, _isRetry = false) {
    optionally biased toward a search phrase (used by the AI enhancement
    flow to pass context-aware queries instead of just the bare word).
 --------------------------------------------------------------------- */
-async function fetchImages(query, count, _isRetry = false) {
+async function fetchImages(query, count, externalSignal, _isRetry = false) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), LOOKUP_TIMEOUT_MS);
   const CANDIDATE_POOL = 12;
+  // See matching comment in fetchDefinitions() — abort immediately if the
+  // calling lookup gets superseded, instead of finishing (and possibly
+  // retrying) a request nobody needs anymore.
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener("abort", onExternalAbort);
+  }
 
   try {
     const url = `${IMAGE_API_URL}?q=${encodeURIComponent(query)}&page_size=${CANDIDATE_POOL}&license_type=all-cc&mature=false`;
@@ -7853,12 +7875,15 @@ async function fetchImages(query, count, _isRetry = false) {
     return { ok: true, images };
   } catch (err) {
     clearTimeout(timeoutId);
+    if (externalSignal?.aborted) return { ok: false, reason: "superseded" };
     const reason = err.name === "AbortError" ? "timeout" : "network-error";
     console.warn(`Image lookup failed (${reason}):`, err);
     // One quiet retry for transient hiccups (flaky network / momentary
     // timeout) before actually giving up on the search.
-    if (!_isRetry) return fetchImages(query, count, true);
+    if (!_isRetry) return fetchImages(query, count, externalSignal, true);
     return { ok: false, reason };
+  } finally {
+    if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
   }
 }
 
@@ -8386,18 +8411,40 @@ imgSelectNoneBtn.addEventListener("click", () => {
    dictionary definition and a few generic images, none pre-selected.
    Book-aware results only come from the explicit "Fetch with AI" button.
 --------------------------------------------------------------------- */
-async function runWordLookup(word) {
+// Bumped every time a new lookup is kicked off; each in-flight lookup
+// captures its own value at start time. If, by the time it resolves, a
+// newer lookup has since started (e.g. the person paused mid-word, an
+// early lookup fired for "bo", then finished typing "born" and a second
+// lookup fired for that), the stale one's `seq` no longer matches. Without
+// this, the stale request finishing later would yank away the loading
+// tag — and even overwrite results — for the newer, still-in-flight
+// request, making it look like the search silently died even though a
+// real lookup was still working in the background.
+let lookupSeq = 0;
+// Aborts the previous lookup's actual in-flight network requests the
+// moment a new one starts, instead of leaving them to run to completion
+// (and possibly retry) uselessly in the background. Fewer wasted requests
+// to this free, rate-limited API means less chance of it temporarily
+// blocking us for sending too many requests too fast.
+let currentLookupController = null;
+
+async function runWordLookup(word, seq, signal) {
   aiLoadingTag.classList.remove("hidden");
   imageLoadingTag.classList.remove("hidden");
   manualModeTag.classList.add("hidden");
 
   const systemImgLimit = getSystemImgLimit();
   const [defResult, imgResult] = await Promise.all([
-    perfTimeAsync("Dictionary Lookups", () => fetchDefinitions(word)),
+    perfTimeAsync("Dictionary Lookups", () => fetchDefinitions(word, signal)),
     systemImgLimit > 0
-      ? perfTimeAsync("Image Search", () => fetchImages(word, systemImgLimit))
+      ? perfTimeAsync("Image Search", () => fetchImages(word, systemImgLimit, signal))
       : Promise.resolve({ ok: false, reason: "limit-zero", images: [] }),
   ]);
+
+  // A newer lookup has since started — this response is stale. Bail out
+  // WITHOUT touching the loading tags or pending results, since those
+  // now belong to the newer, still-in-flight lookup.
+  if (seq !== lookupSeq) return;
 
   aiLoadingTag.classList.add("hidden");
   imageLoadingTag.classList.add("hidden");
@@ -8435,7 +8482,11 @@ const debouncedWordLookup = debounce(() => {
   if (word.toLowerCase() === lookupState.word.toLowerCase() && lookupState.dictDone) return;
   clearAutoPending();
   lookupState.word = word;
-  runWordLookup(word);
+  currentLookupController?.abort();
+  const controller = new AbortController();
+  currentLookupController = controller;
+  const seq = ++lookupSeq;
+  runWordLookup(word, seq, controller.signal);
 }, 450);
 
 wordInput.addEventListener("input", debouncedWordLookup);
@@ -10745,47 +10796,77 @@ async function init() {
 init();
 
 /* ---------------------------------------------------------------------
-   GEMINI BRIDGE (optional Chrome extension integration)
+   AI BRIDGE (optional Chrome extension integration)
    This block only ever talks over window.postMessage — it never
    references chrome.* APIs directly, so the app works identically
-   whether or not the "Vocab Register — Gemini Bridge" extension is
-   installed; without it, "Search Gemini" is just inert and no
-   GEMINI_ENTRY_SCRAPED messages ever arrive.
+   whether or not the "Vocab Register — AI Bridge" extension is
+   installed; without it, "Search AI" is just inert and no
+   AI_ENTRY_SCRAPED messages ever arrive.
+
+   As of the multi-provider AI Bridge, every lookup targets whichever
+   engine is picked in aiProviderSelect below — "gemini" | "chatgpt" |
+   "deepseek" — instead of always meaning Gemini. The extension side
+   (background.js/bridge-app.js/content-<provider>.js) is fully
+   provider-agnostic: this is the one place in the app that decides
+   which provider string gets sent.
 --------------------------------------------------------------------- */
 
-// "Search Gemini" button — asks the extension to focus/open Gemini and
-// type this word into its chat box (the Search-Bridge flow).
+// AI provider picker — remembers the last choice across reloads the
+// same way every other little app preference here does (localStorage).
+const AI_PROVIDER_STORAGE_KEY = "vocabRegister_aiProvider";
+const aiProviderSelect = document.getElementById("ai-provider-select");
+
+function getSelectedAiProvider() {
+  return aiProviderSelect?.value || "gemini";
+}
+
+if (aiProviderSelect) {
+  const savedProvider = localStorage.getItem(AI_PROVIDER_STORAGE_KEY);
+  if (savedProvider && Array.from(aiProviderSelect.options).some((o) => o.value === savedProvider)) {
+    aiProviderSelect.value = savedProvider;
+  }
+  aiProviderSelect.addEventListener("change", () => {
+    localStorage.setItem(AI_PROVIDER_STORAGE_KEY, aiProviderSelect.value);
+  });
+}
+
+// "Search AI" button — asks the extension to focus/open the selected
+// provider's tab and type this word into its chat box (the
+// Search-Bridge flow). Element id (search-gemini-btn) is unchanged from
+// the Gemini-only version for backward compatibility with any custom
+// CSS/placement settings already saved — only its label/behavior grew
+// to cover all three providers.
 const searchGeminiBtn = document.getElementById("search-gemini-btn");
 if (searchGeminiBtn) {
   searchGeminiBtn.addEventListener("click", () => {
     const word = wordInput.value.trim();
     if (!word) {
-      alert("Type a word first, then click Search Gemini.");
+      alert("Type a word first, then click Search AI.");
       return;
     }
     const bookTitle = bookInput.value.trim();
-    window.postMessage({ type: "SEARCH_GEMINI", word, bookTitle }, window.location.origin);
+    window.postMessage({ type: "SEARCH_AI_PROVIDER", provider: getSelectedAiProvider(), word, bookTitle }, window.location.origin);
   });
 }
 
-// "Restart Gemini Tab" button — asks the extension to close whatever
-// Gemini tab(s) are currently open and open a fresh one. Tab management
-// first and foremost (works fine with the word bar empty — meant for
-// when a Gemini tab has gotten stuck or broken and the fastest fix is a
-// clean one instead of hunting down and closing it yourself), but if
-// there's a word currently in the word bar, it's sent along too so the
-// extension types that word's prompt into the freshly-opened tab, same
-// as clicking "Search Gemini" right after the restart.
+// "Restart AI Tab" button — asks the extension to close whatever tab(s)
+// of the selected provider are currently open and open a fresh one. Tab
+// management first and foremost (works fine with the word bar empty —
+// meant for when a tab has gotten stuck or broken and the fastest fix
+// is a clean one instead of hunting down and closing it yourself), but
+// if there's a word currently in the word bar, it's sent along too so
+// the extension types that word's prompt into the freshly-opened tab,
+// same as clicking "Search AI" right after the restart.
 const restartGeminiTabBtn = document.getElementById("restart-gemini-tab-btn");
 if (restartGeminiTabBtn) {
   restartGeminiTabBtn.addEventListener("click", () => {
     const word = wordInput.value.trim();
     const bookTitle = bookInput.value.trim();
-    window.postMessage({ type: "RESTART_GEMINI_TAB", word, bookTitle }, window.location.origin);
+    window.postMessage({ type: "RESTART_AI_PROVIDER_TAB", provider: getSelectedAiProvider(), word, bookTitle }, window.location.origin);
   });
 }
 
-// Gemini's "direct URL to a representative image" is frequently a
+// The AI's "direct URL to a representative image" is frequently a
 // hallucinated/dead link — LLMs are unreliable at producing real,
 // resolvable image URLs. Probe it with a throwaway Image() first; if it
 // 404s/errors, fall back to the app's own Openverse image search (the
@@ -10828,9 +10909,11 @@ function sanitizeScrapedText(text, maxRunLength = 40) {
   });
 }
 
-// Receives a scraped Gemini entry relayed by the extension's app-side
-// content script (the Scrape-Back flow). Wrapped in try/catch so a
-// malformed or unexpected message can never break the rest of the app.
+// Receives a scraped AI entry relayed by the extension's app-side
+// content script (the Scrape-Back flow) — from whichever provider
+// (Gemini/ChatGPT/DeepSeek) content-<provider>.js scraped it from, per
+// event.data.provider. Wrapped in try/catch so a malformed or
+// unexpected message can never break the rest of the app.
 window.addEventListener("message", (event) => {
   // Both checks matter: event.source !== window rules out other frames/
   // tabs, and event.origin !== our own origin rules out anything that
@@ -10842,20 +10925,33 @@ window.addEventListener("message", (event) => {
   // sanitizeScrapedText()/sanitizeImageUrl() before it touches the DOM.
   if (event.source !== window) return;
   if (event.origin !== window.location.origin) return;
-  if (!event.data || event.data.type !== "GEMINI_ENTRY_SCRAPED") return;
+  if (!event.data || event.data.type !== "AI_ENTRY_SCRAPED") return;
 
-  console.log("[VocabBridge] script.js received GEMINI_ENTRY_SCRAPED:", event.data.payload);
+  console.log(`[VocabBridge] script.js received AI_ENTRY_SCRAPED (${event.data.provider}):`, event.data.payload);
 
   try {
     const payload = event.data.payload || {};
-    // content-gemini.js already parses Gemini's reply into these fields
-    // (DEF: / US: / UK: labeled lines, plus whatever <img> it attached)
-    // before it ever leaves the extension — nothing left to split here.
+    // content-<provider>.js already parses the AI's reply into these
+    // fields (definition / US / UK, split on "|", plus whatever <img>
+    // it attached) before it ever leaves the extension — nothing left
+    // to split here.
     const definition = typeof payload.definition === "string" ? sanitizeScrapedText(payload.definition.trim()) : "";
     const imageUrl = typeof payload.imageUrl === "string" ? payload.imageUrl.trim() : "";
     const usPronunciation = typeof payload.usPronunciation === "string" ? sanitizeScrapedText(payload.usPronunciation.trim()) : "";
     const ukPronunciation = typeof payload.ukPronunciation === "string" ? sanitizeScrapedText(payload.ukPronunciation.trim()) : "";
     const wordForFallback = wordInput.value.trim();
+
+    // Invalidate any still-in-flight free-dictionary auto-lookup for this
+    // word BEFORE clearing/overwriting pending state below. Without this,
+    // a slow runWordLookup() started earlier (while you were still typing,
+    // before you clicked "Search Gemini") can resolve AFTER this handler
+    // runs and unconditionally overwrite pendingPhonetics with its own
+    // (often empty — the free dictionary rarely has book-specific/proper
+    // nouns) result, silently wiping out the Gemini pronunciation you just
+    // got. Bumping lookupSeq makes that stale response's own `seq !==
+    // lookupSeq` guard reject it when it finally comes back.
+    currentLookupController?.abort();
+    lookupSeq++;
 
     // Clear any stale pending definitions/images/tags before injecting
     // the new data — same as a fresh "Fetch with AI" run would.
@@ -10883,6 +10979,11 @@ window.addEventListener("message", (event) => {
     if (ukPronunciation) pendingPhonetics.uk = { text: ukPronunciation, audio: null, source: "ai" };
     if (usPronunciation || ukPronunciation) renderPhoneticPreview(pendingPhonetics);
 
+    // Mark this word as already resolved so a later "input" event on the
+    // word field (e.g. from focus/re-render below) can't kick off a fresh
+    // free-dictionary auto-lookup that would repeat the same overwrite.
+    lookupState = { word: wordForFallback, dictDone: true };
+
     // Ready for the person to review/adjust and hit "Add Entry" —
     // fully auto-populated, zero further interaction needed to get here.
     wordInput.focus();
@@ -10898,10 +10999,10 @@ window.addEventListener("message", (event) => {
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
   if (event.origin !== window.location.origin) return;
-  if (!event.data || event.data.type !== "GEMINI_BRIDGE_DISCONNECTED") return;
+  if (!event.data || event.data.type !== "AI_BRIDGE_DISCONNECTED") return;
   alert(
-    "The Gemini Bridge extension isn't responding — this usually happens right after it's been " +
-      "reloaded/updated. Please refresh this page (and the Gemini tab) and try again."
+    "The AI Bridge extension isn't responding — this usually happens right after it's been " +
+      "reloaded/updated. Please refresh this page (and the AI tab) and try again."
   );
 });
 
@@ -11395,6 +11496,198 @@ definitionsList.addEventListener("click", (e) => {
 })();
 
 /* =========================================================================
+   📝 FLOATING NOTEPAD
+   ---------------------------------------------------------------------
+   A cute, detachable scratchpad — entirely separate from your
+   vocabulary entries — for jotting down app-update ideas, bugs, or
+   to-dos while you're using the app. Same toggle/drag/position-
+   persistence pattern as the Audio Window above, just much simpler:
+   one plain text note, autosaved to localStorage as you type.
+
+   Storage (localStorage):
+     litVocabNotepadText      -> plain string, the note's content
+     litVocabNotepadActive    -> "true"/"false", whether the window is open
+     litVocabNotepadPosition  -> {left, top} last dragged-to position
+========================================================================= */
+const NOTEPAD_TEXT_STORAGE = "litVocabNotepadText";
+const NOTEPAD_ACTIVE_STORAGE = "litVocabNotepadActive";
+const NOTEPAD_POSITION_STORAGE = "litVocabNotepadPosition";
+
+let isNotepadActive = false;
+
+const notepadToggleBtn = document.getElementById("notepad-toggle-btn");
+const vocabNotepadWindow = document.getElementById("vocab-notepad-window");
+const npDragHandle = document.getElementById("np-drag-handle");
+const npTextarea = document.getElementById("np-textarea");
+const npCloseBtn = document.getElementById("np-close-btn");
+const npClearBtn = document.getElementById("np-clear-btn");
+const npSavedTag = document.getElementById("np-saved-tag");
+
+function showNpWindow() {
+  if (!vocabNotepadWindow) return;
+  vocabNotepadWindow.classList.remove("hidden");
+  vocabNotepadWindow.setAttribute("aria-hidden", "false");
+  // Next frame, same reasoning as showVawWindow() above — lets the
+  // fade/rise-in transition actually play instead of popping in place.
+  requestAnimationFrame(() => vocabNotepadWindow.classList.add("np-open"));
+}
+
+function hideNpWindow() {
+  if (!vocabNotepadWindow) return;
+  vocabNotepadWindow.classList.remove("np-open");
+  vocabNotepadWindow.setAttribute("aria-hidden", "true");
+  setTimeout(() => {
+    if (!isNotepadActive) vocabNotepadWindow.classList.add("hidden");
+  }, 220);
+}
+
+function setNotepadActive(on) {
+  isNotepadActive = !!on;
+  try {
+    localStorage.setItem(NOTEPAD_ACTIVE_STORAGE, String(isNotepadActive));
+  } catch (err) {
+    // non-fatal
+  }
+  if (notepadToggleBtn) {
+    notepadToggleBtn.setAttribute("aria-pressed", String(isNotepadActive));
+    notepadToggleBtn.classList.toggle("active", isNotepadActive);
+    notepadToggleBtn.title = `Notepad: ${isNotepadActive ? "ON" : "OFF"}`;
+  }
+  if (isNotepadActive) {
+    showNpWindow();
+  } else {
+    hideNpWindow();
+  }
+}
+
+notepadToggleBtn?.addEventListener("click", () => {
+  const turningOn = !isNotepadActive;
+  setNotepadActive(turningOn);
+  // Only steal focus on an explicit click-to-open — never on the silent
+  // restore-on-page-load path below, which would otherwise yank focus
+  // away from whatever the person was doing the moment the page loads.
+  if (turningOn) npTextarea?.focus();
+});
+npCloseBtn?.addEventListener("click", () => setNotepadActive(false));
+
+npClearBtn?.addEventListener("click", () => {
+  if (!npTextarea) return;
+  if (npTextarea.value.trim() && !confirm("Clear the notepad? This can't be undone.")) return;
+  npTextarea.value = "";
+  try {
+    localStorage.setItem(NOTEPAD_TEXT_STORAGE, "");
+  } catch (err) {
+    // non-fatal
+  }
+  npTextarea.focus();
+});
+
+// Autosave, debounced so a burst of keystrokes doesn't hit localStorage
+// on every single character — same idea as saveEntries() elsewhere.
+let npSaveTimer = null;
+let npTagTimer = null;
+
+function showNpSavedTag() {
+  if (!npSavedTag) return;
+  npSavedTag.classList.remove("hidden");
+  clearTimeout(npTagTimer);
+  npTagTimer = setTimeout(() => npSavedTag.classList.add("hidden"), 1200);
+}
+
+npTextarea?.addEventListener("input", () => {
+  clearTimeout(npSaveTimer);
+  npSaveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(NOTEPAD_TEXT_STORAGE, npTextarea.value);
+      showNpSavedTag();
+    } catch (err) {
+      console.error("Failed to save notepad text to localStorage.", err);
+    }
+  }, 400);
+});
+
+// ---- Dragging (header bar only; buttons inside it are excluded) ------
+(function initNpDrag() {
+  if (!npDragHandle || !vocabNotepadWindow) return;
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+
+  npDragHandle.addEventListener("mousedown", (e) => {
+    if (e.target.closest(".icon-btn")) return;
+    dragging = true;
+    const rect = vocabNotepadWindow.getBoundingClientRect();
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = rect.left;
+    startTop = rect.top;
+    vocabNotepadWindow.style.left = `${startLeft}px`;
+    vocabNotepadWindow.style.top = `${startTop}px`;
+    vocabNotepadWindow.style.right = "auto";
+    vocabNotepadWindow.style.bottom = "auto";
+    npDragHandle.classList.add("np-dragging");
+    e.preventDefault();
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const maxLeft = Math.max(0, window.innerWidth - vocabNotepadWindow.offsetWidth);
+    const maxTop = Math.max(0, window.innerHeight - vocabNotepadWindow.offsetHeight);
+    const newLeft = Math.min(Math.max(0, startLeft + (e.clientX - startX)), maxLeft);
+    const newTop = Math.min(Math.max(0, startTop + (e.clientY - startY)), maxTop);
+    vocabNotepadWindow.style.left = `${newLeft}px`;
+    vocabNotepadWindow.style.top = `${newTop}px`;
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    npDragHandle.classList.remove("np-dragging");
+    try {
+      localStorage.setItem(
+        NOTEPAD_POSITION_STORAGE,
+        JSON.stringify({ left: vocabNotepadWindow.style.left, top: vocabNotepadWindow.style.top })
+      );
+    } catch (err) {
+      // non-fatal
+    }
+  });
+})();
+
+// ---- Init: restore saved text + last position + on/off state ---------
+(function initNpPersisted() {
+  try {
+    const savedText = localStorage.getItem(NOTEPAD_TEXT_STORAGE);
+    if (npTextarea && typeof savedText === "string") npTextarea.value = savedText;
+  } catch (err) {
+    // non-fatal
+  }
+  try {
+    const rawPos = localStorage.getItem(NOTEPAD_POSITION_STORAGE);
+    if (rawPos && vocabNotepadWindow) {
+      const pos = JSON.parse(rawPos);
+      if (pos?.left && pos?.top) {
+        vocabNotepadWindow.style.left = pos.left;
+        vocabNotepadWindow.style.top = pos.top;
+        vocabNotepadWindow.style.right = "auto";
+        vocabNotepadWindow.style.bottom = "auto";
+      }
+    }
+  } catch (err) {
+    // non-fatal — falls back to the CSS default position
+  }
+  let savedActive = false;
+  try {
+    savedActive = localStorage.getItem(NOTEPAD_ACTIVE_STORAGE) === "true";
+  } catch (err) {
+    savedActive = false;
+  }
+  setNotepadActive(savedActive);
+})();
+
+/* =========================================================================
    CUSTOMIZABLE KEYBOARD SHORTCUT SYSTEM
    ---------------------------------------------------------------------
    A single source of truth (SHORTCUT_FIELDS + shortcutConfig) drives:
@@ -11447,6 +11740,14 @@ definitionsList.addEventListener("click", (e) => {
     imgRight: ["ArrowRight"],
     selectItem: ["Space"],
 
+    // Internal config key kept as "focusGeminiTab" (rather than renamed
+    // to e.g. "focusAiTab") so anyone's existing saved shortcut config
+    // in localStorage keeps working unchanged after upgrading — it now
+    // means "focus the tab of whichever AI provider is currently
+    // selected" (see aiProviderSelect in the AI BRIDGE block above),
+    // not specifically Gemini. Same reasoning for restartGeminiTab and
+    // searchGemini below. Only the on-screen label changed (see
+    // SHORTCUT_FIELDS).
     focusGeminiTab: ["F7"],
     focusAppTab: ["F8"],
     restartGeminiTab: ["Backquote"],
@@ -11497,7 +11798,7 @@ definitionsList.addEventListener("click", (e) => {
     playUs: ["BracketLeft"],
     playUk: ["BracketRight"],
 
-    searchGemini: ["Quote"],
+    searchGemini: ["Quote"], // fires "Search AI" for whichever provider is selected
     addEntry: ["Enter"],
     addManualDefinition: ["Semicolon"],
 
@@ -11528,8 +11829,8 @@ definitionsList.addEventListener("click", (e) => {
 
   // Rendering metadata for the sidebar — order here is display order.
   const SHORTCUT_FIELDS = [
-    { key: "searchGemini", label: "Search Gemini", group: "Main Actions" },
-    { key: "restartGeminiTab", label: "Restart Gemini Tab (Close & Reopen)", group: "Main Actions" },
+    { key: "searchGemini", label: "Search AI", group: "Main Actions" },
+    { key: "restartGeminiTab", label: "Restart AI Tab (Close & Reopen)", group: "Main Actions" },
     { key: "addEntry", label: "Add Entry", group: "Main Actions" },
     { key: "addManualDefinition", label: "Add Manual Definition", group: "Main Actions" },
 
@@ -11542,7 +11843,7 @@ definitionsList.addEventListener("click", (e) => {
     { key: "imgRight", label: "Images List — Right", group: "List Navigation" },
     { key: "selectItem", label: "Select Highlighted Item", group: "List Navigation" },
 
-    { key: "focusGeminiTab", label: "Focus Gemini Tab", group: "Extension / Tabs" },
+    { key: "focusGeminiTab", label: "Focus AI Tab (selected provider)", group: "Extension / Tabs" },
     { key: "focusAppTab", label: "Return to App Tab", group: "Extension / Tabs" },
     { key: "focusYoutubeTab", label: "Focus YouTube Tab", group: "Extension / Tabs" },
     { key: "focusYoutubeSearch", label: "Focus YouTube Window Search Bar", group: "Extension / Tabs" },
@@ -11733,15 +12034,22 @@ definitionsList.addEventListener("click", (e) => {
   }
 
   // Tells the companion extension (if installed) which keys currently
-  // mean "focus Gemini tab" / "return to app tab" / "focus YouTube
-  // search bar" / "skip YouTube ad", so content-gemini.js can listen for
-  // the *same* "return to app tab" key while you're sitting on the
-  // Gemini tab itself, and content-youtube.js can listen for the *same*
-  // "focus YouTube search bar" / "skip ad" keys while you're sitting on
-  // a real youtube.com tab (or, for Skip Ad, inside the app's own
-  // embedded YouTube Window player — see skipAd() in youtube-window.js)
-  // — see background.js / bridge-app.js for the relay, and
-  // content-gemini.js / content-youtube.js for where each is consumed.
+  // mean "focus AI tab" / "return to app tab" / "focus YouTube search
+  // bar" / "skip YouTube ad", so content-gemini.js/content-chatgpt.js/
+  // content-deepseek.js can listen for the *same* "return to app tab"
+  // key while you're sitting on that AI's own tab, and
+  // content-youtube.js can listen for the *same* "focus YouTube search
+  // bar" / "skip ad" keys while you're sitting on a real youtube.com
+  // tab (or, for Skip Ad, inside the app's own embedded YouTube Window
+  // player — see skipAd() in youtube-window.js) — see background.js /
+  // bridge-app.js for the relay, and content-gemini.js /
+  // content-chatgpt.js / content-deepseek.js / content-youtube.js for
+  // where each is consumed. focusAiKey is relayed under that name
+  // regardless of which provider it currently applies to — the content
+  // scripts on Gemini/ChatGPT/DeepSeek all read the same
+  // vocabBridge_focusAppKey value (see RETURN_KEY_STORAGE in each), so
+  // there's nothing provider-specific to send here beyond the key
+  // itself.
   function syncTabSwitchKeysToExtension() {
     // These four fields are expected to stay single-key bindings for
     // the extension bridge to make sense; if someone rebinds any of
@@ -11749,7 +12057,7 @@ definitionsList.addEventListener("click", (e) => {
     window.postMessage(
       {
         type: "SYNC_SHORTCUT_KEYS",
-        focusGeminiKey: shortcutConfig.focusGeminiTab?.[0] || null,
+        focusAiKey: shortcutConfig.focusGeminiTab?.[0] || null,
         focusAppKey: shortcutConfig.focusAppTab?.[0] || null,
         youtubeSearchKey: shortcutConfig.focusYoutubeSearch?.[0] || null,
         skipAdKey: shortcutConfig.skipYoutubeAd?.[0] || null,
@@ -12063,8 +12371,8 @@ definitionsList.addEventListener("click", (e) => {
   function applyShortcutTitles() {
     const targets = [
       [document.getElementById("entry-form-submit-btn"), "addEntry", "Add Entry"],
-      [typeof searchGeminiBtn !== "undefined" ? searchGeminiBtn : null, "searchGemini", "Search Gemini"],
-      [typeof restartGeminiTabBtn !== "undefined" ? restartGeminiTabBtn : null, "restartGeminiTab", "Restart Gemini Tab"],
+      [typeof searchGeminiBtn !== "undefined" ? searchGeminiBtn : null, "searchGemini", "Search AI"],
+      [typeof restartGeminiTabBtn !== "undefined" ? restartGeminiTabBtn : null, "restartGeminiTab", "Restart AI Tab"],
       [addDefinitionBtn, "addManualDefinition", "Add this definition"],
       [pronUsBtn, "playUs", "Play American pronunciation"],
       [pronUkBtn, "playUk", "Play British pronunciation"],
@@ -12363,7 +12671,7 @@ definitionsList.addEventListener("click", (e) => {
 
       case "focusGeminiTab":
         e.preventDefault();
-        window.postMessage({ type: "FOCUS_GEMINI_TAB" }, window.location.origin);
+        window.postMessage({ type: "FOCUS_AI_PROVIDER_TAB", provider: getSelectedAiProvider() }, window.location.origin);
         break;
 
       case "focusYoutubeTab":
