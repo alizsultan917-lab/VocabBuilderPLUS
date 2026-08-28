@@ -159,13 +159,37 @@
 
     <div id="notepad-widget" class="storage-widget">
       <button type="button" id="notepad-toggle-btn" class="storage-toggle-btn" title="Notepad: OFF" aria-pressed="false">
-        <span class="storage-icon">📝</span>
+        <!-- Hand-drawn little spiral notepad + heart sticker, redrawn as
+             inline SVG instead of the plain 📝 emoji (same reasoning as
+             the YouTube logomark above) so it reads as a cute, on-brand
+             illustration rather than a generic OS emoji, and renders
+             identically everywhere. Purely decorative — the button's own
+             title/aria-pressed carry the accessible state. -->
+        <svg class="storage-icon notepad-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <circle cx="7" cy="3.2" r="1" fill="#9FC6EA"></circle>
+          <circle cx="10.5" cy="3.2" r="1" fill="#9FC6EA"></circle>
+          <circle cx="14" cy="3.2" r="1" fill="#9FC6EA"></circle>
+          <rect x="4" y="3.2" width="15" height="17.6" rx="2.5" fill="#FFF6E6" stroke="#E7B98A" stroke-width="1"></rect>
+          <line x1="7" y1="9.5" x2="16" y2="9.5" stroke="#8FB2D6" stroke-width="1.3" stroke-linecap="round"></line>
+          <line x1="7" y1="13" x2="16" y2="13" stroke="#8FB2D6" stroke-width="1.3" stroke-linecap="round"></line>
+          <line x1="7" y1="16.5" x2="12.5" y2="16.5" stroke="#8FB2D6" stroke-width="1.3" stroke-linecap="round"></line>
+          <path d="M17.4 15.9c-.75-.68-1.4-1.27-1.4-2.02 0-.6.48-1.08 1.08-1.08.36 0 .68.18.87.46.19-.28.51-.46.87-.46.6 0 1.08.48 1.08 1.08 0 .75-.65 1.34-1.4 2.02l-.55.5-.55-.5z" fill="#FF9FB2"></path>
+        </svg>
       </button>
     </div>
 
     <div id="shortcuts-widget" class="storage-widget">
       <button type="button" id="shortcuts-toggle-btn" class="storage-toggle-btn" title="Keyboard Shortcuts">
         <span class="storage-icon">⌨️</span>
+      </button>
+    </div>
+
+    <!-- Opens the #prompt-sidebar (see below, near #settings-sidebar) —
+         edit/choose the same up-to-4 saved AI-lookup prompts as the
+         extension's toolbar popup, without leaving the app. -->
+    <div id="ai-prompt-widget" class="storage-widget">
+      <button type="button" id="ai-prompt-toggle-btn" class="storage-toggle-btn" title="AI Prompts">
+        <span class="storage-icon">🤖</span>
       </button>
     </div>
 
@@ -806,6 +830,45 @@
   <div id="shortcut-fields-list" class="shortcut-fields-list"></div>
   <div class="settings-sidebar-footer">
     <button type="button" id="shortcuts-reset-btn" class="btn btn-secondary btn-small">Reset to Defaults</button>
+  </div>
+</aside>
+
+<!-- "🤖 AI Prompts" sidebar — view/edit/choose the same up-to-4 saved
+     AI-lookup prompt variants as the extension's toolbar popup
+     (popup.html), from inside the app itself. Talks to background.js's
+     shared vocabBridge_promptSlots/_activePromptIndex storage through
+     bridge-app.js's PROMPT_SLOTS_REQUEST/_RESPONSE relay — see the
+     "PROMPT SLOT SIDEBAR" block near the end of script.js. Reuses the
+     same .settings-sidebar shell/slide-in as the Keyboard Shortcuts
+     sidebar above (own #prompt-sidebar-backdrop/#prompt-sidebar ids so
+     the two can open independently). -->
+<div id="prompt-sidebar-backdrop" class="settings-sidebar-backdrop"></div>
+<aside id="prompt-sidebar" class="settings-sidebar" aria-hidden="true">
+  <div class="settings-sidebar-header">
+    <h2>🤖 AI Prompts</h2>
+    <button type="button" id="prompt-sidebar-close-btn" class="icon-btn" title="Close">✕</button>
+  </div>
+  <p class="settings-sidebar-hint">
+    Keep up to 4 prompt variants saved at once — pick a tab to view/edit one, then hit
+    <strong>Use this prompt</strong> to make it the one sent on your next search. The other
+    three stay saved untouched. This same prompt is sent to whichever AI you pick above —
+    Gemini, ChatGPT, or DeepSeek — so you only ever need to maintain it in one place. Use
+    <code>{word}</code> for the searched word and <code>{book}</code> for the book title —
+    both get swapped in automatically. Keep the reply as one line with two <code>|</code>
+    separators (definition, then US pronunciation, then UK pronunciation) — that's how the
+    extension pulls the pronunciations out. Requires the extension to be installed.
+  </p>
+  <div id="prompt-tabs-list" class="prompt-tabs-list"></div>
+  <input id="prompt-slot-name" class="prompt-slot-name-input" type="text" maxlength="40" placeholder="Prompt name" />
+  <textarea id="prompt-slot-text" class="prompt-slot-textarea" rows="10"></textarea>
+  <div class="settings-sidebar-footer prompt-sidebar-footer">
+    <div class="prompt-footer-row">
+      <button type="button" id="prompt-reset-btn" class="btn btn-secondary btn-small">Reset to default</button>
+      <button type="button" id="prompt-save-btn" class="btn btn-primary btn-small">Save</button>
+    </div>
+    <button type="button" id="prompt-use-btn" class="btn btn-secondary btn-small prompt-use-btn">Use this prompt</button>
+    <div id="prompt-active-badge" class="prompt-active-badge"></div>
+    <div id="prompt-status" class="prompt-status"></div>
   </div>
 </aside>
 
