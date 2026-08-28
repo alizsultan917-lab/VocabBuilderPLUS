@@ -141,6 +141,22 @@
       </button>
     </div>
 
+    <!-- AI provider picker (Gemini / ChatGPT / DeepSeek) — moved here from
+         the Add a Word form's <select>. Same spherical shape/size as every
+         other header icon; the icon shown is always the currently selected
+         provider's logo (see initAiProviderPicker() / applyAiProviderSelection()
+         in script.js), and choosing a different one here also updates the
+         "Fetch with AI" button's icon to match. -->
+    <div id="ai-provider-widget" class="storage-widget">
+      <button type="button" id="ai-provider-toggle-btn" class="storage-toggle-btn ai-provider-toggle-btn" title="AI provider" aria-haspopup="true" aria-expanded="false">
+        <span id="ai-provider-toggle-icon" class="storage-icon ai-provider-icon-slot"></span>
+      </button>
+      <div id="ai-provider-panel" class="storage-panel ai-provider-panel hidden">
+        <p class="storage-status">Pick which AI powers "Fetch with AI", "Search AI", and "Restart AI Tab".</p>
+        <div id="ai-provider-options" class="ai-provider-options"></div>
+      </div>
+    </div>
+
     <div id="notepad-widget" class="storage-widget">
       <button type="button" id="notepad-toggle-btn" class="storage-toggle-btn" title="Notepad: OFF" aria-pressed="false">
         <span class="storage-icon">📝</span>
@@ -849,16 +865,11 @@
 
           <div class="ai-fetch-row">
             <button type="button" id="ai-fetch-btn" class="btn btn-ai">
-              <span class="ai-fetch-icon">✨</span> <span id="ai-fetch-btn-label">Fetch with AI</span>
+              <span class="ai-fetch-icon" id="ai-fetch-icon"></span> <span id="ai-fetch-btn-label">Fetch with AI</span>
             </button>
             <button type="button" id="ai-settings-btn" class="link-btn key-link-btn" title="Configure your local/cloud AI settings">AI Settings</button>
-            <select id="ai-provider-select" class="ai-provider-select" title="Which AI 'Search AI' / 'Restart AI Tab' target (requires the AI Bridge extension)">
-              <option value="gemini">✨ Gemini</option>
-              <option value="chatgpt">🤖 ChatGPT</option>
-              <option value="deepseek">🐋 DeepSeek</option>
-            </select>
             <button type="button" id="search-gemini-btn" class="btn btn-gemini" title="Opens the selected AI in another tab and searches this word (requires the AI Bridge extension)">
-              <span class="gemini-btn-icon">✨</span> <span class="gemini-btn-label">Search AI</span>
+              <span class="gemini-btn-icon" id="search-ai-icon"></span> <span class="gemini-btn-label">Search AI</span>
             </button>
             <button type="button" id="restart-gemini-tab-btn" class="btn btn-gemini" title="Closes the current tab for the selected AI (if one is open) and opens a fresh one (requires the AI Bridge extension)">
               <span class="gemini-btn-icon">🔄</span> <span class="gemini-btn-label">Restart AI Tab</span>
