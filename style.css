@@ -2198,6 +2198,13 @@ textarea {
   filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.5));
 }
 
+/* ---------- 📝 Notepad header icon ---------- */
+.notepad-icon-svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
 .ai-provider-panel {
   width: 240px;
 }
@@ -4969,6 +4976,116 @@ body.bubbly-mode .switch-thumb {
   .settings-sidebar-backdrop {
     transition-duration: 0.01ms !important;
   }
+}
+
+/* =======================================================================
+   "🤖 AI PROMPTS" SIDEBAR (#prompt-sidebar)
+   Same .settings-sidebar shell as Keyboard Shortcuts above — this just
+   adds the tab strip + name field + textarea + footer specific to
+   editing/choosing a saved prompt slot. Mirrors popup.html's own
+   #tabs/.tab styling so the in-app editor and the toolbar popup feel
+   like the same feature. See the "PROMPT SLOT SIDEBAR" block near the
+   end of script.js.
+======================================================================= */
+
+.prompt-tabs-list {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+
+.prompt-tab {
+  flex: 1;
+  min-width: 64px;
+  padding: 0.4rem 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--blue-pale);
+  color: var(--ink);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.prompt-tab:hover {
+  background: #d3e2f2;
+}
+
+.prompt-tab-selected {
+  border-color: var(--blue);
+  background: var(--paper);
+  font-weight: 700;
+  box-shadow: 0 0 0 1px var(--blue) inset;
+}
+
+.prompt-tab-active::before {
+  content: "\25CF ";
+  color: var(--green);
+  font-size: 0.6rem;
+}
+
+.prompt-slot-name-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 0.82rem;
+  margin-bottom: 0.5rem;
+}
+
+.prompt-slot-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  flex: 1;
+  min-height: 220px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.prompt-sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.prompt-footer-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.prompt-footer-row .btn {
+  flex: 1;
+}
+
+.prompt-use-btn {
+  width: 100%;
+}
+
+.prompt-use-btn:disabled {
+  background: var(--blue-pale);
+  color: var(--ink-soft);
+  cursor: default;
+  box-shadow: none;
+}
+
+.prompt-active-badge {
+  font-size: 0.74rem;
+  color: var(--green);
+  font-weight: 600;
+  min-height: 1rem;
+  text-align: center;
+}
+
+.prompt-status {
+  font-size: 0.74rem;
+  color: var(--green);
+  min-height: 1rem;
+  text-align: center;
 }
 
 /* ---------------------------------------------------------------------

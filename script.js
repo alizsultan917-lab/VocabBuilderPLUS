@@ -1117,6 +1117,7 @@ const CUSTOMIZABLE_IDS = [
   "customize-widget",
   "storage-widget",
   "performance-widget",
+  "ai-prompt-widget",
   "word-input",
   "page-input-wrap",
   "book-input",
@@ -1170,6 +1171,7 @@ const NO_RESIZE_IDS = new Set([
   "customize-widget",
   "storage-widget",
   "performance-widget",
+  "ai-prompt-widget",
 ]);
 const MIN_ELEMENT_WIDTH = 32;
 const MIN_ELEMENT_HEIGHT = 24;
@@ -12220,6 +12222,237 @@ npTextarea?.addEventListener("input", () => {
   });
   settingsSidebarCloseBtn?.addEventListener("click", closeSidebar);
   settingsSidebarBackdrop?.addEventListener("click", closeSidebar);
+
+  /* -----------------------------------------------------------------
+     PROMPT SLOT SIDEBAR: "🤖 AI Prompts" — view/edit/choose the same
+     up-to-4 saved AI-lookup prompt variants as the extension's toolbar
+     popup (popup.html/popup.js), without leaving the app.
+
+     Talks to background.js's shared vocabBridge_promptSlots/
+     _activePromptIndex storage through bridge-app.js's
+     PROMPT_SLOTS_REQUEST/_RESPONSE round trip (see the big comment
+     near the bottom of bridge-app.js) — same storage, same shape as
+     the popup, so editing here or there stays in sync (last save
+     wins, and this sidebar re-fetches fresh every time it opens).
+
+     DEFAULT_PROMPT_TEMPLATE below is only the display default shown
+     by "Reset to default" — kept in sync BY HAND with the identical
+     constant in popup.js, content-gemini.js, content-chatgpt.js, and
+     content-deepseek.js. Change one, change all five.
+  ----------------------------------------------------------------- */
+  const PROMPT_SLOT_COUNT = 4;
+  const DEFAULT_PROMPT_TEMPLATE = (
+    `Context: the book "{book}". Reply with ONE plain-text line, no markdown, no labels: ` +
+    `a 2-line definition of "{word}" in this context, then "|", then {word}'s US pronunciation ` +
+    `as a natural-sounding phonetic respelling (real American accent — e.g. pronounced "r", ` +
+    `stressed syllable in CAPS, no IPA symbols), then "|", then {word}'s UK pronunciation the ` +
+    `same way (real British accent — e.g. dropped final "r"). Then attach one representative image.`
+  );
+
+  let promptSlots = Array.from({ length: PROMPT_SLOT_COUNT }, (_, i) => ({
+    name: `Prompt ${i + 1}`,
+    text: DEFAULT_PROMPT_TEMPLATE,
+  }));
+  let promptActiveIndex = 0;
+  let promptCurrentTab = 0;
+
+  // Matches each in-flight PROMPT_SLOTS_REQUEST to the resolver
+  // waiting on its PROMPT_SLOTS_RESPONSE, via a round-tripped
+  // requestId — see bridge-app.js. In practice this sidebar only ever
+  // has one request in flight at a time, but this keeps it correct if
+  // that ever changes instead of silently resolving the wrong call.
+  let promptRequestSeq = 0;
+  const pendingPromptRequests = new Map();
+
+  function requestPromptSlots(action, extra = {}) {
+    return new Promise((resolve, reject) => {
+      const requestId = `p${Date.now()}_${promptRequestSeq++}`;
+      pendingPromptRequests.set(requestId, { resolve, reject });
+      window.postMessage({ type: "PROMPT_SLOTS_REQUEST", requestId, action, ...extra }, window.location.origin);
+      // The extension bridge can be entirely absent (not installed, or
+      // bridge-app.js just hasn't loaded yet) — don't leave the UI
+      // hanging forever on a response that will never arrive.
+      setTimeout(() => {
+        if (!pendingPromptRequests.has(requestId)) return;
+        pendingPromptRequests.delete(requestId);
+        reject(new Error("No response from the extension — is it installed and enabled?"));
+      }, 5000);
+    });
+  }
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || !event.data) return;
+    if (event.data.type !== "PROMPT_SLOTS_RESPONSE") return;
+    const pending = pendingPromptRequests.get(event.data.requestId);
+    if (!pending) return;
+    pendingPromptRequests.delete(event.data.requestId);
+    if (event.data.ok) pending.resolve(event.data);
+    else pending.reject(new Error(event.data.error || "Request failed"));
+  });
+
+  const promptSidebar = document.getElementById("prompt-sidebar");
+  const promptSidebarBackdrop = document.getElementById("prompt-sidebar-backdrop");
+  const promptToggleBtn = document.getElementById("ai-prompt-toggle-btn");
+  const promptSidebarCloseBtn = document.getElementById("prompt-sidebar-close-btn");
+  const promptTabsEl = document.getElementById("prompt-tabs-list");
+  const promptNameInput = document.getElementById("prompt-slot-name");
+  const promptTextarea = document.getElementById("prompt-slot-text");
+  const promptSaveBtn = document.getElementById("prompt-save-btn");
+  const promptUseBtn = document.getElementById("prompt-use-btn");
+  const promptResetBtn = document.getElementById("prompt-reset-btn");
+  const promptActiveBadge = document.getElementById("prompt-active-badge");
+  const promptStatusEl = document.getElementById("prompt-status");
+
+  function showPromptStatus(msg) {
+    if (!promptStatusEl) return;
+    promptStatusEl.textContent = msg;
+    setTimeout(() => {
+      if (promptStatusEl.textContent === msg) promptStatusEl.textContent = "";
+    }, 1800);
+  }
+
+  function renderPromptTabs() {
+    if (!promptTabsEl) return;
+    promptTabsEl.innerHTML = "";
+    promptSlots.forEach((slot, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className =
+        "prompt-tab" +
+        (i === promptCurrentTab ? " prompt-tab-selected" : "") +
+        (i === promptActiveIndex ? " prompt-tab-active" : "");
+      btn.textContent = slot.name || `Prompt ${i + 1}`;
+      btn.title =
+        i === promptActiveIndex
+          ? "Currently used for AI searches — click to view/edit"
+          : "Click to view/edit this saved prompt";
+      btn.addEventListener("click", () => selectPromptTab(i));
+      promptTabsEl.appendChild(btn);
+    });
+  }
+
+  function updatePromptActiveBadge() {
+    if (promptActiveBadge) {
+      promptActiveBadge.textContent =
+        promptCurrentTab === promptActiveIndex ? "● Active — used for every AI search" : "";
+    }
+    if (promptUseBtn) {
+      promptUseBtn.disabled = promptCurrentTab === promptActiveIndex;
+      promptUseBtn.textContent =
+        promptCurrentTab === promptActiveIndex ? "This is the active prompt" : "Use this prompt";
+    }
+  }
+
+  function selectPromptTab(i) {
+    promptCurrentTab = i;
+    if (promptNameInput) promptNameInput.value = promptSlots[i]?.name || `Prompt ${i + 1}`;
+    if (promptTextarea) promptTextarea.value = promptSlots[i]?.text || DEFAULT_PROMPT_TEMPLATE;
+    renderPromptTabs();
+    updatePromptActiveBadge();
+  }
+
+  async function loadPromptSlotsIntoSidebar() {
+    try {
+      const { slots, activeIndex } = await requestPromptSlots("get");
+      if (Array.isArray(slots) && slots.length === PROMPT_SLOT_COUNT) promptSlots = slots;
+      promptActiveIndex = Number.isInteger(activeIndex) ? activeIndex : 0;
+      selectPromptTab(promptCurrentTab < promptSlots.length ? promptCurrentTab : 0);
+    } catch (err) {
+      console.warn("[VocabRegister] Couldn't load AI prompt slots from the extension:", err);
+      showPromptStatus("Couldn't reach the extension — is it installed?");
+    }
+  }
+
+  function openPromptSidebar() {
+    if (!promptSidebar) return;
+    promptSidebar.classList.add("open");
+    promptSidebarBackdrop?.classList.add("open");
+    promptSidebar.setAttribute("aria-hidden", "false");
+    // Re-fetch every time it opens (not just once) so edits made from
+    // the extension's own toolbar popup while the app was already
+    // open show up here without needing a page reload.
+    loadPromptSlotsIntoSidebar();
+  }
+  function closePromptSidebar() {
+    if (!promptSidebar) return;
+    promptSidebar.classList.remove("open");
+    promptSidebarBackdrop?.classList.remove("open");
+    promptSidebar.setAttribute("aria-hidden", "true");
+  }
+  function togglePromptSidebar() {
+    if (!promptSidebar) return;
+    if (promptSidebar.classList.contains("open")) closePromptSidebar();
+    else openPromptSidebar();
+  }
+
+  promptToggleBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    togglePromptSidebar();
+  });
+  promptSidebarCloseBtn?.addEventListener("click", closePromptSidebar);
+  promptSidebarBackdrop?.addEventListener("click", closePromptSidebar);
+
+  promptSaveBtn?.addEventListener("click", async () => {
+    const text = (promptTextarea?.value || "").trim();
+    if (!text) return;
+    const name = (promptNameInput?.value || "").trim() || `Prompt ${promptCurrentTab + 1}`;
+    try {
+      const { slots, activeIndex } = await requestPromptSlots("save", { index: promptCurrentTab, name, text });
+      promptSlots = slots;
+      promptActiveIndex = activeIndex;
+      renderPromptTabs();
+      updatePromptActiveBadge();
+      showPromptStatus("Saved ✓");
+    } catch (err) {
+      showPromptStatus("Couldn't save — is the extension installed?");
+    }
+  });
+
+  promptUseBtn?.addEventListener("click", async () => {
+    try {
+      const { slots, activeIndex } = await requestPromptSlots("setActive", { index: promptCurrentTab });
+      promptSlots = slots;
+      promptActiveIndex = activeIndex;
+      renderPromptTabs();
+      updatePromptActiveBadge();
+      showPromptStatus("Now active for searches ✓");
+    } catch (err) {
+      showPromptStatus("Couldn't switch — is the extension installed?");
+    }
+  });
+
+  promptResetBtn?.addEventListener("click", async () => {
+    const name = (promptNameInput?.value || "").trim() || `Prompt ${promptCurrentTab + 1}`;
+    if (promptTextarea) promptTextarea.value = DEFAULT_PROMPT_TEMPLATE;
+    if (promptNameInput) promptNameInput.value = name;
+    try {
+      const { slots, activeIndex } = await requestPromptSlots("save", {
+        index: promptCurrentTab,
+        name,
+        text: DEFAULT_PROMPT_TEMPLATE,
+      });
+      promptSlots = slots;
+      promptActiveIndex = activeIndex;
+      renderPromptTabs();
+      updatePromptActiveBadge();
+      showPromptStatus("Reset to default ✓");
+    } catch (err) {
+      showPromptStatus("Couldn't reset — is the extension installed?");
+    }
+  });
+
+  promptNameInput?.addEventListener("change", async () => {
+    const name = (promptNameInput.value || "").trim() || `Prompt ${promptCurrentTab + 1}`;
+    const text = (promptTextarea?.value || "").trim() || promptSlots[promptCurrentTab]?.text || DEFAULT_PROMPT_TEMPLATE;
+    try {
+      const { slots, activeIndex } = await requestPromptSlots("save", { index: promptCurrentTab, name, text });
+      promptSlots = slots;
+      promptActiveIndex = activeIndex;
+      renderPromptTabs();
+    } catch (err) {
+      /* silent — the name just re-syncs the next time the sidebar opens */
+    }
+  });
 
   let recordingBtn = null;
   let recordingKey = null;
