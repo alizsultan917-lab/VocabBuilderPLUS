@@ -10804,31 +10804,150 @@ init();
    AI_ENTRY_SCRAPED messages ever arrive.
 
    As of the multi-provider AI Bridge, every lookup targets whichever
-   engine is picked in aiProviderSelect below — "gemini" | "chatgpt" |
-   "deepseek" — instead of always meaning Gemini. The extension side
+   engine is picked via the header AI-provider bubble (getSelectedAiProvider()
+   below) — "gemini" | "chatgpt" | "deepseek" — instead of always meaning
+   Gemini. The extension side
    (background.js/bridge-app.js/content-<provider>.js) is fully
    provider-agnostic: this is the one place in the app that decides
    which provider string gets sent.
 --------------------------------------------------------------------- */
 
-// AI provider picker — remembers the last choice across reloads the
-// same way every other little app preference here does (localStorage).
+// AI provider picker — now a spherical header icon (like 🎧/🗺️/⌨️/⚙️)
+// instead of the old <select> that used to sit in the Add a Word form.
+// Remembers the last choice across reloads the same way every other
+// little app preference here does (localStorage). Each provider's logo
+// (drawn as inline SVG, same technique as the YouTube header icon, so it
+// renders identically everywhere with no emoji-font differences) is
+// shown in three places at once: the header bubble itself, the "Fetch
+// with AI" button, and the "Search AI" button — all three stay in sync
+// whenever the choice changes.
 const AI_PROVIDER_STORAGE_KEY = "vocabRegister_aiProvider";
-const aiProviderSelect = document.getElementById("ai-provider-select");
+
+let __aiProviderSvgUid = 0;
+const AI_PROVIDERS = [
+  {
+    id: "gemini",
+    label: "Gemini",
+    svg() {
+      const uid = `ai-provider-gemini-grad-${__aiProviderSvgUid++}`;
+      return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="12" r="12" fill="#ffffff"></circle>
+        <defs>
+          <linearGradient id="${uid}" x1="2" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#4C8DF6"></stop>
+            <stop offset="0.5" stop-color="#9168E4"></stop>
+            <stop offset="1" stop-color="#F2994A"></stop>
+          </linearGradient>
+        </defs>
+        <path fill="url(#${uid})" d="M12 4.2C12 8.65 8.65 12 4.2 12C8.65 12 12 15.65 12 19.8C12 15.65 15.65 12 19.8 12C15.65 12 12 8.65 12 4.2Z"></path>
+      </svg>`;
+    },
+  },
+  {
+    id: "chatgpt",
+    label: "ChatGPT",
+    svg() {
+      return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="12" r="12" fill="#000000"></circle>
+        <g fill="#ffffff">
+          <rect x="10.6" y="3.2" width="2.8" height="8.6" rx="1.4" transform="rotate(0 12 12)"></rect>
+          <rect x="10.6" y="3.2" width="2.8" height="8.6" rx="1.4" transform="rotate(60 12 12)"></rect>
+          <rect x="10.6" y="3.2" width="2.8" height="8.6" rx="1.4" transform="rotate(120 12 12)"></rect>
+          <rect x="10.6" y="3.2" width="2.8" height="8.6" rx="1.4" transform="rotate(180 12 12)"></rect>
+          <rect x="10.6" y="3.2" width="2.8" height="8.6" rx="1.4" transform="rotate(240 12 12)"></rect>
+          <rect x="10.6" y="3.2" width="2.8" height="8.6" rx="1.4" transform="rotate(300 12 12)"></rect>
+        </g>
+        <circle cx="12" cy="12" r="2.6" fill="#000000"></circle>
+      </svg>`;
+    },
+  },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    svg() {
+      return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="12" r="12" fill="#4D6BFE"></circle>
+        <path d="M4 10c1.6 2.4 3.3 2.4 5 0s3.4-2.4 5 0 3.4 2.4 5 0" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round"></path>
+        <path d="M4 14.5c1.6 2.4 3.3 2.4 5 0s3.4-2.4 5 0 3.4 2.4 5 0" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" opacity="0.6"></path>
+      </svg>`;
+    },
+  },
+];
+
+const aiProviderToggleBtn = document.getElementById("ai-provider-toggle-btn");
+const aiProviderToggleIcon = document.getElementById("ai-provider-toggle-icon");
+const aiProviderPanel = document.getElementById("ai-provider-panel");
+const aiProviderOptions = document.getElementById("ai-provider-options");
+const aiFetchIconSlot = document.getElementById("ai-fetch-icon");
+const searchAiIconSlot = document.getElementById("search-ai-icon");
+
+let selectedAiProvider = "gemini";
 
 function getSelectedAiProvider() {
-  return aiProviderSelect?.value || "gemini";
+  return selectedAiProvider;
 }
 
-if (aiProviderSelect) {
-  const savedProvider = localStorage.getItem(AI_PROVIDER_STORAGE_KEY);
-  if (savedProvider && Array.from(aiProviderSelect.options).some((o) => o.value === savedProvider)) {
-    aiProviderSelect.value = savedProvider;
+function applyAiProviderSelection(id, { persist = true } = {}) {
+  const provider = AI_PROVIDERS.find((p) => p.id === id) || AI_PROVIDERS[0];
+  selectedAiProvider = provider.id;
+
+  if (aiProviderToggleIcon) aiProviderToggleIcon.innerHTML = provider.svg();
+  if (aiProviderToggleBtn) aiProviderToggleBtn.title = `AI provider: ${provider.label}`;
+  if (aiFetchIconSlot) aiFetchIconSlot.innerHTML = provider.svg();
+  if (searchAiIconSlot) searchAiIconSlot.innerHTML = provider.svg();
+
+  if (aiProviderOptions) {
+    aiProviderOptions.querySelectorAll(".ai-provider-option").forEach((btn) => {
+      const isSelected = btn.dataset.provider === provider.id;
+      btn.classList.toggle("selected", isSelected);
+      btn.setAttribute("aria-checked", String(isSelected));
+    });
   }
-  aiProviderSelect.addEventListener("change", () => {
-    localStorage.setItem(AI_PROVIDER_STORAGE_KEY, aiProviderSelect.value);
-  });
+
+  if (persist) localStorage.setItem(AI_PROVIDER_STORAGE_KEY, provider.id);
 }
+
+function initAiProviderPicker() {
+  if (aiProviderOptions) {
+    aiProviderOptions.innerHTML = AI_PROVIDERS.map(
+      (p) => `<button type="button" class="ai-provider-option" data-provider="${p.id}" role="menuitemradio" aria-checked="false">
+        ${p.svg()}
+        <span class="ai-provider-option-label">${p.label}</span>
+        <span class="ai-provider-option-check">✓</span>
+      </button>`
+    ).join("");
+
+    aiProviderOptions.addEventListener("click", (e) => {
+      const btn = e.target.closest(".ai-provider-option");
+      if (!btn) return;
+      applyAiProviderSelection(btn.dataset.provider);
+      aiProviderPanel.classList.add("hidden");
+      aiProviderToggleBtn?.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  const savedProvider = localStorage.getItem(AI_PROVIDER_STORAGE_KEY);
+  const initial = AI_PROVIDERS.some((p) => p.id === savedProvider) ? savedProvider : "gemini";
+  applyAiProviderSelection(initial, { persist: false });
+
+  if (aiProviderToggleBtn && aiProviderPanel) {
+    aiProviderToggleBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const willShow = aiProviderPanel.classList.contains("hidden");
+      aiProviderPanel.classList.toggle("hidden");
+      aiProviderToggleBtn.setAttribute("aria-expanded", String(willShow));
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!aiProviderPanel.classList.contains("hidden") && !e.target.closest("#ai-provider-widget")) {
+        aiProviderPanel.classList.add("hidden");
+        aiProviderToggleBtn.setAttribute("aria-expanded", "false");
+      }
+    });
+  }
+}
+
+initAiProviderPicker();
 
 // "Search AI" button — asks the extension to focus/open the selected
 // provider's tab and type this word into its chat box (the
@@ -11744,8 +11863,8 @@ npTextarea?.addEventListener("input", () => {
     // to e.g. "focusAiTab") so anyone's existing saved shortcut config
     // in localStorage keeps working unchanged after upgrading — it now
     // means "focus the tab of whichever AI provider is currently
-    // selected" (see aiProviderSelect in the AI BRIDGE block above),
-    // not specifically Gemini. Same reasoning for restartGeminiTab and
+    // selected" (see the header AI-provider bubble in the AI BRIDGE block
+    // above), not specifically Gemini. Same reasoning for restartGeminiTab and
     // searchGemini below. Only the on-screen label changed (see
     // SHORTCUT_FIELDS).
     focusGeminiTab: ["F7"],

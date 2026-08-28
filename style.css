@@ -2163,34 +2163,88 @@ textarea {
 }
 
 /* ---------- AI provider picker (Gemini / ChatGPT / DeepSeek) ---------- */
-/* Sits right before the Search AI / Restart AI Tab buttons and controls
-   which of the three the AI Bridge extension talks to. Styled to read
-   as part of the same control cluster as .btn-gemini below (rounded,
-   similar height) without competing with its gradient for attention. */
-.ai-provider-select {
-  height: 2.2rem;
-  padding: 0 1.6rem 0 0.7rem;
-  border-radius: 999px;
-  border: 1px solid rgba(145, 104, 228, 0.4);
-  background: var(--panel-bg, #fff);
+/* Lives in the header now, styled as just another spherical header icon
+   (same .storage-toggle-btn/.storage-widget/.storage-panel shapes as the
+   🎧/🗺️/📝/⌨️/⚙️ widgets beside it). The button's icon is always a
+   render of whichever provider is currently selected — see
+   applyAiProviderSelection() in script.js, which also keeps the "Fetch
+   with AI" and "Search AI" button icons on the Add a Word form in sync
+   with the same choice. */
+.ai-provider-icon-slot,
+.ai-fetch-icon,
+#search-ai-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.ai-provider-icon-slot svg,
+.ai-fetch-icon svg,
+#search-ai-icon svg {
+  display: block;
+}
+
+.ai-provider-icon-slot svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ai-fetch-icon svg,
+#search-ai-icon svg {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.5));
+}
+
+.ai-provider-panel {
+  width: 240px;
+}
+
+.ai-provider-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ai-provider-option {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
   color: inherit;
-  font-size: 0.85rem;
+  font-size: 0.88rem;
   font-family: inherit;
+  text-align: left;
   cursor: pointer;
-  appearance: none;
-  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
-  background-position: calc(100% - 12px) calc(50% - 2px), calc(100% - 7px) calc(50% - 2px);
-  background-size: 5px 5px, 5px 5px;
-  background-repeat: no-repeat;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.ai-provider-select:hover {
-  border-color: rgba(145, 104, 228, 0.7);
+.ai-provider-option svg {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
 }
 
-.ai-provider-select:focus-visible {
-  outline: 2px solid var(--ai, #9168e4);
-  outline-offset: 2px;
+.ai-provider-option:hover {
+  background: var(--blue-pale, #eaf1fb);
+}
+
+.ai-provider-option.selected {
+  background: var(--blue-pale, #eaf1fb);
+  border-color: rgba(145, 104, 228, 0.5);
+  font-weight: 600;
+}
+
+.ai-provider-option-check {
+  margin-left: auto;
+  color: var(--ai, #7c3aed);
+  font-size: 0.85rem;
 }
 
 /* ---------- Search Gemini button ---------- */
