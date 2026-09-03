@@ -261,6 +261,20 @@
         </div>
 
         <div class="limits-group">
+          <h4 class="limits-group-title">AI Search</h4>
+          <div class="bubbly-toggle-row">
+            <div class="bubbly-toggle-label">
+              <span class="bubbly-toggle-title">Auto-Submit AI Search</span>
+              <span class="bubbly-toggle-hint">On: pressing "Search AI" types the prompt into Gemini/ChatGPT/DeepSeek AND submits it for you automatically. Off: the prompt gets typed in but you'll need to press that tab's own Send button (or hit Enter) yourself before it replies.</span>
+            </div>
+            <label class="switch" for="auto-submit-ai-toggle">
+              <input type="checkbox" id="auto-submit-ai-toggle" checked>
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="limits-group">
           <h4 class="limits-group-title">Add Word Form Buttons</h4>
           <div class="bubbly-toggle-row">
             <div class="bubbly-toggle-label">
@@ -300,6 +314,7 @@
             </label>
           </div>
         </div>
+
 
         <div class="limits-group">
           <h4 class="limits-group-title">Definitions</h4>
@@ -740,6 +755,28 @@
           <div class="storage-panel-actions">
             <button type="button" id="sync-now-btn" class="btn btn-secondary btn-small">Sync Now</button>
           </div>
+        </div>
+
+        <hr class="storage-divider">
+
+        <p class="storage-status"><strong>Automatic Backup</strong></p>
+        <p id="auto-backup-status" class="storage-status">Checking backup status…</p>
+        <div class="storage-panel-actions">
+          <button type="button" id="choose-backup-folder-btn" class="btn btn-secondary btn-small">Choose Backup Folder</button>
+        </div>
+
+        <label class="storage-sync-hint" for="auto-backup-frequency-select">Frequency</label>
+        <select id="auto-backup-frequency-select"></select>
+
+        <p id="auto-backup-last-success" class="storage-sync-hint">Last Successful Backup: never</p>
+        <p id="auto-backup-last-count" class="storage-sync-hint">Entries in Last Backup: —</p>
+
+        <label class="storage-sync-hint" for="auto-backup-retention-select">Retention</label>
+        <select id="auto-backup-retention-select"></select>
+
+        <div class="storage-panel-actions">
+          <button type="button" id="backup-now-btn" class="btn btn-secondary btn-small">Back Up Now</button>
+          <button type="button" id="restore-backup-btn" class="btn btn-secondary btn-small">Restore Backup</button>
         </div>
       </div>
     </div>
@@ -1807,6 +1844,7 @@
 <script src="wallpaper-folder-service.js"></script>
 <script src="wallpaper-tone-contrast.js"></script>
 <script src="wallpaper-adaptive-text.js"></script>
+<script src="backup-manager.js"></script>
 <script src="script.js"></script>
 <!-- Twemoji: renders every map symbol (and country flag) as a crisp,
      full-colour SVG image instead of relying on whatever emoji font the

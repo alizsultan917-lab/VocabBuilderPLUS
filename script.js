@@ -400,6 +400,7 @@ const pageDualGroup = document.getElementById("page-dual-group");
 const mergePageBarsToggle = document.getElementById("merge-page-bars-toggle");
 const showScrollbarToggle = document.getElementById("show-scrollbar-toggle");
 const hideAudioWindowControlsToggle = document.getElementById("hide-audio-window-controls-toggle");
+const autoSubmitAiToggle = document.getElementById("auto-submit-ai-toggle");
 const hideFormButtonsToggle = document.getElementById("hide-form-buttons-toggle");
 const showAddEntryBtnToggle = document.getElementById("show-add-entry-btn-toggle");
 const showFetchAiBtnToggle = document.getElementById("show-fetch-ai-btn-toggle");
@@ -517,6 +518,18 @@ const syncDirectionRow = document.getElementById("sync-direction-row");
 const syncDirectionLocalRadio = document.getElementById("sync-direction-local-radio");
 const syncDirectionDriveRadio = document.getElementById("sync-direction-drive-radio");
 const syncNowBtn = document.getElementById("sync-now-btn");
+
+// Automatic Local Backup System UI (backup-manager.js) — thin element refs
+// only; all decisions about what these should say/do come from
+// BackupManager itself (see renderBackupStatus() below).
+const autoBackupStatus = document.getElementById("auto-backup-status");
+const chooseBackupFolderBtn = document.getElementById("choose-backup-folder-btn");
+const autoBackupFrequencySelect = document.getElementById("auto-backup-frequency-select");
+const autoBackupRetentionSelect = document.getElementById("auto-backup-retention-select");
+const autoBackupLastSuccess = document.getElementById("auto-backup-last-success");
+const autoBackupLastCount = document.getElementById("auto-backup-last-count");
+const backupNowBtn = document.getElementById("backup-now-btn");
+const restoreBackupBtn = document.getElementById("restore-backup-btn");
 const syncDirectionModal = document.getElementById("sync-direction-modal");
 const syncDirectionModalWarning = document.getElementById("sync-direction-modal-warning");
 const syncDirectionConfirmLabel = document.getElementById("sync-direction-confirm-label");
@@ -2542,6 +2555,99 @@ syncNowBtn.addEventListener("click", async () => {
   if (result.message) alert(result.message);
 });
 
+/* ---------------------------------------------------------------------
+   AUTOMATIC BACKUP UI (backup-manager.js — Part 6)
+   -------------------------------------------------------------------
+   Every handler below is thin: it calls a public BackupManager method
+   and lets BackupManager itself decide what changed and how the panel
+   should look afterwards (via the renderBackupStatus callback wired up
+   in init(), below). No backup business logic lives here — this file
+   only ever reads BackupManager.BACKUP_INTERVALS / RETENTION_OPTIONS to
+   populate the two <select> elements, and paints whatever status object
+   BackupManager hands back.
+--------------------------------------------------------------------- */
+
+// Populates the frequency/retention <select> elements from BackupManager's
+// own config objects — so the option list is never hand-duplicated here
+// and can't drift out of sync with what BackupManager actually supports.
+function populateBackupSelectOptions() {
+  if (!window.BackupManager) return;
+  autoBackupFrequencySelect.innerHTML = "";
+  for (const [key, config] of Object.entries(window.BackupManager.BACKUP_INTERVALS)) {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = config.label;
+    autoBackupFrequencySelect.appendChild(opt);
+  }
+  autoBackupRetentionSelect.innerHTML = "";
+  for (const [key, config] of Object.entries(window.BackupManager.RETENTION_OPTIONS)) {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = config.label;
+    autoBackupRetentionSelect.appendChild(opt);
+  }
+}
+
+// The renderBackupStatus callback passed into BackupManager.initialize().
+// Purely a paint step — every field here comes straight off the status
+// object BackupManager computed; this function makes no decisions of its
+// own about what the app's backup state currently is.
+function renderBackupStatus(status) {
+  autoBackupStatus.textContent = status.uiStatusLabel;
+  autoBackupStatus.classList.toggle(
+    "storage-status-warning",
+    status.uiState === "failed" || status.uiState === "permission-required"
+  );
+
+  chooseBackupFolderBtn.textContent = status.backupFolderLabel ? "Change Backup Folder" : "Choose Backup Folder";
+  chooseBackupFolderBtn.disabled = status.uiState === "unsupported";
+
+  if (autoBackupFrequencySelect.value !== status.selectedInterval) {
+    autoBackupFrequencySelect.value = status.selectedInterval;
+  }
+  if (autoBackupRetentionSelect.value !== status.retentionLimit) {
+    autoBackupRetentionSelect.value = status.retentionLimit;
+  }
+
+  autoBackupLastSuccess.textContent = status.lastSuccessfulBackup
+    ? `Last Successful Backup: ${new Date(status.lastSuccessfulBackup).toLocaleString()}`
+    : "Last Successful Backup: never";
+  autoBackupLastCount.textContent =
+    status.lastBackupEntryCount == null ? "Entries in Last Backup: —" : `Entries in Last Backup: ${status.lastBackupEntryCount}`;
+
+  backupNowBtn.disabled = status.uiState === "backup-in-progress" || status.uiState === "unsupported";
+  backupNowBtn.textContent = status.uiState === "backup-in-progress" ? "Backing Up…" : "Back Up Now";
+
+  // Restore reads a plain <input type="file">, so — unlike backupNowBtn —
+  // it isn't gated on "unsupported" (no File System Access API). It's
+  // still gated on "backup-in-progress": restoreBackup() itself runs a
+  // safety backup through the same backupInProgress lock createBackup()
+  // uses, so avoid letting someone kick off a second overlapping call.
+  restoreBackupBtn.disabled = status.uiState === "backup-in-progress";
+}
+
+chooseBackupFolderBtn.addEventListener("click", () => window.BackupManager?.chooseBackupFolder());
+
+autoBackupFrequencySelect.addEventListener("change", () => {
+  const value = autoBackupFrequencySelect.value;
+  window.BackupManager?.setSelectedInterval(value);
+  window.BackupManager?.setAutoBackupEnabled(value !== "disabled");
+});
+
+autoBackupRetentionSelect.addEventListener("change", () => {
+  window.BackupManager?.setRetentionLimit(autoBackupRetentionSelect.value);
+});
+
+backupNowBtn.addEventListener("click", () => window.BackupManager?.createBackup("manual"));
+
+restoreBackupBtn.addEventListener("click", async () => {
+  // restoreBackup() itself owns every bit of user-facing feedback for this
+  // action (invalid-file alerts, the preview/confirm dialog, safety-backup
+  // failure alerts, the success notification) — this handler doesn't need
+  // its own branching on the result, same as backupNowBtn just above.
+  await window.BackupManager?.restoreBackup();
+});
+
 function updateCloudStatusUI() {
   if (usingCloudStorage) {
     cloudStatus.textContent = "Connected — your words can be saved to Google Drive.";
@@ -2743,6 +2849,12 @@ function saveEntries() {
   // mirror current at all times closes that gap for good.
   const hasDurableBackup = saveLocal || saveCloud;
   perfTime("Local Storage I/O", () => saveEntriesToLocalStorage(hasDurableBackup));
+
+  // Automatic Local Backup System (backup-manager.js) — flags that data
+  // has changed since the last backup. Optional-chained since
+  // backup-manager.js is a self-contained, independently loadable file;
+  // its absence must never affect the app's own save path.
+  window.BackupManager?.markDataChanged();
 }
 
 function loadLastBookPage() {
@@ -3160,6 +3272,55 @@ if (hideAudioWindowControlsToggle) {
   });
 }
 setHideAudioWindowControls(getHideAudioWindowControls());
+
+/* ---------------------------------------------------------------------
+   AUTO-SUBMIT AI SEARCH (⚙️ Fetch limits → AI Search). This toggle
+   itself lives in the app, but the behavior it controls happens on
+   Gemini's/ChatGPT's/DeepSeek's own page, inside content-gemini.js /
+   content-chatgpt.js / content-deepseek.js — those files type the
+   lookup prompt into that AI's chat box either way, then check this
+   setting before deciding whether to also click Send (or press Enter)
+   for you:
+     On  (default): "Search AI" types the prompt in AND submits it
+         automatically — the AI starts replying with no further action.
+     Off: the prompt gets typed in and left there — you press that
+          tab's own Send button (or hit Enter) yourself when you're
+          ready.
+   Persisted locally so the checkbox reflects your choice on reload, and
+   relayed to the extension via bridge-app.js -> background.js, which
+   stores it in chrome.storage.local (vocabBridge_autoSubmitAi) — the
+   same "read fresh from storage on every search" pattern the shared
+   AI-lookup prompt itself already uses. Entirely inert with no error if
+   the extension isn't installed, same as every other postMessage bridge
+   call (see syncAccentColorToExtension() above).
+--------------------------------------------------------------------- */
+const AUTO_SUBMIT_AI_STORAGE = "litVocabAutoSubmitAi";
+
+function getAutoSubmitAi() {
+  try {
+    const raw = localStorage.getItem(AUTO_SUBMIT_AI_STORAGE);
+    return raw === null ? true : raw === "true"; // default: on (original always-submit behavior)
+  } catch (err) {
+    return true;
+  }
+}
+
+function setAutoSubmitAi(enabled) {
+  if (autoSubmitAiToggle) autoSubmitAiToggle.checked = enabled;
+  try {
+    localStorage.setItem(AUTO_SUBMIT_AI_STORAGE, String(enabled));
+  } catch (err) {
+    // non-fatal
+  }
+  window.postMessage({ type: "SYNC_AUTO_SUBMIT_AI", autoSubmit: enabled }, window.location.origin);
+}
+
+if (autoSubmitAiToggle) {
+  autoSubmitAiToggle.addEventListener("change", () => {
+    setAutoSubmitAi(autoSubmitAiToggle.checked);
+  });
+}
+setAutoSubmitAi(getAutoSubmitAi());
 
 /* ---------------------------------------------------------------------
    ADD WORD FORM BUTTONS — SHOW/HIDE (⚙️ Fetch limits → Add Word Form
@@ -10777,6 +10938,45 @@ async function init() {
   storageStatus.textContent = "Checking storage…";
   await loadEntries();
   updateStorageStatusUI();
+
+  // Automatic Local Backup System (backup-manager.js) — self-contained
+  // file, optional-chained so its absence never breaks the app's own
+  // init. Entries are already loaded at this point, so getEntries() has
+  // something real to read the first time it's called.
+  populateBackupSelectOptions();
+  await window.BackupManager?.initialize({
+    getEntries: () => entries,
+    // Thin setter for BackupManager.restoreBackup() (Part 8) — the one
+    // piece of plumbing that didn't already exist. Mirrors exactly what
+    // loadEntries() itself does when it replaces `entries` wholesale from
+    // disk/localStorage: no merge, no id regeneration (a backup already
+    // holds this app's own complete entry objects), just recompute nextSeq
+    // the same way loadEntries() does so newly-added words after a
+    // restore keep getting distinct, increasing seq values.
+    setEntries: (restoredEntries) => {
+      entries = Array.isArray(restoredEntries) ? restoredEntries : [];
+      nextSeq = entries.reduce((max, e) => Math.max(max, (e.seq || 0) + 1), 0);
+    },
+    saveEntries,
+    // getMetadata was accepted here through Part 8 but backup-manager.js
+    // never actually read it — Part 9's boundary audit removed the unused
+    // integration point on both sides rather than leave dead plumbing in
+    // place "in case it's needed later".
+    refreshUI: () => {
+      refreshBookFilterOptions();
+      refreshBookDatalist();
+      renderTable();
+    },
+    // No dedicated toast/notification component exists anywhere in this
+    // app yet — the established pattern for surfacing status is a plain
+    // text line (storageStatus, cloudStatus, and now autoBackupStatus),
+    // updated via textContent. renderBackupStatus above already reuses
+    // that exact convention for every backup status change, success and
+    // failure included, so BackupManager's optional "notify" hook is
+    // intentionally left unset here rather than standing up a second,
+    // new notification system alongside the first.
+    renderBackupStatus,
+  });
   updateOriginDisplay();
   initDisplayUI();
   prefillLastBookPage();
