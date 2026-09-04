@@ -704,10 +704,11 @@ body.has-wallpaper .vaw-header {
 }
 
 /* Compact mode: toggled via ⚙️ Fetch limits → Audio Window → "Hide Control
-   Buttons". Hides the US/UK, Prev/Next, and Remove rows so the window
-   shrinks to just the word + definitions — for keyboard-hotkey users who
-   don't need the on-screen buttons. */
-.vocab-audio-window.vaw-compact .vaw-pron-text-row,
+   Buttons". Hides the US/UK play, Prev/Next, and Remove button rows so
+   the window shrinks to just the word + written pronunciation +
+   definitions — for keyboard-hotkey users who don't need the on-screen
+   buttons. The written US/UK pronunciation text (.vaw-pron-text-row)
+   stays visible either way; it's a reading aid, not a control. */
 .vocab-audio-window.vaw-compact .vaw-pron-row,
 .vocab-audio-window.vaw-compact .vaw-cycle-row,
 .vocab-audio-window.vaw-compact .vaw-delete-row {
