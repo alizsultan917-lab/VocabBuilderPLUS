@@ -499,6 +499,17 @@ body.has-wallpaper .vaw-header {
   min-width: 0;
 }
 
+/* Independent pronunciation-text size slider (⚙️ Fetch limits → Audio
+   Window → Pronunciation Text Size). Scoped to #vocab-audio-window so it
+   never touches the identically-classed .pron-text spans used elsewhere
+   (main table, "Add a Word" form) — only this window's US/UK written
+   respelling grows/shrinks. --vaw-pron-scale is a plain ratio (1 = 100%)
+   set from script.js; the calc() keeps the same 0.88rem base the shared
+   .pron-text rule already uses when the slider sits at its default. */
+#vocab-audio-window .pron-text {
+  font-size: calc(0.88rem * var(--vaw-pron-scale, 1));
+}
+
 .vaw-pron-row {
   display: flex;
   gap: 0.5rem;
@@ -514,7 +525,12 @@ body.has-wallpaper .vaw-header {
 .vaw-definitions {
   max-height: 160px;
   overflow-y: auto;
-  font-size: 0.85rem;
+  /* Independent definition-text size slider (⚙️ Fetch limits → Audio
+     Window → Definition Text Size) — see the matching --vaw-pron-scale
+     comment on .pron-text above. --vaw-def-scale is a plain ratio
+     (1 = 100%) set from script.js; 0.85rem is this rule's own original
+     base, so the slider at its default renders identically to before. */
+  font-size: calc(0.85rem * var(--vaw-def-scale, 1));
   color: var(--ink);
 }
 

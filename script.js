@@ -86,6 +86,8 @@ const GLASS_BLUR_STORAGE = "litVocabGlassBlur";
 const GLASS_TINT_STORAGE = "litVocabGlassTint";
 const APP_VOLUME_STORAGE = "litVocabAppVolume";
 const APP_BRIGHTNESS_STORAGE = "litVocabAppBrightness";
+const VAW_PRON_SIZE_STORAGE = "litVocabAudioWindowPronSize";
+const VAW_DEF_SIZE_STORAGE = "litVocabAudioWindowDefSize";
 // 🤍 Panel Whiteness — extra white backing layered only on panels/cards
 // (see the --panel-whiteness-main/--panel-whiteness-sub rules in
 // style.css), independent of the three glass keys above so it can
@@ -254,6 +256,17 @@ const APP_VOLUME_MAX = 100;
 const DEFAULT_APP_BRIGHTNESS = 100; // % — 100 = normal, <100 dimmer, >100 brighter
 const APP_BRIGHTNESS_MIN = 50;
 const APP_BRIGHTNESS_MAX = 150;
+// 🎧 Audio Window text size — two independent sliders (⚙️ Fetch limits →
+// Audio Window) so the US/UK pronunciation spelling and the definition
+// list can each be scaled to taste without affecting the other, or any
+// identically-classed text elsewhere in the app (see the scoped
+// #vocab-audio-window rules in style.css).
+const DEFAULT_VAW_PRON_SIZE = 100; // % of the window's normal pronunciation-text size
+const VAW_PRON_SIZE_MIN = 10;
+const VAW_PRON_SIZE_MAX = 200;
+const DEFAULT_VAW_DEF_SIZE = 100; // % of the window's normal definition-text size
+const VAW_DEF_SIZE_MIN = 10;
+const VAW_DEF_SIZE_MAX = 200;
 
 const LOOKUP_TIMEOUT_MS = 8000;
 
@@ -563,6 +576,10 @@ const appVolumeInput = document.getElementById("app-volume-input");
 const appVolumeValue = document.getElementById("app-volume-value");
 const appBrightnessInput = document.getElementById("app-brightness-input");
 const appBrightnessValue = document.getElementById("app-brightness-value");
+const vawPronSizeInput = document.getElementById("vaw-pron-size-input");
+const vawPronSizeValue = document.getElementById("vaw-pron-size-value");
+const vawDefSizeInput = document.getElementById("vaw-def-size-input");
+const vawDefSizeValue = document.getElementById("vaw-def-size-value");
 
 const displayToggleBtn = document.getElementById("display-toggle-btn");
 const displayPanel = document.getElementById("display-panel");
@@ -3168,6 +3185,16 @@ function initFetchLimitsUI() {
     appBrightnessInput.value = ab;
     appBrightnessValue.textContent = `${ab}%`;
   }
+  if (vawPronSizeInput) {
+    const vps = getVawPronSize();
+    vawPronSizeInput.value = vps;
+    vawPronSizeValue.textContent = `${vps}%`;
+  }
+  if (vawDefSizeInput) {
+    const vds = getVawDefSize();
+    vawDefSizeInput.value = vds;
+    vawDefSizeValue.textContent = `${vds}%`;
+  }
 }
 
 /* ---------------------------------------------------------------------
@@ -3281,6 +3308,31 @@ if (hideAudioWindowControlsToggle) {
   });
 }
 setHideAudioWindowControls(getHideAudioWindowControls());
+
+/* ---------------------------------------------------------------------
+   AUDIO WINDOW — PRONUNCIATION / DEFINITION TEXT SIZE (⚙️ Fetch limits →
+   Audio Window). Two independent sliders, each persisted and applied as
+   its own CSS custom property — see applyVawPronSize/applyVawDefSize and
+   the scoped #vocab-audio-window rules in style.css. Applied on load
+   here (not just on slider input) so the saved size survives a refresh.
+--------------------------------------------------------------------- */
+if (vawPronSizeInput) {
+  vawPronSizeInput.addEventListener("input", () => {
+    vawPronSizeValue.textContent = `${vawPronSizeInput.value}%`;
+    setVawPronSize(vawPronSizeInput.value);
+    applyVawPronSize(vawPronSizeInput.value);
+  });
+}
+applyVawPronSize(getVawPronSize());
+
+if (vawDefSizeInput) {
+  vawDefSizeInput.addEventListener("input", () => {
+    vawDefSizeValue.textContent = `${vawDefSizeInput.value}%`;
+    setVawDefSize(vawDefSizeInput.value);
+    applyVawDefSize(vawDefSizeInput.value);
+  });
+}
+applyVawDefSize(getVawDefSize());
 
 /* ---------------------------------------------------------------------
    AUTO-SUBMIT AI SEARCH (⚙️ Fetch limits → AI Search). This toggle
@@ -6373,6 +6425,54 @@ function setAppBrightness(n) {
 // (System) Volume"-style hardware controls above.
 function applyAppBrightness(n) {
   document.documentElement.style.setProperty("--app-brightness", (clampRange(n, APP_BRIGHTNESS_MIN, APP_BRIGHTNESS_MAX, DEFAULT_APP_BRIGHTNESS) / 100).toFixed(2));
+}
+
+// 🎧 Audio Window — Pronunciation Text Size / Definition Text Size.
+// Same get/set/apply shape as the volume/brightness sliders just above,
+// but each writes its own CSS custom property (--vaw-pron-scale /
+// --vaw-def-scale) that only the scoped #vocab-audio-window rules in
+// style.css read — so these two sliders never affect each other or any
+// .pron-text/definition text outside the Audio Window.
+function getVawPronSize() {
+  try {
+    const v = parseInt(localStorage.getItem(VAW_PRON_SIZE_STORAGE), 10);
+    return Number.isFinite(v) ? clampRange(v, VAW_PRON_SIZE_MIN, VAW_PRON_SIZE_MAX, DEFAULT_VAW_PRON_SIZE) : DEFAULT_VAW_PRON_SIZE;
+  } catch (err) {
+    return DEFAULT_VAW_PRON_SIZE;
+  }
+}
+
+function setVawPronSize(n) {
+  try {
+    localStorage.setItem(VAW_PRON_SIZE_STORAGE, String(clampRange(n, VAW_PRON_SIZE_MIN, VAW_PRON_SIZE_MAX, DEFAULT_VAW_PRON_SIZE)));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function applyVawPronSize(n) {
+  document.documentElement.style.setProperty("--vaw-pron-scale", (clampRange(n, VAW_PRON_SIZE_MIN, VAW_PRON_SIZE_MAX, DEFAULT_VAW_PRON_SIZE) / 100).toFixed(2));
+}
+
+function getVawDefSize() {
+  try {
+    const v = parseInt(localStorage.getItem(VAW_DEF_SIZE_STORAGE), 10);
+    return Number.isFinite(v) ? clampRange(v, VAW_DEF_SIZE_MIN, VAW_DEF_SIZE_MAX, DEFAULT_VAW_DEF_SIZE) : DEFAULT_VAW_DEF_SIZE;
+  } catch (err) {
+    return DEFAULT_VAW_DEF_SIZE;
+  }
+}
+
+function setVawDefSize(n) {
+  try {
+    localStorage.setItem(VAW_DEF_SIZE_STORAGE, String(clampRange(n, VAW_DEF_SIZE_MIN, VAW_DEF_SIZE_MAX, DEFAULT_VAW_DEF_SIZE)));
+  } catch (err) {
+    // non-fatal
+  }
+}
+
+function applyVawDefSize(n) {
+  document.documentElement.style.setProperty("--vaw-def-scale", (clampRange(n, VAW_DEF_SIZE_MIN, VAW_DEF_SIZE_MAX, DEFAULT_VAW_DEF_SIZE) / 100).toFixed(2));
 }
 
 // The three glass sliders — transparency, blur, and tint — only make
