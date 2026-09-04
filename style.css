@@ -483,6 +483,22 @@ body.has-wallpaper .vaw-header {
   gap: 0.6rem;
 }
 
+/* Written pronunciation (e.g. "US BOHR" / "UK BAW") shown above the
+   US/UK play buttons — same .pron-row/.pron-accent/.pron-text classes
+   the "Add a Word" form's pronunciation panel already uses, so an
+   AI-supplied respelling picks up the same purple "✨" treatment
+   (.pron-text-ai) automatically with zero extra CSS. */
+.vaw-pron-text-row {
+  display: flex;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.vaw-pron-text-row .pron-row {
+  flex: 1;
+  min-width: 0;
+}
+
 .vaw-pron-row {
   display: flex;
   gap: 0.5rem;
@@ -691,6 +707,7 @@ body.has-wallpaper .vaw-header {
    Buttons". Hides the US/UK, Prev/Next, and Remove rows so the window
    shrinks to just the word + definitions — for keyboard-hotkey users who
    don't need the on-screen buttons. */
+.vocab-audio-window.vaw-compact .vaw-pron-text-row,
 .vocab-audio-window.vaw-compact .vaw-pron-row,
 .vocab-audio-window.vaw-compact .vaw-cycle-row,
 .vocab-audio-window.vaw-compact .vaw-delete-row {

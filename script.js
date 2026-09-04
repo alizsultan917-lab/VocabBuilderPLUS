@@ -11617,6 +11617,8 @@ const vocabAudioWindow = document.getElementById("vocab-audio-window");
 const vawDragHandle = document.getElementById("vaw-drag-handle");
 const vawWordEl = document.getElementById("vaw-word");
 const vawPositionEl = document.getElementById("vaw-position");
+const vawUsTextEl = document.getElementById("vaw-us-text");
+const vawUkTextEl = document.getElementById("vaw-uk-text");
 const vawDefinitionsEl = document.getElementById("vaw-definitions");
 const vawPlayUsBtn = document.getElementById("vaw-play-us-btn");
 const vawPlayUkBtn = document.getElementById("vaw-play-uk-btn");
@@ -11639,6 +11641,20 @@ function getVawCurrentEntry() {
   return entries.find((e) => e.id === vawCurrentId) || null;
 }
 
+// Mirrors the US/UK phonetic-respelling display already used in the main
+// table (renderRowCells) and the "Add a Word" form (updatePronunciationUI)
+// — same "—" empty state and same purple/✨ .pron-text-ai treatment for
+// AI-supplied respellings, so the Audio Window's written pronunciation
+// looks and behaves identically to every other pronunciation display in
+// the app.
+function setVawPronunciationText(el, phonetic) {
+  if (!el) return;
+  const fromAi = phonetic?.source === "ai";
+  el.textContent = phonetic?.text || "—";
+  el.classList.toggle("pron-text-ai", !!(fromAi && phonetic?.text));
+  el.title = fromAi && phonetic?.text ? "Phonetic respelling from Gemini (approximate)" : "";
+}
+
 function renderVawContent() {
   if (!vocabAudioWindow) return;
   const list = getVawWordList();
@@ -11647,6 +11663,8 @@ function renderVawContent() {
   if (!entry) {
     vawWordEl.textContent = "—";
     vawPositionEl.textContent = "";
+    setVawPronunciationText(vawUsTextEl, null);
+    setVawPronunciationText(vawUkTextEl, null);
     vawDefinitionsEl.innerHTML =
       '<p class="vaw-empty-state">No words saved to this window yet. Double-click a word\u2019s definitions in the table to add it, or double-click a definition while composing a new word above and then click "Add Entry".</p>';
     return;
@@ -11655,6 +11673,8 @@ function renderVawContent() {
   const idx = list.findIndex((e) => e.id === entry.id);
   vawWordEl.textContent = entry.word;
   vawPositionEl.textContent = list.length ? `${idx + 1} / ${list.length}` : "";
+  setVawPronunciationText(vawUsTextEl, entry.phonetics?.us);
+  setVawPronunciationText(vawUkTextEl, entry.phonetics?.uk);
 
   const { definitions } = getFilteredData(entry);
   vawDefinitionsEl.innerHTML = definitions.length
