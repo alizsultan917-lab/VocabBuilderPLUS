@@ -11272,7 +11272,7 @@ function sanitizeScrapedText(text, maxRunLength = 40) {
 // (see showAiSourceLink()) while the text itself stays clean.
 // Same three patterns as the extension's own scrubbing: full
 // scheme-prefixed URLs, bare "www.something", and bare "word.tld" tokens.
-const STRAY_LINK_PATTERN = /\bhttps?:\/\/\S+|\bwww\.\S+|\b[a-z0-9-]+\.(?:com|org|net|io|co|gov|edu|info|biz)(?:\/\S*)?\b/gi;
+const STRAY_LINK_PATTERN = /\bhttps?:\/\/\S+|\bwww\.\S+|\b[a-z0-9-]+\.(?:com|org|net|io|co|gov|edu|info|biz|ai|app|dev|me)(?:\/\S*)?\b/gi;
 
 function extractStrayLink(text) {
   if (typeof text !== "string" || !text) return { text: text || "", link: "" };
