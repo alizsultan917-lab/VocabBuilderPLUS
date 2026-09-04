@@ -11270,9 +11270,23 @@ function sanitizeScrapedText(text, maxRunLength = 40) {
 // first link-like token it finds OUT of the text and returns it
 // separately, so callers can route it to the "source link" bar instead
 // (see showAiSourceLink()) while the text itself stays clean.
-// Same three patterns as the extension's own scrubbing: full
-// scheme-prefixed URLs, bare "www.something", and bare "word.tld" tokens.
-const STRAY_LINK_PATTERN = /\bhttps?:\/\/\S+|\bwww\.\S+|\b[a-z0-9-]+\.(?:com|org|net|io|co|gov|edu|info|biz|ai|app|dev|me)(?:\/\S*)?\b/gi;
+//
+// This used to strip "word.tld" only for a hand-picked TLD whitelist
+// (.com/.org/.net/etc.) — meaning any citation domain on a TLD that
+// wasn't on the list (or a multi-part TLD like ".co.uk", or a
+// multi-label host like "vertexaisearch.cloud.google.com") sailed
+// straight through this "second line of defense" too, which is how a
+// link could still end up saved even with the extension-side stripping
+// in content-<provider>.js already in place. Rather than keep extending
+// a whitelist, this now recognizes the general *shape* of a domain —
+// one or more "label." groups followed by a final all-letter segment —
+// so it isn't tied to a specific TLD list at all. Same three
+// alternatives as the extension's own scrubbing (kept in sync with
+// content-gemini.js/content-chatgpt.js/content-deepseek.js): full
+// scheme-prefixed URLs, bare "www.something", and bare domain-shaped
+// tokens.
+const STRAY_LINK_PATTERN =
+  /\bhttps?:\/\/\S+|\bwww\.[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/\S*)?\b|\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:\/\S*)?\b/gi;
 
 function extractStrayLink(text) {
   if (typeof text !== "string" || !text) return { text: text || "", link: "" };
