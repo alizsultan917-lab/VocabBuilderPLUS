@@ -1228,12 +1228,15 @@
   // and the "Auto-hide playback controls" settings-panel toggle.
   const YW_TRANSPORT_HIDE_STORAGE = "vocabRegister_youtubeTransportPermanentlyHidden";
 
-  // Lowered from 180/120 on request — the header (Compact Mode) and the
-  // transport bar (see the "Auto-hide playback controls" settings toggle
-  // below) already collapse gracefully at small sizes, so there's no
-  // layout reason to stop someone shrinking the window further than this.
-  const YW_MIN_WIDTH = 90;
-  const YW_MIN_HEIGHT = 70;
+  // Lowered from 180/120, then again from 90/70 on request — the header
+  // (Compact Mode) and the transport bar (see the "Auto-hide playback
+  // controls" settings toggle below) already collapse gracefully at small
+  // sizes, so there's no layout reason to stop someone shrinking the
+  // window further than this. Below this floor the header/controls would
+  // start overlapping the video itself, so this is close to the practical
+  // limit rather than an arbitrary one.
+  const YW_MIN_WIDTH = 40;
+  const YW_MIN_HEIGHT = 32;
   const YW_MAX_WIDTH = 900;
   const YW_MAX_HEIGHT = 700;
 

@@ -54,8 +54,8 @@
   height: 320px;
   /* Matches YW_MIN_WIDTH/YW_MIN_HEIGHT in youtube-window.js — keep the two
      in sync if either changes. */
-  min-width: 90px;
-  min-height: 70px;
+  min-width: 40px;
+  min-height: 32px;
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 32px);
   z-index: 98;
