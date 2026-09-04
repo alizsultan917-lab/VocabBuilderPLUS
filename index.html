@@ -1367,6 +1367,15 @@
     <div class="vaw-delete-row">
       <button type="button" id="vaw-delete-btn" class="btn btn-danger btn-small" title="Remove this word from the Audio Window only (keeps it in your register)">🗑️ Remove from Window</button>
     </div>
+
+    <!-- Width-only resize handle — drag left/right to make the window
+         narrower/wider. Scoped to .vaw-body (not the header) so it never
+         overlaps the ⌨️/✕ header buttons; see initVawResize() near the
+         end of script.js. -->
+    <div id="vaw-resize-handle" class="vaw-resize-handle" title="Drag to resize width">
+      <span class="vaw-resize-grip" aria-hidden="true">⋮</span>
+    </div>
+    <div id="vaw-resize-tooltip" class="vaw-resize-tooltip hidden"></div>
   </div>
 </div>
 

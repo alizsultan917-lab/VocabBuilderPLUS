@@ -11653,6 +11653,12 @@ window.addEventListener("message", (event) => {
 const AUDIO_WINDOW_ACTIVE_STORAGE = "vocabRegister_audioWindowActive";
 const VAW_POSITION_STORAGE = "vocabRegister_audioWindowPosition";
 const VAW_SAVED_WORDS_STORAGE = "vocabRegister_audioWindowWords";
+// Width-only resize (see initVawResize() below) — deliberately separate
+// from VAW_POSITION_STORAGE so a saved width persists independently of
+// wherever the window was last dragged to.
+const VAW_WIDTH_STORAGE = "vocabRegister_audioWindowWidth";
+const VAW_MIN_WIDTH = 240; // px — narrower and the US/UK play buttons start wrapping
+const VAW_MAX_WIDTH = 640; // px — also capped live to the viewport, see maxVawWidth()
 
 let isAudioWindowActive = false;
 let vawCurrentId = null;
@@ -11728,6 +11734,8 @@ const vawCloseBtn = document.getElementById("vaw-close-btn");
 const vawDeleteBtn = document.getElementById("vaw-delete-btn");
 const vawHotkeysBtn = document.getElementById("vaw-hotkeys-btn");
 const vawPendingTag = document.getElementById("vaw-pending-tag");
+const vawResizeHandle = document.getElementById("vaw-resize-handle");
+const vawResizeTooltip = document.getElementById("vaw-resize-tooltip");
 
 function updateVawPendingTag() {
   vawPendingTag?.classList.toggle("hidden", vawFlaggedDefIds.size === 0);
@@ -12006,6 +12014,111 @@ definitionsList.addEventListener("click", (e) => {
   });
 })();
 
+// Live viewport cap — same idea as YouTube Window's maxW()/maxH(): the
+// stored/dragged-to width is never allowed to force the window wider
+// than the browser window itself, with a little breathing room (32px,
+// matching the window's own `max-width: calc(100vw - 32px)` in CSS).
+function maxVawWidth() {
+  return Math.min(VAW_MAX_WIDTH, window.innerWidth - 32);
+}
+
+// ---- Resizing (width only, right edge of the body) --------------------
+// Pointer Events so mouse, trackpad, touch, and pen all behave the same
+// way, matching the Map/YouTube windows' resize handles. Unlike those,
+// this only ever sets `width` — the window's height is already content-
+// driven (the definitions list scrolls internally), so there's nothing
+// useful to drag vertically.
+(function initVawResize() {
+  if (!vawResizeHandle || !vocabAudioWindow) return;
+  let resizing = false;
+  let pointerId = null;
+  let startX = 0;
+  let startWidth = 0;
+
+  function showTooltip(w) {
+    if (!vawResizeTooltip) return;
+    vawResizeTooltip.textContent = `${Math.round(w)}px`;
+    vawResizeTooltip.classList.remove("hidden");
+  }
+  function hideTooltip() {
+    vawResizeTooltip?.classList.add("hidden");
+  }
+
+  vawResizeHandle.addEventListener("pointerdown", (e) => {
+    resizing = true;
+    pointerId = e.pointerId;
+    try {
+      vawResizeHandle.setPointerCapture(pointerId);
+    } catch (err) {
+      // non-fatal
+    }
+    startX = e.clientX;
+    startWidth = vocabAudioWindow.offsetWidth;
+    // The window's CSS default is anchored via `right`, not `left` (and
+    // stays that way until the first drag). If we resized while still
+    // right-anchored, the browser would recompute the left edge itself
+    // and the window would appear to grow leftward out from under the
+    // cursor instead of growing from the edge being dragged. Pinning an
+    // explicit `left` first — same fix the drag handler above already
+    // applies — keeps the *left* edge fixed and all the growth on the
+    // right, where the handle actually is.
+    const rect = vocabAudioWindow.getBoundingClientRect();
+    vocabAudioWindow.style.left = `${rect.left}px`;
+    vocabAudioWindow.style.right = "auto";
+    vawResizeHandle.classList.add("vaw-resizing");
+    // Suspends the CSS width transition for the duration of the drag —
+    // see the .vaw-resize-live comment in style.css for why animating
+    // toward every live pointermove target makes a resize feel laggy.
+    vocabAudioWindow.classList.add("vaw-resize-live");
+    showTooltip(startWidth);
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  vawResizeHandle.addEventListener("pointermove", (e) => {
+    if (!resizing || e.pointerId !== pointerId) return;
+    const nextWidth = Math.min(maxVawWidth(), Math.max(VAW_MIN_WIDTH, startWidth + (e.clientX - startX)));
+    vocabAudioWindow.style.width = `${nextWidth}px`;
+    showTooltip(nextWidth);
+  });
+
+  function endResize(e) {
+    if (!resizing || (e && e.pointerId !== pointerId)) return;
+    resizing = false;
+    vawResizeHandle.classList.remove("vaw-resizing");
+    vocabAudioWindow.classList.remove("vaw-resize-live");
+    hideTooltip();
+    try {
+      vawResizeHandle.releasePointerCapture(pointerId);
+    } catch (err) {
+      // non-fatal
+    }
+    pointerId = null;
+    try {
+      localStorage.setItem(VAW_WIDTH_STORAGE, String(vocabAudioWindow.offsetWidth));
+    } catch (err) {
+      // non-fatal
+    }
+  }
+
+  vawResizeHandle.addEventListener("pointerup", endResize);
+  vawResizeHandle.addEventListener("pointercancel", endResize);
+})();
+
+// Keep a manually-widened window from getting stranded wider than the
+// browser itself if the person later shrinks it (e.g. narrowing a
+// desktop window, or rotating a tablet) — same clamp-on-resize idea as
+// the YouTube Window. The CSS `width` transition (suspended only during
+// an active drag, see .vaw-resize-live) means this reads as a smooth
+// snap rather than a jump.
+window.addEventListener("resize", () => {
+  if (!vocabAudioWindow || vocabAudioWindow.classList.contains("hidden")) return;
+  const capW = maxVawWidth();
+  if (vocabAudioWindow.offsetWidth > capW) {
+    vocabAudioWindow.style.width = `${Math.max(VAW_MIN_WIDTH, capW)}px`;
+  }
+});
+
 // ---- Init: restore last position + on/off state ----------------------
 (function initVawPersisted() {
   try {
@@ -12021,6 +12134,14 @@ definitionsList.addEventListener("click", (e) => {
     }
   } catch (err) {
     // non-fatal — falls back to the CSS default position
+  }
+  try {
+    const savedWidth = parseInt(localStorage.getItem(VAW_WIDTH_STORAGE), 10);
+    if (Number.isFinite(savedWidth) && vocabAudioWindow) {
+      vocabAudioWindow.style.width = `${Math.min(maxVawWidth(), Math.max(VAW_MIN_WIDTH, savedWidth))}px`;
+    }
+  } catch (err) {
+    // non-fatal — falls back to the CSS default 300px width
   }
   let savedActive = false;
   try {

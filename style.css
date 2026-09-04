@@ -354,6 +354,18 @@ h1, h2, h3 {
   visibility: hidden;
   pointer-events: none;
   transform: translateY(10px) scale(0.97);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s, width 0.18s ease;
+}
+
+/* While the width resize handle (below) is actively being dragged, drop
+   the `width` transition above — animating every live pointermove frame
+   toward a target it never gets to reach before the next frame arrives
+   is what makes a resize feel laggy/rubbery. Restoring the transition
+   the instant the drag ends (removed on pointerup, see initVawResize()
+   in script.js) is what makes THAT last snap, and any later programmatic
+   width change (e.g. the viewport-shrink clamp on browser resize), read
+   as smooth instead of both reading as janky live-tracking. */
+.vocab-audio-window.vaw-resize-live {
   transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
 }
 
@@ -397,7 +409,8 @@ html[data-wallpaper-tone="dark"] body.has-wallpaper .vocab-audio-window {
 
 html[data-wallpaper-tone="dark"] body.has-wallpaper .vaw-definitions,
 html[data-wallpaper-tone="dark"] body.has-wallpaper .vaw-def-list li,
-html[data-wallpaper-tone="dark"] body.has-wallpaper .vaw-body .icon-btn {
+html[data-wallpaper-tone="dark"] body.has-wallpaper .vaw-body .icon-btn,
+html[data-wallpaper-tone="dark"] body.has-wallpaper .vaw-resize-handle {
   color: var(--on-wallpaper-text, #f5f8fb);
 }
 
@@ -477,6 +490,7 @@ body.has-wallpaper .vaw-header {
 }
 
 .vaw-body {
+  position: relative; /* containing block for .vaw-resize-handle below */
   padding: 0.7rem 0.75rem 0.8rem;
   display: flex;
   flex-direction: column;
@@ -566,6 +580,75 @@ body.has-wallpaper .vaw-header {
 
 .vaw-delete-row .btn {
   flex: 1;
+}
+
+/* ---------- Width-only resize handle (right edge of the body) ----------
+   Deliberately NOT a corner grip like the Map/YouTube windows: this
+   window's height is already content-driven (the definitions list just
+   scrolls internally via .vaw-definitions), so the only dimension worth
+   putting in the person's hands is width. Scoped to .vaw-body (which is
+   position:relative above) rather than the whole window, so it starts
+   below the header and never sits on top of the ⌨️/✕ buttons there. */
+.vaw-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ew-resize;
+  color: var(--ink-soft);
+  background: transparent;
+  z-index: 3;
+  user-select: none;
+  touch-action: none;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+/* Discoverable on hover of the body generally (a faint sliver), full
+   opacity once you're actually over the handle itself or dragging it —
+   same "mostly out of the way until needed" idea as the Map/YouTube
+   corner grips, just as an edge instead of a corner. */
+.vaw-body:hover .vaw-resize-handle {
+  opacity: 0.35;
+}
+
+.vaw-resize-handle:hover,
+.vaw-resize-handle.vaw-resizing {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.vaw-resize-handle.vaw-resizing {
+  color: var(--accent-color, var(--blue));
+  background: color-mix(in srgb, var(--accent-color, var(--blue)) 14%, transparent);
+}
+
+.vaw-resize-grip {
+  font-size: 0.85rem;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.vaw-resize-tooltip {
+  position: absolute;
+  top: 0.5rem;
+  right: 16px;
+  z-index: 4;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(20, 30, 45, 0.78);
+  color: #fff;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.vaw-resize-tooltip.hidden {
+  display: none;
 }
 
 /* =========================================================================
