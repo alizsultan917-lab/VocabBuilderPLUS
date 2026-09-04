@@ -959,6 +959,20 @@
                 <button type="button" id="pron-uk-btn" class="icon-btn pron-play-btn" title="Play British pronunciation">🔊</button>
               </div>
             </div>
+
+            <!-- Any stray link an AI reply drops (a citation/source URL that
+                 slipped past the extension's own scrubbing, or accidentally
+                 ends up glued onto the pronunciation) lands here instead of
+                 inside the US/UK pronunciation text above. Purely a
+                 convenience for you to click through and check the source —
+                 it is never part of the saved entry (see resetFormPendingState()
+                 in script.js) and disappears the moment the word changes or
+                 the entry is added/discarded. -->
+            <div id="ai-source-link-bar" class="ai-source-link-bar hidden">
+              <span class="ai-source-link-icon" aria-hidden="true">🔗</span>
+              <a id="ai-source-link-anchor" class="ai-source-link-text" href="#" target="_blank" rel="noopener noreferrer">—</a>
+              <button type="button" id="ai-source-link-dismiss" class="icon-btn ai-source-link-dismiss" title="Dismiss this link — it isn't saved with the entry either way">✕</button>
+            </div>
           </div>
 
           <button type="submit" id="entry-form-submit-btn" class="btn btn-primary btn-submit">Add Entry</button>

@@ -376,6 +376,12 @@ let nextSeq = 0; // assigned to each new/imported entry, guarantees stable "firs
 let pendingDefinitions = []; // { id, text, source, selected }
 let pendingImages = [];      // { id, url, source, selected }
 let pendingPhonetics = { us: null, uk: null };
+// A stray link (citation/source URL) scraped out of an AI reply — shown
+// in its own small bar (see ai-source-link-bar in index.html) instead of
+// inside the US/UK pronunciation text. Deliberately kept OUT of
+// pendingPhonetics/the saved entry object — see resetFormPendingState()
+// and addEntryFromForm() below, neither of which reference it.
+let pendingSourceLink = "";
 
 // Pending state for the edit modal (separate from the add form).
 let editPendingDefinitions = [];
@@ -437,6 +443,9 @@ const pronUsText = document.getElementById("pron-us-text");
 const pronUkText = document.getElementById("pron-uk-text");
 const pronUsBtn = document.getElementById("pron-us-btn");
 const pronUkBtn = document.getElementById("pron-uk-btn");
+const aiSourceLinkBar = document.getElementById("ai-source-link-bar");
+const aiSourceLinkAnchor = document.getElementById("ai-source-link-anchor");
+const aiSourceLinkDismissBtn = document.getElementById("ai-source-link-dismiss");
 const definitionsList = document.getElementById("definitions-list");
 
 const imageLoadingTag = document.getElementById("image-loading-tag");
@@ -8445,6 +8454,26 @@ function renderPhoneticPreview(phonetics) {
   pronUkText.title = ukFromAi ? "Phonetic respelling from Gemini (approximate)" : "";
 }
 
+// Shows/hides the small "source link" bar under the pronunciation panel.
+// Purely a display convenience for a link an AI reply happened to
+// include — see pendingSourceLink above. Never touches pendingPhonetics
+// or the entry object, so it can never end up saved with the word.
+function showAiSourceLink(url) {
+  pendingSourceLink = url;
+  aiSourceLinkAnchor.href = url;
+  aiSourceLinkAnchor.textContent = url;
+  aiSourceLinkBar.classList.remove("hidden");
+}
+
+function clearAiSourceLink() {
+  pendingSourceLink = "";
+  aiSourceLinkAnchor.href = "#";
+  aiSourceLinkAnchor.textContent = "—";
+  aiSourceLinkBar.classList.add("hidden");
+}
+
+aiSourceLinkDismissBtn.addEventListener("click", clearAiSourceLink);
+
 // Plays the word currently in the add-word form (before it's been saved as
 // an entry), using whatever accent-specific recorded audio the lookup
 // found, then a genuinely accent-matched voice if one exists, Google
@@ -8529,6 +8558,7 @@ function clearAutoPending() {
   renderImages(pendingImages, imagesGallery, removePendingImage, togglePendingImage);
   pendingPhonetics = { us: null, uk: null };
   renderPhoneticPreview(null);
+  clearAiSourceLink();
   manualModeTag.classList.add("hidden");
 }
 
@@ -8539,6 +8569,7 @@ function resetFormPendingState() {
   renderDefinitions(pendingDefinitions, definitionsList, removePendingDefinition, togglePendingDefinition);
   renderImages(pendingImages, imagesGallery, removePendingImage, togglePendingImage);
   renderPhoneticPreview(null);
+  clearAiSourceLink();
   manualModeTag.classList.add("hidden");
   aiLoadingTag.classList.add("hidden");
   contextLoadingTag.classList.add("hidden");
@@ -11230,6 +11261,32 @@ function sanitizeScrapedText(text, maxRunLength = 40) {
   });
 }
 
+// Second, app-side line of defense against a link-like token ending up
+// inside the definition/US/UK text. content-<provider>.js already strips
+// citation/source links before the payload ever leaves the extension —
+// but if one ever slips through anyway (a new citation format a provider
+// starts using, a manually-pasted reply, etc.), it must never sit inside
+// the pronunciation bar or get saved as part of the entry. This pulls the
+// first link-like token it finds OUT of the text and returns it
+// separately, so callers can route it to the "source link" bar instead
+// (see showAiSourceLink()) while the text itself stays clean.
+// Same three patterns as the extension's own scrubbing: full
+// scheme-prefixed URLs, bare "www.something", and bare "word.tld" tokens.
+const STRAY_LINK_PATTERN = /\bhttps?:\/\/\S+|\bwww\.\S+|\b[a-z0-9-]+\.(?:com|org|net|io|co|gov|edu|info|biz)(?:\/\S*)?\b/gi;
+
+function extractStrayLink(text) {
+  if (typeof text !== "string" || !text) return { text: text || "", link: "" };
+  let link = "";
+  const cleaned = text
+    .replace(STRAY_LINK_PATTERN, (match) => {
+      if (!link) link = match.replace(/[)\].,;:]+$/, ""); // trim trailing punctuation
+      return "";
+    })
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return { text: cleaned, link };
+}
+
 // Receives a scraped AI entry relayed by the extension's app-side
 // content script (the Scrape-Back flow) — from whichever provider
 // (Gemini/ChatGPT/DeepSeek) content-<provider>.js scraped it from, per
@@ -11255,11 +11312,30 @@ window.addEventListener("message", (event) => {
     // content-<provider>.js already parses the AI's reply into these
     // fields (definition / US / UK, split on "|", plus whatever <img>
     // it attached) before it ever leaves the extension — nothing left
-    // to split here.
-    const definition = typeof payload.definition === "string" ? sanitizeScrapedText(payload.definition.trim()) : "";
+    // to split here. extractStrayLink() is a defensive second pass: it
+    // pulls out any link-like token that slipped through the extension's
+    // own scrubbing (rather than leaving it glued onto whichever field
+    // happens to follow it — usually UK pronunciation) BEFORE
+    // sanitizeScrapedText() runs, since that function's zero-width-space
+    // insertion into long runs would otherwise break the URL pattern
+    // match. Only the first link found across all three fields is kept —
+    // that's virtually always the AI's citation/source link.
+    const rawDefinition = typeof payload.definition === "string" ? payload.definition.trim() : "";
+    const rawUsPronunciation = typeof payload.usPronunciation === "string" ? payload.usPronunciation.trim() : "";
+    const rawUkPronunciation = typeof payload.ukPronunciation === "string" ? payload.ukPronunciation.trim() : "";
+
+    const defResult = extractStrayLink(rawDefinition);
+    const usResult = extractStrayLink(rawUsPronunciation);
+    const ukResult = extractStrayLink(rawUkPronunciation);
+
+    const definition = sanitizeScrapedText(defResult.text);
     const imageUrl = typeof payload.imageUrl === "string" ? payload.imageUrl.trim() : "";
-    const usPronunciation = typeof payload.usPronunciation === "string" ? sanitizeScrapedText(payload.usPronunciation.trim()) : "";
-    const ukPronunciation = typeof payload.ukPronunciation === "string" ? sanitizeScrapedText(payload.ukPronunciation.trim()) : "";
+    const usPronunciation = sanitizeScrapedText(usResult.text);
+    const ukPronunciation = sanitizeScrapedText(ukResult.text);
+    // UK is where a trailing citation link lands most often (it's
+    // whatever comes after the LAST "|"), so prefer it, then US, then
+    // the definition.
+    const strayLink = ukResult.link || usResult.link || defResult.link || "";
     const wordForFallback = wordInput.value.trim();
 
     // Invalidate any still-in-flight free-dictionary auto-lookup for this
@@ -11299,6 +11375,11 @@ window.addEventListener("message", (event) => {
     if (usPronunciation) pendingPhonetics.us = { text: usPronunciation, audio: null, source: "ai" };
     if (ukPronunciation) pendingPhonetics.uk = { text: ukPronunciation, audio: null, source: "ai" };
     if (usPronunciation || ukPronunciation) renderPhoneticPreview(pendingPhonetics);
+
+    // Any link pulled out above goes in its own small bar — never in
+    // pendingPhonetics, so it's never part of the entry object built in
+    // addEntryFromForm() and never gets saved.
+    if (strayLink) showAiSourceLink(strayLink);
 
     // Mark this word as already resolved so a later "input" event on the
     // word field (e.g. from focus/re-render below) can't kick off a fresh

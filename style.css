@@ -2381,6 +2381,52 @@ textarea {
   flex-shrink: 0;
 }
 
+/* Stray link scraped from an AI reply (citation/source URL) — deliberately
+   styled as its own small pill, separate from the pronunciation panel
+   above, so it reads as "here's a link, click if curious" rather than
+   part of the pronunciation. Never saved with the entry — see
+   resetFormPendingState()/addEntryFromForm() in script.js. */
+.ai-source-link-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  background: var(--purple-pale, #f3edfd);
+  border: 1px solid var(--purple, #7c4dff);
+  border-radius: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ai-source-link-icon {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+}
+
+.ai-source-link-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.78rem;
+  color: var(--purple, #7c4dff);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-source-link-text:hover {
+  text-decoration: underline;
+}
+
+.ai-source-link-dismiss {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+.ai-source-link-dismiss:hover {
+  opacity: 1;
+}
+
 /* ---------- Table: pronunciation & images ---------- */
 .word-text {
   font-weight: 700;
